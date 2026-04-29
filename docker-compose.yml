@@ -5,11 +5,17 @@
 #     .env                          secrets — NEVER commit (gitignored)
 #     config/                       per-container persistent state
 #     caddy/                        Caddyfile + ACME data/config volumes
-#     downloads/                    local SSD: in-flight torrent payloads
 #     scripts/                      sidecar shell scripts
 #   /mnt/storagebox/                Hetzner Storage Box mounted via CIFS
-#     media/tv/                     TV library
-#     media/movies/                 movie library
+#     data/                         exposed inside containers as /data
+#       torrents/tv/                qBit Sonarr category
+#       torrents/movies/            qBit Radarr category
+#       media/tv/                   Sonarr root folder
+#       media/movies/               Radarr root folder
+#
+# Trash-guides layout: everything under one root means Sonarr/Radarr can
+# hardlink imports from /data/torrents/... into /data/media/... instead of
+# copying. Same filesystem, no double-disk-use.
 
 networks:
   servarr:
@@ -90,7 +96,7 @@ services:
       - WEBUI_PORT=8080
     volumes:
       - ./config/qbittorrent:/config
-      - ./downloads:/downloads
+      - /mnt/storagebox/data:/data
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -115,8 +121,7 @@ services:
       - TZ=Europe/Rome
     volumes:
       - ./config/sonarr:/config
-      - /mnt/storagebox/media/tv:/tv
-      - ./downloads:/downloads
+      - /mnt/storagebox/data:/data
     networks:
       - servarr
 
@@ -130,8 +135,7 @@ services:
       - TZ=Europe/Rome
     volumes:
       - ./config/radarr:/config
-      - /mnt/storagebox/media/movies:/movies
-      - ./downloads:/downloads
+      - /mnt/storagebox/data:/data
     networks:
       - servarr
 
@@ -145,8 +149,7 @@ services:
       - TZ=Europe/Rome
     volumes:
       - ./config/bazarr:/config
-      - /mnt/storagebox/media/tv:/tv
-      - /mnt/storagebox/media/movies:/movies
+      - /mnt/storagebox/data:/data
     networks:
       - servarr
 
@@ -239,8 +242,7 @@ services:
       - JELLYFIN_PublishedServerUrl=https://media.${DOMAIN}
     volumes:
       - ./config/jellyfin:/config
-      - /mnt/storagebox/media/tv:/data/tv
-      - /mnt/storagebox/media/movies:/data/movies
+      - /mnt/storagebox/data/media:/data
     networks:
       - servarr
 
