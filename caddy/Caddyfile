@@ -1,106 +1,51 @@
-# Caddy reverse proxy + HTTPS automatico (Let's Encrypt)
-# Le variabili {$DOMAIN} e {$ACME_EMAIL} arrivano dall'environment del container.
+# Caddy reverse proxy + automatic HTTPS via Let's Encrypt.
+# Container env reads: {$DOMAIN}, {$ACME_EMAIL}.
 #
-# Modello di esposizione:
-#   - jellyfin / jellyseerr / homarr: pubblici, niente auth Caddy (auth nativa)
-#   - sonarr / radarr / prowlarr / bazarr / qbit: dietro Authelia (forward_auth)
-#     bypass per /api/* cosi' app native (LunaSea, ecc.) funzionano via API key
-#   - auth: endpoint Authelia stesso
+# Layout:
+#   media.{$DOMAIN}       → Jellyfin (streaming UI)
+#   seerr.{$DOMAIN}       → Seerr (request management)
+#   <app>.{$DOMAIN}       → other apps, one subdomain each
+#
+# Auth: each app handles its own (Sonarr/Radarr/Prowlarr/Bazarr →
+# Settings → General → Authentication = "Forms"; qBittorrent has its own
+# WebUI auth; Jellyfin/Seerr/Homarr have native login).
 
 {
     email {$ACME_EMAIL}
-    # default_sni {$DOMAIN}
 }
 
-# ---------- Authelia portal ----------
-auth.{$DOMAIN} {
-    reverse_proxy authelia:9091
-}
-
-# ---------- Snippet riusabile per Authelia forward auth ----------
-(authelia) {
-    forward_auth authelia:9091 {
-        uri /api/verify?rd=https://auth.{$DOMAIN}/
-        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
-    }
-}
-
-# ---------- Servizi pubblici (auth nativa) ----------
-jellyfin.{$DOMAIN} {
+media.{$DOMAIN} {
     reverse_proxy jellyfin:8096
 }
 
-jellyseerr.{$DOMAIN} {
-    reverse_proxy jellyseerr:5055
+seerr.{$DOMAIN} {
+    reverse_proxy seerr:5055
 }
 
 homarr.{$DOMAIN} {
     reverse_proxy homarr:7575
 }
 
-# ---------- Servizi protetti da Authelia ----------
-
 sonarr.{$DOMAIN} {
-    @api path /api/* /ping /feed/*
-    handle @api {
-        reverse_proxy sonarr:8989
-    }
-    handle {
-        import authelia
-        reverse_proxy sonarr:8989
-    }
+    reverse_proxy sonarr:8989
 }
 
 radarr.{$DOMAIN} {
-    @api path /api/* /ping /feed/*
-    handle @api {
-        reverse_proxy radarr:7878
-    }
-    handle {
-        import authelia
-        reverse_proxy radarr:7878
-    }
+    reverse_proxy radarr:7878
 }
 
 prowlarr.{$DOMAIN} {
-    @api path /api/* /ping /feed/*
-    handle @api {
-        reverse_proxy prowlarr:9696
-    }
-    handle {
-        import authelia
-        reverse_proxy prowlarr:9696
-    }
+    reverse_proxy prowlarr:9696
 }
 
 bazarr.{$DOMAIN} {
-    @api path /api/* /ping
-    handle @api {
-        reverse_proxy bazarr:6767
-    }
-    handle {
-        import authelia
-        reverse_proxy bazarr:6767
-    }
+    reverse_proxy bazarr:6767
 }
 
 qbit.{$DOMAIN} {
-    # qBittorrent WebUI ha auth propria (username+password).
-    # /api/v2/* sono le API REST usate da app native (LunaSea ecc.)
-    @api path /api/v2/*
-    handle @api {
-        reverse_proxy qbittorrent:8080 {
-            header_up X-Forwarded-Host {host}
-            header_up Host qbittorrent:8080
-            header_up Referer http://qbittorrent:8080
-        }
-    }
-    handle {
-        import authelia
-        reverse_proxy qbittorrent:8080 {
-            header_up X-Forwarded-Host {host}
-            header_up Host qbittorrent:8080
-            header_up Referer http://qbittorrent:8080
-        }
-    }
+    reverse_proxy gluetun:8080
+}
+
+bitmagnet.{$DOMAIN} {
+    reverse_proxy gluetun:3333
 }

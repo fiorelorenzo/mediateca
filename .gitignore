@@ -1,0 +1,12 @@
+# Local secrets (never commit — see .env.template for the schema)
+.env
+
+# Persistent app state created at runtime
+config/
+downloads/
+caddy/data/
+caddy/config/
+
+# Tooling
+.claude/settings.local.json
+.DS_Store

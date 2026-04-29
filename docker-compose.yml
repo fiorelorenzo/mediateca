@@ -1,15 +1,15 @@
-# Servarr stack su Hetzner Cloud
-# Path layout sul server:
-#   /opt/servarr/                   (working dir, owner=lorenzo)
-#     docker-compose.yml            (questo file)
-#     .env                          (segreti — NON committare)
-#     config/                       (config persistenti dei container)
-#     caddy/                        (Caddyfile + data/config volumi Caddy)
-#     authelia/                     (configuration.yml + users_database.yml + secrets)
-#     downloads/                    (SSD locale: torrent in corso)
-#   /mnt/storagebox/                (Storage Box BX11 montato via CIFS)
-#     media/tv/                     (libreria serie)
-#     media/movies/                 (libreria film)
+# Servarr stack on Hetzner Cloud.
+# On-server layout:
+#   /opt/servarr/                   working dir, owner=$USERNAME
+#     docker-compose.yml            this file
+#     .env                          secrets — NEVER commit (gitignored)
+#     config/                       per-container persistent state
+#     caddy/                        Caddyfile + ACME data/config volumes
+#     downloads/                    local SSD: in-flight torrent payloads
+#     scripts/                      sidecar shell scripts
+#   /mnt/storagebox/                Hetzner Storage Box mounted via CIFS
+#     media/tv/                     TV library
+#     media/movies/                 movie library
 
 networks:
   servarr:
@@ -17,7 +17,7 @@ networks:
 
 services:
   # =========================================
-  # Reverse proxy + HTTPS automatico
+  # Reverse proxy + automatic HTTPS
   # =========================================
   caddy:
     image: caddy:2-alpine
@@ -38,39 +38,51 @@ services:
       - servarr
 
   # =========================================
-  # SSO + 2FA in front delle UI
+  # VPN client (ProtonVPN) — shares its network namespace with
+  # qbittorrent, flaresolverr, bitmagnet, qb-port-manager.
   # =========================================
-  authelia:
-    image: authelia/authelia:latest
-    container_name: authelia
+  gluetun:
+    image: qmcgaw/gluetun:latest
+    container_name: gluetun
     restart: unless-stopped
-    volumes:
-      - ./authelia:/config
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
     environment:
+      - VPN_SERVICE_PROVIDER=protonvpn
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES}
+      - VPN_PORT_FORWARDING=on
+      - VPN_PORT_FORWARDING_PROVIDER=protonvpn
+      - VPN_PORT_FORWARDING_STATUS_FILE=/gluetun/forwarded_port
+      - PORT_FORWARD_ONLY=on
+      - FIREWALL_INPUT_PORTS=8080,8191,3333
+      - FIREWALL_OUTBOUND_SUBNETS=172.18.0.0/16
+      - DNS_KEEP_NAMESERVER=on
+      - HEALTH_VPN_DURATION_INITIAL=120s
       - TZ=Europe/Rome
-      - AUTHELIA_JWT_SECRET_FILE=/config/secrets/jwt_secret
-      - AUTHELIA_SESSION_SECRET_FILE=/config/secrets/session_secret
-      - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/config/secrets/storage_encryption_key
-    depends_on:
-      - redis
-    networks:
-      - servarr
-
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    restart: unless-stopped
-    command: redis-server --save "" --appendonly no
+    volumes:
+      - ./config/gluetun:/gluetun
+    ports:
+      - "8080"            # qBit WebUI (Caddy reaches it as gluetun:8080)
+      - "8191"            # FlareSolverr (Prowlarr reaches it as gluetun:8191)
+      - "3333"            # BitMagnet WebUI/Torznab (via gluetun:3333)
     networks:
       - servarr
 
   # =========================================
-  # Stack arr (uguale al Mac, path adattati)
+  # *arr stack (same as a local install, paths adapted for Storage Box)
   # =========================================
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
     container_name: qbittorrent
     restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
@@ -79,11 +91,6 @@ services:
     volumes:
       - ./config/qbittorrent:/config
       - ./downloads:/downloads
-    ports:
-      - "6881:6881"
-      - "6881:6881/udp"
-    networks:
-      - servarr
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:latest
@@ -147,16 +154,79 @@ services:
     image: ghcr.io/flaresolverr/flaresolverr:latest
     container_name: flaresolverr
     restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      - gluetun
     environment:
       - LOG_LEVEL=info
       - LOG_HTML=false
       - CAPTCHA_SOLVER=none
       - TZ=Europe/Rome
-    networks:
-      - servarr
 
   # =========================================
-  # Visione + richieste + dashboard
+  # BitMagnet — local DHT crawler (Cloudflare-free Torznab indexer)
+  # =========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - POSTGRES_DB=bitmagnet
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - ./config/postgres:/var/lib/postgresql/data
+    networks:
+      - servarr
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bitmagnet:
+    image: ghcr.io/bitmagnet-io/bitmagnet:latest
+    container_name: bitmagnet
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      gluetun:
+        condition: service_started
+    command:
+      - worker
+      - run
+      - --keys=http_server
+      - --keys=queue_server
+      - --keys=dht_crawler
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - TMDB_API_KEY=${TMDB_API_KEY}
+      - TZ=Europe/Rome
+
+  # Syncs qBittorrent's listening port with whatever NAT-PMP port Proton hands
+  # out, every 60s. Reads /gluetun/forwarded_port, calls qBit WebUI API.
+  qb-port-manager:
+    image: alpine:latest
+    container_name: qb-port-manager
+    restart: unless-stopped
+    network_mode: "service:gluetun"
+    depends_on:
+      - qbittorrent
+    volumes:
+      - ./config/gluetun:/gluetun:ro
+      - ./scripts/qb-port-update.sh:/qb-port-update.sh:ro
+    environment:
+      - INTERVAL=60
+      - TZ=Europe/Rome
+      - QBIT_USER=${QBIT_USER}
+      - QBIT_PASS=${QBIT_PASS}
+    command: sh -c "apk add --no-cache curl >/dev/null 2>&1 && /qb-port-update.sh"
+
+  # =========================================
+  # Streaming + requests + dashboard
   # =========================================
   jellyfin:
     image: lscr.io/linuxserver/jellyfin:latest
@@ -166,7 +236,7 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=Europe/Rome
-      - JELLYFIN_PublishedServerUrl=https://jellyfin.${DOMAIN}
+      - JELLYFIN_PublishedServerUrl=https://media.${DOMAIN}
     volumes:
       - ./config/jellyfin:/config
       - /mnt/storagebox/media/tv:/data/tv
@@ -174,25 +244,29 @@ services:
     networks:
       - servarr
 
-  jellyseerr:
-    image: fallenbagel/jellyseerr:latest
-    container_name: jellyseerr
+  seerr:
+    image: ghcr.io/seerr-team/seerr:latest
+    container_name: seerr
+    init: true
     restart: unless-stopped
     environment:
       - LOG_LEVEL=info
       - TZ=Europe/Rome
+      - PORT=5055
     volumes:
-      - ./config/jellyseerr:/app/config
+      - ./config/seerr:/app/config
     networks:
       - servarr
 
   homarr:
-    image: ghcr.io/ajnart/homarr:latest
+    image: ghcr.io/homarr-labs/homarr:latest
     container_name: homarr
     restart: unless-stopped
+    environment:
+      - TZ=Europe/Rome
+      - SECRET_ENCRYPTION_KEY=${HOMARR_SECRET_ENCRYPTION_KEY}
     volumes:
-      - ./config/homarr/configs:/app/data/configs
-      - ./config/homarr/icons:/app/public/icons
-      - ./config/homarr/data:/data
+      - ./config/homarr/appdata:/appdata
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - servarr

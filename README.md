@@ -1,243 +1,360 @@
-# Servarr stack su Hetzner Cloud — guida operativa
+# Self-hosted media stack on Hetzner Cloud
 
-Stack: qBittorrent + Prowlarr + Sonarr + Radarr + Bazarr + FlareSolverr +
-Jellyfin + Jellyseerr + Homarr + Caddy (HTTPS) + Authelia (SSO+2FA) + Redis.
+Jellyfin + Servarr (Sonarr/Radarr/Prowlarr/Bazarr) + qBittorrent + Seerr +
+Homarr + BitMagnet, all behind Caddy with automatic HTTPS, with qBittorrent
+and FlareSolverr routed through ProtonVPN (WireGuard, port forwarded).
 
-Esposizione: tutto su sottodomini di un tuo dominio, con HTTPS automatico
-(Let's Encrypt). Le UI arr e qBittorrent sono protette da Authelia con login
-+ 2FA TOTP, con bypass `/api/*` per app native (LunaSea, ecc.). Jellyfin,
-Jellyseerr e Homarr restano sulla loro auth nativa.
+## Stack at a glance
 
-## Prerequisiti
+| URL | Service | Notes |
+| --- | --- | --- |
+| `media.<DOMAIN>` | Jellyfin | streaming UI |
+| `seerr.<DOMAIN>` | [Seerr](https://github.com/seerr-team/seerr) | request management (Jellyseerr fork) |
+| `homarr.<DOMAIN>` | Homarr 1.x | dashboard / launcher |
+| `sonarr.<DOMAIN>` | Sonarr | TV automation |
+| `radarr.<DOMAIN>` | Radarr | movie automation |
+| `prowlarr.<DOMAIN>` | Prowlarr | indexer manager |
+| `bazarr.<DOMAIN>` | Bazarr | subtitles |
+| `qbit.<DOMAIN>` | qBittorrent | torrent client (via VPN) |
+| `bitmagnet.<DOMAIN>` | BitMagnet | local DHT crawler / Torznab indexer (via VPN) |
 
-- Dominio acquistato (es. `tuodominio.com`).
-- Account Hetzner Cloud attivo.
-- Coppia SSH `~/.ssh/id_ed25519` sul Mac.
+Authentication is each app's own (Forms login on *arr, native login on
+Jellyfin/Seerr/Homarr/qBit). Rationale: simpler and good enough for a personal
+stack with strong passwords + fail2ban — no separate SSO layer.
 
-## Fasi
+## Network topology
 
-### Fase 1 — Provisioning Hetzner (web console)
-
-1. Crea un Progetto.
-2. **Security → SSH Keys**: incolla il contenuto di `~/.ssh/id_ed25519.pub` del Mac.
-3. **Servers → Add Server**:
-   - Location: Falkenstein (FSN1) o Helsinki (HEL1)
-   - Image: Ubuntu 24.04
-   - Type: **CPX21** (3 vCPU AMD, 4GB RAM, 80GB SSD)
-   - SSH Keys: seleziona quella appena caricata
-   - Networking: lascia IPv4+IPv6
-   - Firewall: crea ora un firewall "servarr-fw" con regole inbound:
-     - `TCP 22` (SSH) — Any IPv4/IPv6
-     - `TCP 80` (HTTP) — Any
-     - `TCP 443` (HTTPS) — Any
-     - `UDP 443` (HTTP/3) — Any
-     - `TCP 6881`, `UDP 6881` (qBittorrent) — Any
-   - Name: `servarr-prod`
-   - Click **Create & Buy now**.
-4. **Storage Boxes → Order Storage Box**:
-   - Type: **BX11** (1TB)
-   - Location: stessa del server (per LAN gratuita)
-   - Click **Buy**.
-5. Aperta la Storage Box: tab **Settings** → annota username (`uXXXXXX`),
-   host (`uXXXXXX.your-storagebox.de`), e imposta una password.
-6. Tab **Sub-accounts** della Storage Box → assicurati che **SMB** sia
-   abilitato sull'account principale (di solito lo e' di default).
-
-Annota: **IP pubblico VPS** + **username/host/password Storage Box**.
-
-### Fase 2 — Setup base server
-
-Dal Mac, apri Terminale:
-
-```sh
-ssh root@<IP-VPS>
+```
+  internet ──► Hetzner VPS ──► Caddy (TLS) ──► docker network "servarr"
+                                                  │
+                                                  ├── jellyfin / sonarr / radarr / ...
+                                                  ├── seerr / homarr / prowlarr / bazarr
+                                                  └── gluetun (ProtonVPN, WireGuard)
+                                                          │ shared netns
+                                                          ├── qbittorrent
+                                                          ├── flaresolverr
+                                                          ├── bitmagnet
+                                                          └── qb-port-manager (sidecar)
 ```
 
-Una volta dentro, copia lo script di setup tramite SCP da un'altra finestra
-oppure incollalo direttamente con un here-doc. Variante semplice:
+`gluetun` is on the `servarr` network so other containers can reach it as
+`gluetun:8080` (qBit), `gluetun:8191` (FlareSolverr), `gluetun:3333`
+(BitMagnet). Containers using `network_mode: service:gluetun` route all their
+outbound traffic through the VPN tunnel.
+
+A small alpine sidecar (`qb-port-manager`) polls
+`/gluetun/forwarded_port` every 60s and pokes the qBittorrent WebUI API to
+keep its listening port aligned with the port Proton hands out via NAT-PMP.
+
+## Prerequisites
+
+- A registered domain (this repo assumes Namecheap; any provider works).
+- An active [Hetzner Cloud](https://www.hetzner.com/cloud) account.
+- An [SSH key pair](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) on your laptop (`~/.ssh/id_ed25519`).
+- A [ProtonVPN Plus](https://protonvpn.com/) subscription (or any provider with
+  WireGuard + NAT-PMP port forwarding).
+- A Hetzner Storage Box (BX11+) for the media library, in the same region as
+  the VPS for free LAN bandwidth.
+
+## Phase 1 — Hetzner provisioning
+
+You can do this from the web console or via `hcloud` CLI.
+
+### Web console
+
+1. **Security → SSH Keys** — paste `~/.ssh/id_ed25519.pub`.
+2. **Firewalls** — create `servarr-fw` with inbound rules:
+   - TCP 22 (SSH), TCP 80, TCP 443, UDP 443 — Any
+   - TCP 6881, UDP 6881 (qBittorrent BT) — Any
+3. **Servers → Add Server**:
+   - Location: `fsn1` (Falkenstein) or any EU datacenter
+   - Image: Ubuntu 24.04
+   - Type: `cpx22` (2 vCPU AMD, 4 GB RAM, 80 GB SSD) or larger
+   - Attach the firewall and the SSH key
+   - Name: `servarr-prod`
+4. **Storage Boxes → Order Storage Box** — `BX11` in the same region.
+   Open it → **Settings**, set a password using **only ASCII characters**
+   (CIFS/SMB has issues with non-ASCII passwords), enable SMB, note username
+   (`uXXXXXX`) and host (`uXXXXXX.your-storagebox.de`).
+
+Note Hetzner's CPX21 was deprecated in January 2026 — use CPX22 (closest
+like-for-like x86 replacement) or CAX21 (ARM, cheaper but watch for image
+arch compatibility).
+
+### hcloud CLI (alternative)
 
 ```sh
-# Sul Mac, in una seconda finestra, sostituire <IP> e copiare:
-scp setup-server.sh root@<IP>:/root/
+brew install hcloud
+export HCLOUD_TOKEN=<from console.hetzner.cloud → Security → API Tokens>
 
-# Tornati nella SSH al VPS:
+hcloud ssh-key create --name laptop --public-key-from-file ~/.ssh/id_ed25519.pub
+
+hcloud firewall create --name servarr-fw
+for spec in \
+  'tcp 22 SSH' 'tcp 80 HTTP' 'tcp 443 HTTPS' 'udp 443 HTTP/3' \
+  'tcp 6881 qbit-tcp' 'udp 6881 qbit-udp'; do
+    set -- $spec
+    hcloud firewall add-rule servarr-fw --direction in --protocol $1 --port $2 \
+      --source-ips 0.0.0.0/0 --source-ips ::/0 --description "$3"
+done
+
+hcloud server create \
+  --name servarr-prod --type cpx22 --image ubuntu-24.04 --location fsn1 \
+  --ssh-key laptop --firewall servarr-fw
+```
+
+The Storage Box has to be ordered from the web console (Hetzner Robot, not
+the Cloud API).
+
+## Phase 2 — Server bootstrap
+
+```sh
+ssh root@<VPS-IP>
+```
+
+Then from your laptop, push the bootstrap script + a one-shot env file:
+
+```sh
+cat > /tmp/servarr-env.sh <<EOF
 export USERNAME='lorenzo'
 export STORAGEBOX_USER='uXXXXXX'
 export STORAGEBOX_HOST='uXXXXXX.your-storagebox.de'
-export STORAGEBOX_PASSWORD='la-password-storage-box'
-export SSH_PUBKEY="$(cat <<'EOF'
-ssh-ed25519 AAAA...incolla qui la tua chiave pubblica del Mac... commento
+export STORAGEBOX_PASSWORD='ASCII-only-password-from-storage-box-settings'
+export SSH_PUBKEY="$(cat ~/.ssh/id_ed25519.pub)"
 EOF
-)"
-chmod +x /root/setup-server.sh
-/root/setup-server.sh
+
+scp setup-server.sh /tmp/servarr-env.sh root@<VPS-IP>:/root/
+ssh root@<VPS-IP> 'set -a && source /root/servarr-env.sh && set +a && bash /root/setup-server.sh'
 ```
 
-Lo script:
-- aggiorna sistema, installa Docker, fail2ban, ufw, unattended-upgrades
-- crea utente non-root `lorenzo` con la tua chiave SSH
-- disabilita login root e password su SSH
-- configura UFW (firewall locale, ridondante a quello Hetzner Cloud)
-- monta Storage Box su `/mnt/storagebox` via CIFS (con auto-mount)
-- crea `/opt/servarr` come working dir
+`setup-server.sh`:
+- updates the system, installs Docker + fail2ban + ufw + unattended-upgrades
+- creates a non-root user with your SSH key, disables root SSH and password auth
+- installs `linux-modules-extra` so CIFS' `nls_utf8` is available (Hetzner's
+  default Ubuntu Cloud image ships a stripped kernel — without this, mounting
+  the Storage Box fails with `iocharset utf8 not found`)
+- mounts the Storage Box at `/mnt/storagebox` via CIFS with auto-mount
+- creates `/opt/servarr` as the working directory
 
-A fine script: **chiudi la SSH come root** e ricollegati come l'utente nuovo:
+After it finishes, root SSH is disabled. Reconnect as the new user:
 
 ```sh
-ssh lorenzo@<IP-VPS>
+ssh lorenzo@<VPS-IP>
 ```
 
-### Fase 3 — DNS
+## Phase 3 — DNS
 
-Sul registrar del tuo dominio, aggiungi:
+Add per-subdomain A records on your registrar. Example for Namecheap:
 
-```
-A  *.tuodominio.com   <IP-VPS>      TTL 300
-A    tuodominio.com   <IP-VPS>      TTL 300
-```
+| Type | Host | Value | TTL |
+| --- | --- | --- | --- |
+| A | `media` | `<VPS-IP>` | Automatic |
+| A | `seerr` | `<VPS-IP>` | Automatic |
+| A | `homarr` | `<VPS-IP>` | Automatic |
+| A | `sonarr` | `<VPS-IP>` | Automatic |
+| A | `radarr` | `<VPS-IP>` | Automatic |
+| A | `prowlarr` | `<VPS-IP>` | Automatic |
+| A | `bazarr` | `<VPS-IP>` | Automatic |
+| A | `qbit` | `<VPS-IP>` | Automatic |
+| A | `bitmagnet` | `<VPS-IP>` | Automatic |
 
-Il wildcard `*` copre tutti i sottodomini (auth, jellyfin, sonarr, radarr,
-prowlarr, bazarr, qbit, jellyseerr, homarr) in un colpo solo.
+A wildcard `*` works too but per-subdomain records are easier to audit and
+fail-closed (an unmapped subdomain just doesn't resolve).
 
-Verifica propagazione (puo' richiedere da 1 minuto a 24h):
+Verify propagation against the registrar's authoritative NS, not a cached
+resolver:
 
 ```sh
-dig +short auth.tuodominio.com
-dig +short jellyfin.tuodominio.com
+dig +short media.<DOMAIN> @dns1.registrar-servers.com
 ```
 
-Devono ritornare l'IP del VPS.
+## Phase 4 — Deploy the stack
 
-### Fase 4 — Deploy stack
-
-Sul VPS, copia la cartella `hetzner/` (questi file) in `/opt/servarr/`:
+From your laptop:
 
 ```sh
-# Dal Mac:
-scp -r hetzner/ lorenzo@<IP-VPS>:/opt/servarr/
-# (tutto il contenuto finisce in /opt/servarr/, NON in /opt/servarr/hetzner/)
-
-# Dal VPS:
-cd /opt/servarr
 cp .env.template .env
-nano .env       # imposta DOMAIN, ACME_EMAIL, PUID=1000 PGID=1000
-chmod +x personalize.sh
-./personalize.sh
+# Edit .env — see comments inline. Generate secrets with:
+#   openssl rand -hex 32   # HOMARR_SECRET_ENCRYPTION_KEY
+#   openssl rand -hex 16   # POSTGRES_PASSWORD
+
+# Push everything to the VPS working dir.
+rsync -av --exclude='.git' --exclude='.claude' \
+  ./ lorenzo@<VPS-IP>:/opt/servarr/
 ```
 
-Genera l'hash della password e crea `users_database.yml`:
-
-```sh
-# Su VPS:
-docker run --rm authelia/authelia:latest authelia hash-password 'mia-password-robusta'
-# stampa: $argon2id$v=19$m=65536,t=3,p=4$...
-
-cp authelia/users_database.template.yml authelia/users_database.yml
-nano authelia/users_database.yml    # sostituisci TUO_USERNAME, TUA_EMAIL e l'hash
-```
-
-Avvia lo stack:
+On the VPS:
 
 ```sh
 cd /opt/servarr
 docker compose up -d
-docker compose ps
-docker compose logs -f caddy        # verifica che Caddy emetta certificati Let's Encrypt
+docker compose logs -f caddy   # watch certificates being obtained
 ```
 
-Il primo avvio di Caddy provoca le challenge HTTP-01 verso ogni sottodominio:
-appariranno log tipo `obtained certificate` per ogni sottodominio. Se vedi
-errori `acme: timeout` o `connection refused`, controlla che il DNS sia
-propagato (vedi Fase 3) e che il firewall Hetzner abbia la porta 80 aperta.
+The first start of Caddy triggers HTTP-01 ACME challenges for every
+subdomain — you should see one `certificate obtained successfully` per
+subdomain in the logs. If you see `acme: timeout` or `connection refused`,
+DNS hasn't propagated or the Hetzner firewall is blocking port 80.
 
-### Fase 5 — Migrazione config dal Mac (opzionale ma raccomandato)
+## Phase 5 — App configuration
 
-Sul Mac, dalla cartella dei file Hetzner:
+The order matters because integrations chain (Prowlarr → Sonarr/Radarr →
+Bazarr → Seerr → Homarr).
+
+**1. Jellyfin** (https://media.<DOMAIN>) — first-run wizard creates the admin
+account; add libraries: TV Shows → `/data/tv`, Movies → `/data/movies`.
+
+**2. qBittorrent** (https://qbit.<DOMAIN>) — read the temporary password from
+the container:
 
 ```sh
-chmod +x migrate-from-mac.sh
-./migrate-from-mac.sh lorenzo@<IP-VPS>
+ssh lorenzo@<VPS-IP> 'docker logs qbittorrent | grep -i "temporary password"'
 ```
 
-Lo script ferma lo stack locale, sincronizza `~/servarr/config/*` su
-`/opt/servarr/config/` del VPS, e (opzionale) sincronizza i media gia'
-scaricati sullo Storage Box.
+Log in with `admin` + temp password, then **Tools → Options → Web UI →
+Authentication** to set a permanent password. Put the same `QBIT_USER` /
+`QBIT_PASS` in `.env` so the port-manager sidecar can authenticate.
 
-Dopo lo rsync, sul VPS:
+**3. Sonarr / Radarr** — Settings → General → Authentication = `Forms`,
+create a user. Add download client `qbittorrent` (host: `qbittorrent`,
+port: `8080`, your qBit credentials, category: `tv-sonarr` /
+`movies-radarr`). Add root folder: `/tv` for Sonarr, `/movies` for Radarr.
+Note the API key in Settings → General → Security.
+
+**4. Prowlarr** — Settings → General → Authentication = Forms, set up user.
+Settings → Indexers → Indexer Proxies → add **FlareSolverr**:
+
+- Tag: `flaresolverr`
+- Host: `http://gluetun:8191` (FlareSolverr lives in Gluetun's namespace)
+
+Add public indexers from Indexers → Add — see the indexer notes below.
+Then Settings → Apps → connect Sonarr (`http://sonarr:8989`) and Radarr
+(`http://radarr:7878`) using their API keys. Indexers will sync automatically.
+
+**5. Bazarr** — Settings → Sonarr → Address `sonarr` port `8989` + API key.
+Same for Radarr (`radarr`/`7878`). Add subtitle providers (OpenSubtitles.com,
+Subscene, etc).
+
+**6. Seerr** — wizard chooses Jellyfin backend → `http://jellyfin:8096` +
+admin login. Then Settings → Sonarr (`sonarr`/`8989` + API key) and Radarr
+(`radarr`/`7878` + API key). Application URL = `https://seerr.<DOMAIN>`.
+
+**7. Homarr 1.x** — first-run creates admin user. Manage → Integrations to
+register backend connections (URLs use container hostnames, e.g.
+`http://jellyfin:8096`). Manage → Apps to add tiles (URLs are public, e.g.
+`https://media.<DOMAIN>`). Boards → New board → Edit mode → add Apps and
+Widgets.
+
+**8. BitMagnet** (https://bitmagnet.<DOMAIN>) — local DHT crawler. Add it
+to Prowlarr as **Generic Torznab**:
+
+- URL: `http://gluetun:3333/torznab`
+- API Path: `/api`
+- API Key: leave empty
+- No FlareSolverr tag
+
+The DHT index grows over time: a few hundred torrents in the first hours,
+hundreds of thousands after a week, millions after a month. Search results
+won't be useful immediately.
+
+## Indexer notes
+
+Datacenter IPs (Hetzner, OVH, ...) are aggressively blocklisted by
+Cloudflare for major torrent sites (1337x, KickAss, TorrentGalaxy, ...).
+Even with FlareSolverr these sites refuse the connection at the IP layer —
+the block is IP reputation, not a JS challenge.
+
+ProtonVPN's IP blocks (and most commercial VPNs) are also flagged. Switching
+country (`VPN_SERVER_COUNTRIES`) helps occasionally but the underlying
+problem is structural.
+
+What works reliably from a Hetzner+Proton setup:
+
+- **EZTV** (TV)
+- **Nyaa.si** (anime)
+- **YTS** (movies)
+- **Internet Archive** (legal public domain)
+- **Magnet aggregators** (`0Magnet`, `MagnetDownload`, `MagnetZ`)
+- **BitMagnet** (DHT crawl, no Cloudflare in the loop at all — best
+  long-term answer)
+
+What does **not** work well: 1337x, TPB, KickAss, TorrentGalaxy mirrors.
+Don't fight it.
+
+## Maintenance
+
+Pull image updates:
 
 ```sh
 cd /opt/servarr
+docker compose pull
 docker compose up -d
 ```
 
-Le API key di Sonarr/Radarr/Prowlarr/Bazarr restano valide (i file
-`*.db` sotto `config/` contengono tutto). Gli indexer riconfigurati e i
-collegamenti tra app continuano a funzionare perche' i nomi dei container
-sul Docker network interno (`sonarr`, `radarr`, ecc.) sono identici.
-
-### Fase 6 — Onboarding Authelia + Jellyfin + Jellyseerr
-
-1. **Authelia**: vai su `https://auth.tuodominio.com`, login con le
-   credenziali di `users_database.yml`. Al primo login Authelia ti chiede di
-   registrare il 2FA TOTP: scansiona il QR con la tua app (1Password, Authy,
-   Google Authenticator, ecc.) e inserisci il codice di conferma.
-
-2. **Jellyfin**: vai su `https://jellyfin.tuodominio.com`, completa il
-   wizard iniziale, crea l'utente admin, aggiungi le librerie:
-   - **TV Shows** → folder `/data/tv`
-   - **Movies** → folder `/data/movies`
-
-3. **Jellyseerr**: vai su `https://jellyseerr.tuodominio.com`, scegli
-   **Use Jellyfin** come backend, inserisci URL `http://jellyfin:8096` e le
-   credenziali dell'admin Jellyfin. Poi nelle impostazioni Jellyseerr aggiungi:
-   - **Sonarr**: URL `http://sonarr:8989`, API key (la stessa di prima)
-   - **Radarr**: URL `http://radarr:7878`, API key
-
-4. **Homarr**: vai su `https://homarr.tuodominio.com`, da li' aggiungi i
-   tile dei vari servizi (URL = il sottodominio HTTPS).
-
-### Fase 7 — App mobile
-
-Su iPhone:
-
-- **Jellyfin** (App Store): URL `https://jellyfin.tuodominio.com`, login.
-- **Jellyseerr** PWA: apri in Safari, condividi → "Aggiungi a Home".
-- **LunaSea** (App Store): nelle impostazioni di ogni servizio (Sonarr,
-  Radarr, qBittorrent), URL = sottodominio HTTPS, autenticazione via API key.
-  Es. Sonarr → URL `https://sonarr.tuodominio.com`, API key dalla pagina
-  Settings → General di Sonarr.
-
-## Sicurezza (note)
-
-- I segreti di Authelia (`authelia/secrets/*`) sono random a 64 char.
-- `users_database.yml` contiene hash argon2id, non la password in chiaro.
-- HTTPS automatico via Let's Encrypt (rinnovo trasparente da Caddy).
-- Tutte le UI arr richiedono login + 2FA, le API restano accessibili via key.
-- Firewall a 2 livelli: Hetzner Cloud Firewall + UFW sul VPS.
-- SSH solo via chiave, root login disabilitato, fail2ban su SSH.
-- unattended-upgrades fa security updates di Ubuntu in automatico.
-
-## Manutenzione tipica
+Backup config (small):
 
 ```sh
-# Update di tutti i container
-cd /opt/servarr && docker compose pull && docker compose up -d
-
-# Logs in tempo reale
-docker compose logs -f sonarr
-docker compose logs -f caddy
-
-# Backup quick della config
-tar czf /tmp/servarr-config-backup.tgz config/ authelia/ caddy/Caddyfile .env
-# Poi rsync su Storage Box o un altro luogo sicuro.
+ssh lorenzo@<VPS-IP> 'sudo tar czf /tmp/servarr-backup-$(date +%F).tgz \
+  -C /opt/servarr config caddy/Caddyfile docker-compose.yml .env'
+scp lorenzo@<VPS-IP>:/tmp/servarr-backup-*.tgz ~/Backups/
 ```
 
-## Costi mensili (riferimento aprile 2026)
+Watch certificate renewals:
 
-- Hetzner Cloud CPX21: ~€8.06
-- Storage Box BX11 1TB: ~€3.81
-- Dominio (.com via Cloudflare/Porkbun): ~€10/anno = ~€0.83/mese
-- **Totale: ~€12-13/mese**
+```sh
+ssh lorenzo@<VPS-IP> 'docker compose logs caddy | grep -i "certificate obtained"'
+```
 
-Storage Box e' ridimensionabile in-place (BX11 → BX21 5TB → BX31 10TB → BX41
-20TB) dalla console Hetzner senza dover ricopiare i dati.
+Check VPN status (public IP should be ProtonVPN, not Hetzner):
+
+```sh
+ssh lorenzo@<VPS-IP> 'docker exec gluetun wget -qO- https://ipinfo.io/ip'
+ssh lorenzo@<VPS-IP> 'docker exec qbittorrent wget -qO- https://ipinfo.io/ip'
+```
+
+Both should return the same Proton IP. If qBit returns the Hetzner IP,
+there's a leak — investigate Gluetun firewall config before downloading
+anything.
+
+Check the current Proton-forwarded port:
+
+```sh
+ssh lorenzo@<VPS-IP> 'docker exec gluetun cat /gluetun/forwarded_port'
+```
+
+The `qb-port-manager` sidecar should be aligning qBit to it within 60s.
+
+## Cost (April 2026 reference)
+
+- Hetzner Cloud CPX22 ≈ €9.75/month
+- Hetzner Storage Box BX11 (1 TB) ≈ €3.81/month
+- Domain (.io via Namecheap) ≈ €30–40/year ≈ €3/month
+- ProtonVPN Plus ≈ €5/month
+- **Total: ≈ €22/month**
+
+## Security model
+
+- Each app has its own login, usually behind 2FA where supported.
+- HTTPS everywhere, certs issued and rotated by Caddy via Let's Encrypt.
+- Hetzner Cloud Firewall + UFW on the VM (defense in depth).
+- SSH: key-only, root login disabled, fail2ban watching auth logs.
+- Unattended security upgrades enabled by `setup-server.sh`.
+- qBittorrent and FlareSolverr exit traffic only through ProtonVPN — no
+  Hetzner-IP torrent peer announcements, no DMCA exposure for the host.
+- BitMagnet's DHT crawler also runs through ProtonVPN.
+- Secrets live in `.env` (gitignored) and never get baked into images.
+
+## Repository layout
+
+```
+.
+├── README.md
+├── .env.template          # variable schema; copy to .env locally
+├── docker-compose.yml     # the whole stack
+├── caddy/Caddyfile        # reverse proxy + automatic TLS
+├── scripts/
+│   └── qb-port-update.sh  # Proton NAT-PMP → qBit port sidecar
+├── setup-server.sh        # one-shot VPS bootstrap (run as root)
+├── personalize.sh         # legacy no-op (kept for compatibility)
+└── migrate-from-mac.sh    # rsync helper for migrating from local macOS stack
+```
