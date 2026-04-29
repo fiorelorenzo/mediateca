@@ -1,0 +1,13 @@
+# users_database.yml — sostituire i placeholder e rinominare in users_database.yml
+#
+# Per generare l'hash della password:
+#   docker run --rm authelia/authelia:latest authelia hash-password 'la-mia-password'
+# Copia l'hash che inizia con $argon2id$... nel campo "password" sotto.
+
+users:
+  TUO_USERNAME:
+    displayname: "Lorenzo"
+    password: "$argon2id$v=19$m=65536,t=3,p=4$..."   # sostituire con hash reale
+    email: "TUA_EMAIL@TUODOMINIO.TLD"
+    groups:
+      - admins

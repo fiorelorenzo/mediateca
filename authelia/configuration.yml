@@ -1,0 +1,85 @@
+# Authelia base configuration
+# Domain placeholder TUODOMINIO.TLD: viene patchato dallo script personalize.sh
+# I secret JWT/session/storage vengono letti da file in /config/secrets/
+
+theme: dark
+
+server:
+  address: 'tcp://:9091'
+
+log:
+  level: info
+
+totp:
+  issuer: TUODOMINIO.TLD
+
+authentication_backend:
+  password_reset:
+    disable: true
+  refresh_interval: 5m
+  file:
+    path: /config/users_database.yml
+    password:
+      algorithm: argon2
+      argon2:
+        variant: argon2id
+
+access_control:
+  default_policy: deny
+  rules:
+    # Authelia stessa: pubblica (e' il portale)
+    - domain: auth.TUODOMINIO.TLD
+      policy: bypass
+
+    # Bypass /api/* di tutti i servizi protetti (LunaSea & co. via API key)
+    # Questo e' GIA' gestito a livello Caddyfile, ma ridondiamo per chiarezza
+    - domain:
+        - "sonarr.TUODOMINIO.TLD"
+        - "radarr.TUODOMINIO.TLD"
+        - "prowlarr.TUODOMINIO.TLD"
+        - "bazarr.TUODOMINIO.TLD"
+        - "qbit.TUODOMINIO.TLD"
+      resources:
+        - "^/api/.*$"
+        - "^/ping$"
+        - "^/feed/.*$"
+      policy: bypass
+
+    # UI web: richiedono login + 2FA
+    - domain:
+        - "sonarr.TUODOMINIO.TLD"
+        - "radarr.TUODOMINIO.TLD"
+        - "prowlarr.TUODOMINIO.TLD"
+        - "bazarr.TUODOMINIO.TLD"
+        - "qbit.TUODOMINIO.TLD"
+      policy: two_factor
+
+session:
+  name: authelia_session
+  expiration: 1h
+  inactivity: 5m
+  remember_me_duration: 1M
+  domain: TUODOMINIO.TLD
+  redis:
+    host: redis
+    port: 6379
+
+regulation:
+  max_retries: 5
+  find_time: 2m
+  ban_time: 10m
+
+storage:
+  local:
+    path: /config/db.sqlite3
+
+notifier:
+  disable_startup_check: false
+  filesystem:
+    filename: /config/notifications.txt
+  # In produzione vera, sostituisci filesystem con SMTP per password reset / email 2FA
+  # smtp:
+  #   host: smtp.example.com
+  #   port: 587
+  #   username: noreply@TUODOMINIO.TLD
+  #   sender: noreply@TUODOMINIO.TLD

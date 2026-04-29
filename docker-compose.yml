@@ -1,0 +1,198 @@
+# Servarr stack su Hetzner Cloud
+# Path layout sul server:
+#   /opt/servarr/                   (working dir, owner=lorenzo)
+#     docker-compose.yml            (questo file)
+#     .env                          (segreti — NON committare)
+#     config/                       (config persistenti dei container)
+#     caddy/                        (Caddyfile + data/config volumi Caddy)
+#     authelia/                     (configuration.yml + users_database.yml + secrets)
+#     downloads/                    (SSD locale: torrent in corso)
+#   /mnt/storagebox/                (Storage Box BX11 montato via CIFS)
+#     media/tv/                     (libreria serie)
+#     media/movies/                 (libreria film)
+
+networks:
+  servarr:
+    driver: bridge
+
+services:
+  # =========================================
+  # Reverse proxy + HTTPS automatico
+  # =========================================
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"     # HTTP/3
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./caddy/data:/data
+      - ./caddy/config:/config
+    environment:
+      - DOMAIN=${DOMAIN}
+      - ACME_EMAIL=${ACME_EMAIL}
+    networks:
+      - servarr
+
+  # =========================================
+  # SSO + 2FA in front delle UI
+  # =========================================
+  authelia:
+    image: authelia/authelia:latest
+    container_name: authelia
+    restart: unless-stopped
+    volumes:
+      - ./authelia:/config
+    environment:
+      - TZ=Europe/Rome
+      - AUTHELIA_JWT_SECRET_FILE=/config/secrets/jwt_secret
+      - AUTHELIA_SESSION_SECRET_FILE=/config/secrets/session_secret
+      - AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/config/secrets/storage_encryption_key
+    depends_on:
+      - redis
+    networks:
+      - servarr
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    command: redis-server --save "" --appendonly no
+    networks:
+      - servarr
+
+  # =========================================
+  # Stack arr (uguale al Mac, path adattati)
+  # =========================================
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+      - WEBUI_PORT=8080
+    volumes:
+      - ./config/qbittorrent:/config
+      - ./downloads:/downloads
+    ports:
+      - "6881:6881"
+      - "6881:6881/udp"
+    networks:
+      - servarr
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:latest
+    container_name: prowlarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+    volumes:
+      - ./config/prowlarr:/config
+    networks:
+      - servarr
+
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+    volumes:
+      - ./config/sonarr:/config
+      - /mnt/storagebox/media/tv:/tv
+      - ./downloads:/downloads
+    networks:
+      - servarr
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+    volumes:
+      - ./config/radarr:/config
+      - /mnt/storagebox/media/movies:/movies
+      - ./downloads:/downloads
+    networks:
+      - servarr
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+    volumes:
+      - ./config/bazarr:/config
+      - /mnt/storagebox/media/tv:/tv
+      - /mnt/storagebox/media/movies:/movies
+    networks:
+      - servarr
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:latest
+    container_name: flaresolverr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - LOG_HTML=false
+      - CAPTCHA_SOLVER=none
+      - TZ=Europe/Rome
+    networks:
+      - servarr
+
+  # =========================================
+  # Visione + richieste + dashboard
+  # =========================================
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: jellyfin
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=Europe/Rome
+      - JELLYFIN_PublishedServerUrl=https://jellyfin.${DOMAIN}
+    volumes:
+      - ./config/jellyfin:/config
+      - /mnt/storagebox/media/tv:/data/tv
+      - /mnt/storagebox/media/movies:/data/movies
+    networks:
+      - servarr
+
+  jellyseerr:
+    image: fallenbagel/jellyseerr:latest
+    container_name: jellyseerr
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=info
+      - TZ=Europe/Rome
+    volumes:
+      - ./config/jellyseerr:/app/config
+    networks:
+      - servarr
+
+  homarr:
+    image: ghcr.io/ajnart/homarr:latest
+    container_name: homarr
+    restart: unless-stopped
+    volumes:
+      - ./config/homarr/configs:/app/data/configs
+      - ./config/homarr/icons:/app/public/icons
+      - ./config/homarr/data:/data
+    networks:
+      - servarr
