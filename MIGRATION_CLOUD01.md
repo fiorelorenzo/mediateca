@@ -83,6 +83,7 @@ persistent in the configs that rsync — listed here so you don't worry they
 - Jellyfin **Open Subtitles plugin** installed via UI Catalog → DLL in `config/jellyfin/plugins/`, settings in `config/jellyfin/data/plugins/`, migrates
 - Prowlarr **CF-blocked indexer note**: known broken (1337x/EZTV via Cardigann post-FlareSolverr false positive) — using only Knaben/LimeTorrents/TheRARBG-clones via `home-proxy` tag → indexer state in DB, migrates
 - BitMagnet + the in-VPN FlareSolverr container **not in `docker-compose.yml`** — already removed from this repo's compose, no resurrection needed
+- qBittorrent **stop-seeding-on-completion** policy: `max_ratio_enabled=true`, `max_ratio=0`, `max_ratio_act=0` (Pause). Saves Hetzner egress + reduces background tunnel chatter. Sonarr/Radarr have already hardlinked the file to `/data/media/` before pause kicks in, so no breakage. State lives in `config/qbittorrent/qBittorrent/qBittorrent.conf`, migrates with rsync.
 
 ---
 
@@ -591,6 +592,14 @@ that nothing requires manual reconfiguration.
 - [ ] **Bazarr Language Profile 1 "IT + EN"**: Settings → Languages → profile exists, default for series + movies
 - [ ] **Sonarr download client**: Settings → Download Clients → qBittorrent host=`gluetun` port=`8080` → Test green
 - [ ] **Radarr download client**: same shape, host=`gluetun`
+- [ ] **qBit stop-seeding policy**: Tools → Options → BitTorrent → "When ratio reaches 0.00, Pause torrent" is checked. Or via API:
+  ```sh
+  ssh ${USERNAME}@${NEW_IP} 'docker run --rm --network servarr_servarr curlimages/curl:latest sh -c "
+    SID=\$(curl -s -i -d \"username=admin&password=YOURPASS\" -H \"Referer: http://gluetun:8080\" http://gluetun:8080/api/v2/auth/login | grep -i set-cookie | sed -E \"s/.*SID=([^;]+);.*/\\1/\" | tr -d \"\\r\")
+    curl -s -b \"SID=\$SID\" -H \"Referer: http://gluetun:8080\" http://gluetun:8080/api/v2/app/preferences
+  " | grep -E "max_ratio_enabled|max_ratio|max_ratio_act"'
+  # Expected: max_ratio_enabled=true, max_ratio=0, max_ratio_act=0
+  ```
 - [ ] **Sonarr root folder**: `/data/media/tv` (or wherever your existing series are)
 - [ ] **Radarr root folder**: `/data/media/movies`
 
