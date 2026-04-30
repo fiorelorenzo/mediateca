@@ -46,6 +46,6 @@ qbit.{$DOMAIN} {
     reverse_proxy gluetun:8080
 }
 
-bitmagnet.{$DOMAIN} {
-    reverse_proxy gluetun:3333
+headscale.{$DOMAIN} {
+    reverse_proxy headscale:8080
 }

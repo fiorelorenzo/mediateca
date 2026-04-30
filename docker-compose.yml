@@ -44,8 +44,9 @@ services:
       - servarr
 
   # =========================================
-  # VPN client (ProtonVPN) — shares its network namespace with
-  # qbittorrent, flaresolverr, bitmagnet, qb-port-manager.
+  # VPN client (ProtonVPN) — shares its network namespace with qbittorrent
+  # and qb-port-manager. All torrent traffic exits via the VPN tunnel; the
+  # rest of the stack uses the direct Hetzner network.
   # =========================================
   gluetun:
     image: qmcgaw/gluetun:latest
@@ -65,7 +66,7 @@ services:
       - VPN_PORT_FORWARDING_PROVIDER=protonvpn
       - VPN_PORT_FORWARDING_STATUS_FILE=/gluetun/forwarded_port
       - PORT_FORWARD_ONLY=on
-      - FIREWALL_INPUT_PORTS=8080,8191,3333
+      - FIREWALL_INPUT_PORTS=8080
       - FIREWALL_OUTBOUND_SUBNETS=172.18.0.0/16
       - DNS_KEEP_NAMESERVER=on
       - HEALTH_VPN_DURATION_INITIAL=120s
@@ -74,8 +75,6 @@ services:
       - ./config/gluetun:/gluetun
     ports:
       - "8080"            # qBit WebUI (Caddy reaches it as gluetun:8080)
-      - "8191"            # FlareSolverr (Prowlarr reaches it as gluetun:8191)
-      - "3333"            # BitMagnet WebUI/Torznab (via gluetun:3333)
     networks:
       - servarr
 
@@ -99,7 +98,7 @@ services:
       - /mnt/storagebox/data:/data
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:latest
+    image: lscr.io/linuxserver/prowlarr:nightly
     container_name: prowlarr
     restart: unless-stopped
     environment:
@@ -153,61 +152,16 @@ services:
     networks:
       - servarr
 
-  flaresolverr:
-    image: ghcr.io/flaresolverr/flaresolverr:latest
-    container_name: flaresolverr
-    restart: unless-stopped
-    network_mode: "service:gluetun"
-    depends_on:
-      - gluetun
-    environment:
-      - LOG_LEVEL=info
-      - LOG_HTML=false
-      - CAPTCHA_SOLVER=none
-      - TZ=Europe/Rome
-
-  # =========================================
-  # BitMagnet — local DHT crawler (Cloudflare-free Torznab indexer)
-  # =========================================
-  postgres:
-    image: postgres:16-alpine
-    container_name: postgres
-    restart: unless-stopped
-    environment:
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=bitmagnet
-      - PGDATA=/var/lib/postgresql/data/pgdata
-    volumes:
-      - ./config/postgres:/var/lib/postgresql/data
-    networks:
-      - servarr
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  bitmagnet:
-    image: ghcr.io/bitmagnet-io/bitmagnet:latest
-    container_name: bitmagnet
-    restart: unless-stopped
-    network_mode: "service:gluetun"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      gluetun:
-        condition: service_started
-    command:
-      - worker
-      - run
-      - --keys=http_server
-      - --keys=queue_server
-      - --keys=dht_crawler
-    environment:
-      - POSTGRES_HOST=postgres
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - TMDB_API_KEY=${TMDB_API_KEY}
-      - TZ=Europe/Rome
+  # FlareSolverr is intentionally NOT in this compose. Running it on the
+  # VPS (whether direct or behind Gluetun) means Cloudflare sees a
+  # datacenter or VPN ASN and blocks it anyway. Instead it runs on a
+  # residential machine (Mac/Linux/Windows/Raspberry Pi) and Prowlarr
+  # reaches it over the private Tailscale/Headscale tailnet — see
+  # README "Indexer proxy on a home node" section.
+  #
+  # BitMagnet + Postgres are also intentionally NOT here: the DHT crawler
+  # saturated both vCPU cores of the CPX22 plan. Re-add only after scaling
+  # to CPX32, or with cpus/mem limits applied.
 
   # Syncs qBittorrent's listening port with whatever NAT-PMP port Proton hands
   # out, every 60s. Reads /gluetun/forwarded_port, calls qBit WebUI API.
@@ -270,5 +224,23 @@ services:
     volumes:
       - ./config/homarr/appdata:/appdata
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - servarr
+
+  # =========================================
+  # Headscale — self-hosted Tailscale coordination server.
+  # The VPS host (and remote nodes like Mac/Pi) join this tailnet via the
+  # official Tailscale client pointed at https://headscale.${DOMAIN}.
+  # Used to route Prowlarr's indexer scraping through a residential IP at
+  # home (Cloudflare/datacenter blocks bypass).
+  # =========================================
+  headscale:
+    image: headscale/headscale:0.26
+    container_name: headscale
+    restart: unless-stopped
+    command: serve
+    volumes:
+      - ./config/headscale/config.yaml:/etc/headscale/config.yaml:ro
+      - ./config/headscale/data:/var/lib/headscale
     networks:
       - servarr

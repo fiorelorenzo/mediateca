@@ -1,8 +1,10 @@
 # Self-hosted media stack on Hetzner Cloud
 
 Jellyfin + Servarr (Sonarr/Radarr/Prowlarr/Bazarr) + qBittorrent + Seerr +
-Homarr + BitMagnet, all behind Caddy with automatic HTTPS, with qBittorrent
-and FlareSolverr routed through ProtonVPN (WireGuard, port forwarded).
+Homarr, all behind Caddy with automatic HTTPS, with qBittorrent routed
+through ProtonVPN (WireGuard, port forwarded). A self-hosted Headscale
+control plane lets a residential machine at home act as an indexer-scraping
+proxy so Prowlarr can reach trackers that block datacenter / VPN IPs.
 
 ## Stack at a glance
 
@@ -16,7 +18,7 @@ and FlareSolverr routed through ProtonVPN (WireGuard, port forwarded).
 | `prowlarr.<DOMAIN>` | Prowlarr | indexer manager |
 | `bazarr.<DOMAIN>` | Bazarr | subtitles |
 | `qbit.<DOMAIN>` | qBittorrent | torrent client (via VPN) |
-| `bitmagnet.<DOMAIN>` | BitMagnet | local DHT crawler / Torznab indexer (via VPN) |
+| `headscale.<DOMAIN>` | [Headscale](https://github.com/juanfont/headscale) | self-hosted Tailscale coordination server |
 
 Authentication is each app's own (Forms login on *arr, native login on
 Jellyfin/Seerr/Homarr/qBit). Rationale: simpler and good enough for a personal
@@ -27,24 +29,36 @@ stack with strong passwords + fail2ban — no separate SSO layer.
 ```
   internet ──► Hetzner VPS ──► Caddy (TLS) ──► docker network "servarr"
                                                   │
-                                                  ├── jellyfin / sonarr / radarr / ...
-                                                  ├── seerr / homarr / prowlarr / bazarr
+                                                  ├── jellyfin / sonarr / radarr / bazarr
+                                                  ├── seerr / homarr / prowlarr
+                                                  ├── headscale (Tailscale control plane)
                                                   └── gluetun (ProtonVPN, WireGuard)
                                                           │ shared netns
                                                           ├── qbittorrent
-                                                          ├── flaresolverr
-                                                          ├── bitmagnet
                                                           └── qb-port-manager (sidecar)
+
+                       Tailscale tailnet (WireGuard P2P, encrypted)
+                       ────────────────────────────────────────────
+                       ├── vps-jellyfin       (the host above)
+                       └── home-node          (Mac / Linux / Windows / Pi at home)
+                              ├── tinyproxy   :8888  (HTTP proxy)
+                              └── flaresolverr :8191 (Cloudflare challenge solver)
 ```
 
 `gluetun` is on the `servarr` network so other containers can reach it as
-`gluetun:8080` (qBit), `gluetun:8191` (FlareSolverr), `gluetun:3333`
-(BitMagnet). Containers using `network_mode: service:gluetun` route all their
-outbound traffic through the VPN tunnel.
+`gluetun:8080` (qBit). Containers using `network_mode: service:gluetun` route
+all their outbound traffic through the VPN tunnel.
 
 A small alpine sidecar (`qb-port-manager`) polls
 `/gluetun/forwarded_port` every 60s and pokes the qBittorrent WebUI API to
 keep its listening port aligned with the port Proton hands out via NAT-PMP.
+
+`headscale` is the open-source Tailscale coordination server. The VPS host
+joins its own tailnet via the official Tailscale client; a residential
+machine at home joins the same tailnet and runs `tinyproxy` and/or
+`flaresolverr`. Prowlarr uses those as Indexer Proxies, so scraping queries
+exit with a residential IP — bypassing both datacenter and commercial-VPN
+ASN blocklists. Torrent traffic itself stays on ProtonVPN.
 
 ## Prerequisites
 
@@ -156,7 +170,7 @@ Add per-subdomain A records on your registrar. Example for Namecheap:
 | A | `prowlarr` | `<VPS-IP>` | Automatic |
 | A | `bazarr` | `<VPS-IP>` | Automatic |
 | A | `qbit` | `<VPS-IP>` | Automatic |
-| A | `bitmagnet` | `<VPS-IP>` | Automatic |
+| A | `headscale` | `<VPS-IP>` | Automatic |
 
 A wildcard `*` works too but per-subdomain records are easier to audit and
 fail-closed (an unmapped subdomain just doesn't resolve).
@@ -222,12 +236,21 @@ port: `8080`, your qBit credentials, category: `tv-sonarr` /
 Note the API key in Settings → General → Security.
 
 **4. Prowlarr** — Settings → General → Authentication = Forms, set up user.
-Settings → Indexers → Indexer Proxies → add **FlareSolverr**:
 
-- Tag: `flaresolverr`
-- Host: `http://gluetun:8191` (FlareSolverr lives in Gluetun's namespace)
+Set up the indexer proxies (see the dedicated **"Indexer proxy on a home
+node"** section below for the full home-node setup). Once the home node is
+up and joined to the tailnet, in Prowlarr → Settings → Indexers → Indexer
+Proxies → Add:
 
-Add public indexers from Indexers → Add — see the indexer notes below.
+- **Http** named `home-proxy`, host = `<home-node-tailnet-ip>`, port `8888`,
+  tag `home-proxy` — for trackers that block by IP only (geo / ASN).
+- **FlareSolverr** named `FlareSolverr`, host = `http://<home-node-tailnet-ip>:8191`,
+  tag `flaresolverr` — for Cloudflare-protected trackers.
+
+Add public indexers from Indexers → Add. Tag CF-protected trackers with
+`flaresolverr`, ASN-blocked trackers with `home-proxy`, free-access ones
+with no tag. See the indexer notes below.
+
 Then Settings → Apps → connect Sonarr (`http://sonarr:8989`) and Radarr
 (`http://radarr:7878`) using their API keys. Indexers will sync automatically.
 
@@ -245,41 +268,206 @@ register backend connections (URLs use container hostnames, e.g.
 `https://media.<DOMAIN>`). Boards → New board → Edit mode → add Apps and
 Widgets.
 
-**8. BitMagnet** (https://bitmagnet.<DOMAIN>) — local DHT crawler. Add it
-to Prowlarr as **Generic Torznab**:
+## Indexer proxy on a home node
 
-- URL: `http://gluetun:3333/torznab`
-- API Path: `/api`
-- API Key: leave empty
-- No FlareSolverr tag
+The VPS sits on a Hetzner datacenter ASN, and qBit exits through ProtonVPN.
+Both ranges are aggressively blocklisted by Cloudflare and by direct ASN
+checks on most public trackers (1337x, TPB, EZTV, KAT, ...). The only
+sustainable workaround is to source scraping requests from a **residential
+IP** at home: a Mac, Linux box, Windows machine, or Raspberry Pi.
 
-The DHT index grows over time: a few hundred torrents in the first hours,
-hundreds of thousands after a week, millions after a month. Search results
-won't be useful immediately.
+The home node joins the same Headscale tailnet as the VPS (encrypted P2P
+WireGuard via the coordination server at `https://headscale.<DOMAIN>`) and
+runs two services Prowlarr can reach over the tailnet:
+
+- **tinyproxy** on port `8888` — a plain HTTP proxy. Cheap and good enough
+  for trackers that block on IP/ASN but don't have Cloudflare.
+- **flaresolverr** on port `8191` — runs a real headless Chromium to solve
+  Cloudflare's JS challenge, with a residential IP and a real browser
+  fingerprint.
+
+### Step 1 — Bring up the VPS-side coordination server
+
+Already part of `docker-compose.yml`:
+
+```sh
+docker compose up -d headscale
+curl -I https://headscale.<DOMAIN>/key   # 400-class is fine, means it's reachable
+```
+
+Create a user and pre-auth keys (one per node you want to enroll):
+
+```sh
+docker exec headscale headscale users create lorenzo
+docker exec headscale headscale users list   # note the numeric id, e.g. 1
+docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
+# → tskey-auth-...VPS-KEY...
+docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
+# → tskey-auth-...HOME-KEY...
+```
+
+### Step 2 — Enroll the VPS host in the tailnet
+
+So Prowlarr's container can resolve `100.x.y.z` for the home node, the VPS
+**host** (not the Docker bridge) needs Tailscale running:
+
+```sh
+curl -fsSL https://tailscale.com/install.sh | sudo sh
+sudo tailscale up \
+  --login-server=https://headscale.<DOMAIN> \
+  --authkey=<VPS-KEY> \
+  --hostname=vps-jellyfin
+sudo tailscale ip -4
+# → 100.64.0.1 (or similar)
+```
+
+### Step 3 — Enroll the home node
+
+Pick **one** of the platforms below.
+
+#### macOS (standalone Tailscale + Homebrew CLI services)
+
+The App Store version of Tailscale doesn't accept a custom login server.
+Use the standalone `.pkg` from <https://pkgs.tailscale.com/stable/#macos>,
+**or** install only the CLI/daemon via Homebrew:
+
+```sh
+brew install tailscale tinyproxy
+sudo brew services start tailscale
+sudo /opt/homebrew/bin/tailscale up \
+  --login-server=https://headscale.<DOMAIN> \
+  --authkey=<HOME-KEY> \
+  --hostname=mac-home
+```
+
+If the auth key has already expired, Tailscale falls back to interactive
+registration: paste the URL it prints, then on the VPS run:
+
+```sh
+docker exec headscale headscale nodes register --user lorenzo --key <THE-KEY-IT-PRINTED>
+```
+
+Configure tinyproxy (Apple Silicon path; on Intel use `/usr/local/etc/`):
+
+```sh
+sed -i '' 's/^User nobody/User '"$(whoami)"'/' /opt/homebrew/etc/tinyproxy/tinyproxy.conf
+sed -i '' 's/^Group nobody/Group staff/'       /opt/homebrew/etc/tinyproxy/tinyproxy.conf
+# Allow the whole tailnet to use this proxy:
+printf '\nAllow 100.64.0.0/10\nAllow fd7a:115c:a1e0::/48\n' \
+  >> /opt/homebrew/etc/tinyproxy/tinyproxy.conf
+brew services start tinyproxy
+```
+
+For FlareSolverr just run the official container (Docker Desktop / OrbStack):
+
+```sh
+docker run -d --name flaresolverr --restart unless-stopped \
+  -p 0.0.0.0:8191:8191 \
+  -e LOG_LEVEL=info -e CAPTCHA_SOLVER=none -e TZ=Europe/Rome \
+  ghcr.io/flaresolverr/flaresolverr:latest
+```
+
+Caveat: a MacBook in clamshell sleep won't route the tunnel. Either keep
+the lid open or set Settings → Battery → Power Adapter → "Prevent automatic
+sleeping". A Mac mini / iMac is fine as-is. Long-term, prefer a Pi.
+
+#### Linux (Debian/Ubuntu/Raspberry Pi OS, x86 or ARM)
+
+```sh
+curl -fsSL https://tailscale.com/install.sh | sudo sh
+sudo tailscale up \
+  --login-server=https://headscale.<DOMAIN> \
+  --authkey=<HOME-KEY> \
+  --hostname=home-node
+
+sudo apt install -y tinyproxy
+sudo sed -i 's/^Allow 127.0.0.1$/Allow 127.0.0.1\nAllow 100.64.0.0\/10\nAllow fd7a:115c:a1e0::\/48/' \
+  /etc/tinyproxy/tinyproxy.conf
+sudo systemctl enable --now tinyproxy
+
+# FlareSolverr (Docker required):
+docker run -d --name flaresolverr --restart unless-stopped \
+  -p 0.0.0.0:8191:8191 \
+  -e LOG_LEVEL=info -e CAPTCHA_SOLVER=none -e TZ=Europe/Rome \
+  ghcr.io/flaresolverr/flaresolverr:latest
+```
+
+#### Windows (Tailscale + WSL2 or Docker Desktop)
+
+1. Install the Tailscale Windows client from
+   <https://tailscale.com/download/windows>. After installing, a custom
+   coordination server is set via the system tray icon → "Preferences" →
+   "Use login server" → `https://headscale.<DOMAIN>` (or run
+   `tailscale up --login-server=... --authkey=<HOME-KEY>` from `cmd.exe`).
+2. Run tinyproxy + flaresolverr inside Docker Desktop or WSL2 — both
+   options expose the ports on `localhost:8888` / `localhost:8191`, which
+   are reachable over the tailnet to your `vps-jellyfin` peer.
+
+   Tinyproxy via Docker:
+
+   ```cmd
+   docker run -d --name tinyproxy --restart unless-stopped ^
+     -p 0.0.0.0:8888:8888 monokal/tinyproxy:latest ANY
+   ```
+
+   FlareSolverr is the same as above.
+
+3. Disable Windows fast startup and put the machine to "Never sleep" when
+   plugged in (Settings → System → Power & battery), otherwise the tailnet
+   peer drops out.
+
+### Step 4 — Smoke-test from the VPS
+
+```sh
+ssh lorenzo@<VPS-IP>
+sudo tailscale status
+# Should show both vps-jellyfin and the home node, online.
+
+# Plain HTTP proxy works and exits with the home IP:
+curl -x http://<home-tailnet-ip>:8888 https://api.ipify.org
+# → your residential IP, NOT the VPS IP
+
+# FlareSolverr is alive:
+curl -s http://<home-tailnet-ip>:8191/
+# → {"msg": "FlareSolverr is ready!", ...}
+```
+
+### Step 5 — Wire it up in Prowlarr
+
+Already covered above — Settings → Indexers → Indexer Proxies → add `Http`
+and `FlareSolverr`, both pointing at `<home-tailnet-ip>`.
+
+### Migration to a Raspberry Pi later
+
+Just enroll the Pi as a new home node (Linux instructions above), update
+the host field on both Prowlarr indexer proxies to the Pi's tailnet IP,
+then stop tinyproxy/flaresolverr on the original machine. Nothing on the
+VPS changes.
 
 ## Indexer notes
 
-Datacenter IPs (Hetzner, OVH, ...) are aggressively blocklisted by
-Cloudflare for major torrent sites (1337x, KickAss, TorrentGalaxy, ...).
-Even with FlareSolverr these sites refuse the connection at the IP layer —
-the block is IP reputation, not a JS challenge.
+What works without any home proxy (free-access trackers):
 
-ProtonVPN's IP blocks (and most commercial VPNs) are also flagged. Switching
-country (`VPN_SERVER_COUNTRIES`) helps occasionally but the underlying
-problem is structural.
-
-What works reliably from a Hetzner+Proton setup:
-
-- **EZTV** (TV)
+- **YTS** (movies x265)
 - **Nyaa.si** (anime)
-- **YTS** (movies)
 - **Internet Archive** (legal public domain)
-- **Magnet aggregators** (`0Magnet`, `MagnetDownload`, `MagnetZ`)
-- **BitMagnet** (DHT crawl, no Cloudflare in the loop at all — best
-  long-term answer)
 
-What does **not** work well: 1337x, TPB, KickAss, TorrentGalaxy mirrors.
-Don't fight it.
+What works with `home-proxy` only (geo/ASN blocked, no Cloudflare):
+
+- **Knaben** (meta-search aggregator — best single pick)
+- **LimeTorrents** (general)
+- **Torrent Downloads** (general)
+
+What works with `flaresolverr` (Cloudflare-protected): variable. Some
+Cardigann definitions break post-FlareSolverr because of Cloudflare Rocket
+Loader markers in the response. **EZTV** and **1337x** specifically tend to
+fail this way despite the challenge being solved. Stick to the non-CF
+alternatives above for consistent results, or switch to Usenet (NZBgeek,
+DrunkenSlug) for industrial-strength TV/movie coverage.
+
+Don't connect the VPS host directly to public trackers without one of
+these proxies — you'll get rate-limited or banned, and it pollutes the IP
+reputation for the whole VPS.
 
 ## Maintenance
 
@@ -339,9 +527,11 @@ The `qb-port-manager` sidecar should be aligning qBit to it within 60s.
 - Hetzner Cloud Firewall + UFW on the VM (defense in depth).
 - SSH: key-only, root login disabled, fail2ban watching auth logs.
 - Unattended security upgrades enabled by `setup-server.sh`.
-- qBittorrent and FlareSolverr exit traffic only through ProtonVPN — no
-  Hetzner-IP torrent peer announcements, no DMCA exposure for the host.
-- BitMagnet's DHT crawler also runs through ProtonVPN.
+- qBittorrent exits traffic only through ProtonVPN — no Hetzner-IP torrent
+  peer announcements, no DMCA exposure for the host.
+- Indexer scraping (small HTTP queries, no torrent payload) goes through
+  the home node over Tailscale, isolating residential IP exposure to
+  metadata-only traffic.
 - Secrets live in `.env` (gitignored) and never get baked into images.
 
 ## Repository layout
