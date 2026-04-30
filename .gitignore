@@ -14,5 +14,5 @@ config/headscale/*
 !config/headscale/config.yaml
 
 # Tooling
-.claude/settings.local.json
+.claude/
 .DS_Store
