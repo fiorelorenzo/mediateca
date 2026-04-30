@@ -49,3 +49,7 @@ qbit.{$DOMAIN} {
 headscale.{$DOMAIN} {
     reverse_proxy headscale:8080
 }
+
+tdarr.{$DOMAIN} {
+    reverse_proxy tdarr:8265
+}

@@ -244,3 +244,41 @@ services:
       - ./config/headscale/data:/var/lib/headscale
     networks:
       - servarr
+
+  # =========================================
+  # Tdarr — asynchronous transcoding pipeline.
+  # Re-encodes new imports to H.264 1080p + AAC stereo, keeping all
+  # original audio tracks. Quality profiles cap at 1080p so Tdarr never
+  # sees 4K. Encode happens on local NVMe (/temp); final result is
+  # written back to the Storage Box via Tdarr's "Replace Original File"
+  # plugin (atomic rename — file remains readable to Jellyfin during
+  # encode, unavailable for ~1-2 s during the swap).
+  # 4c/8t Xeon → 2 parallel FFmpeg workers without saturating the host.
+  # =========================================
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:latest
+    container_name: tdarr
+    restart: unless-stopped
+    cpus: 4.0
+    mem_limit: 12g
+    environment:
+      - TZ=Europe/Rome
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - serverIP=0.0.0.0
+      - serverPort=8266
+      - webUIPort=8265
+      - internalNode=true
+      - inContainer=true
+      - nodeName=tdarr-cloud01
+      - ffmpegVersion=7
+    volumes:
+      - ./config/tdarr/server:/app/server
+      - ./config/tdarr/configs:/app/configs
+      - ./config/tdarr/logs:/app/logs
+      - /mnt/storagebox/data/media:/media
+      # Encode cache on the local NVMe RAID 1, NOT on the Storage Box:
+      # SMB roundtrip per write would tank libx264 throughput.
+      - /var/lib/tdarr-cache:/temp
+    networks:
+      - servarr
