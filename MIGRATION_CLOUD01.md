@@ -37,6 +37,55 @@ brew install hcloud  # if not already installed
 
 ---
 
+## 0a. Configuration inventory — what migrates, what's manual
+
+### Migrates automatically via `rsync /opt/servarr/config/`
+
+Everything under `config/` is part of the rsync in §4.2 and carries
+state across with zero manual reconfiguration:
+
+| Config dir | Contents that migrate |
+| --- | --- |
+| `config/jellyfin/` | Library DBs, users, **per-user audio/subtitle language preferences**, watched state, plugins (incl. **Open Subtitles plugin DLL + creds**), library subtitle provider settings |
+| `config/sonarr/` | Series, **all Custom Formats** (`x264 / H.264`, `Italian`, `Multi (incl. IT)`, `Multi ITA + Original`), **all 4 Quality Profiles** (`HD Generic`, `HD Multi Strict`, `HD Italian Pref`, `HD Original Pref`), download client config, indexer connections, API key |
+| `config/radarr/` | Same shape as Sonarr (movies + same 4 profiles + same 4 CFs + API key) |
+| `config/prowlarr/` | All indexers, **both Indexer Proxies** (`FlareSolverr` → `100.64.0.3:8191`, `home-mac` → `100.64.0.3:8888`), Apps wired to Sonarr/Radarr/Bazarr, API key |
+| `config/bazarr/config/config.yaml` | **Provider list** (currently `tvsubtitles`+`yifysubtitles` only — OpenSubtitles.com intentionally disabled to reserve quota for Jellyfin on-demand), **Language Profile 1 "IT + EN"**, default profile bound to series+movies, interactive search ON, score thresholds (90 series / 70 movies), API key |
+| `config/qbittorrent/` | Listening port history, categories (`tv-sonarr`, `movies-radarr`), **WebUI password hash**, qBit settings |
+| `config/seerr/` | Request history, Sonarr/Radarr server connections, Jellyfin auth, user list, application URL |
+| `config/homarr/appdata/` | Boards, app tiles, integration credentials encrypted with `HOMARR_SECRET_ENCRYPTION_KEY` (the env var is in `.env`, also rsynced) |
+| `config/headscale/data/` | SQLite DB with **Mac home node (100.64.0.3) registered**, user `lorenzo` (id=1), DERP map cache. The Mac stays in the tailnet untouched. |
+| `config/gluetun/` | Proton WireGuard state, `forwarded_port` file (auto-refreshed by NAT-PMP on first VPN connect anyway) |
+| `config/tdarr/` | **Created fresh on `cloud01`** — this is a new service, no migration needed |
+| `.env` | All secrets (DOMAIN, ACME_EMAIL, ProtonVPN keys, qBit creds, HOMARR encryption key) |
+
+### Does NOT migrate automatically — manual or scripted recovery
+
+| Item | Why | Recovery path |
+| --- | --- | --- |
+| **Caddy ACME state** (`caddy/data/`, `caddy/config/`) | Excluded from rsync on purpose | Caddy re-issues certs from Let's Encrypt automatically once DNS points to `cloud01` (~9 certs, well under LE rate limit). 5-10 min wait |
+| **Hetzner Cloud Firewall** (`servarr-fw`) | Belongs to Hetzner project, not `/opt/servarr` | Attached at server-create time in §3.1 (CLI flag `--firewall servarr-fw`) |
+| **Storage Box mount on host** | OS-level config | Recreated by `setup-server.sh` (writes `/etc/fstab`, installs `linux-modules-extra-$(uname -r)`, `modprobe nls_utf8`) |
+| **Tailscale enrolment of new VPS host** | Each host has its own machine key | Recreated in §5.3 (deregister old `vps-jellyfin`, install `tailscale` apt package, `tailscale up --authkey=...`) |
+| **Tdarr libraries + flow plugin** | Tdarr is brand new on `cloud01` | UI setup in §7 (one-time, ~10 min) |
+| **DNS A records** | Outside the VPS | Manual update in §6 |
+
+### Recent runtime tweaks already saved to disk
+
+A few changes were applied via API/file during operations and are now
+persistent in the configs that rsync — listed here so you don't worry they
+"need to be reapplied":
+
+- Sonarr/Radarr **CF "Multi ITA + Original"** (5 conditions matching MULTI/DUAL/ITA-EN/ENG-IT/explicit combos) → in DB, migrates
+- Sonarr/Radarr **`HD Generic` profile** with adjusted scoring (Italian -300, Multi+Original 1000, Multi-broad 200, x264 500) — final state: original-language solo beats Italian-only solo by 600 points → in DB, migrates
+- Sonarr/Radarr **all profiles capped at 1080p** (2160p tiers `allowed=false`, cutoff = Bluray-1080p Remux) → in DB, migrates
+- Bazarr **OpenSubtitles.com removed from `enabled_providers`** (kept configured but inactive; quota dedicated to Jellyfin Open Subtitles plugin) → in `config.yaml`, migrates
+- Jellyfin **Open Subtitles plugin** installed via UI Catalog → DLL in `config/jellyfin/plugins/`, settings in `config/jellyfin/data/plugins/`, migrates
+- Prowlarr **CF-blocked indexer note**: known broken (1337x/EZTV via Cardigann post-FlareSolverr false positive) — using only Knaben/LimeTorrents/TheRARBG-clones via `home-proxy` tag → indexer state in DB, migrates
+- BitMagnet + the in-VPN FlareSolverr container **not in `docker-compose.yml`** — already removed from this repo's compose, no resurrection needed
+
+---
+
 ## 1. Pre-flight checklist
 
 - [ ] **Confirm budget**: CAX41 ≈ 24.49 €/mo + BX11 3.81 + domain 3 + Proton 5 ≈ **36.30 €/mo**.
@@ -377,76 +426,199 @@ Update Namecheap A records — change ALL these from `${OLD_IP}` to `${NEW_IP}`:
 
 ## 7. Tdarr first-run configuration
 
-Open `https://tdarr.${DOMAIN}` in browser. Walk through:
+This is the only true manual setup step on `cloud01` (Tdarr never ran on
+the old VPS, so there's no state to rsync). ~10 minutes of clicking. Every
+field value is written here so it's deterministic and zero-judgment.
 
-1. **Library setup** → Add new Library:
-   - Name: `tv`, Source: `/media/tv`, Output: same as source
-   - Add a second library: `movies`, Source: `/media/movies`
-2. **Plugin pipeline** → Create a new Flow named `H264-1080p-Idempotent`:
-   - **Step 1 — Filter**: `Skip if codec is H264 AND audio includes AAC AND width <= 1920`
-     (use the built-in `Tdarr_Plugin_lmg6_Reorder_Streams` or write a `iif` JS plugin)
-     
-     The simplest is the Classic plugin set:
-     - Add filter: `Tdarr_Plugin_077a_Filter_Codec_H264` → if h264, skip
-     - Add filter: `Tdarr_Plugin_lmg6_Replace_Audio_AAC` → if no AAC, encode audio
-   - **Step 2 — Transcode**:
-     - Use plugin `Tdarr_Plugin_MC93_Migz1FFMPEG` with these env:
-       - `target_codec = h264`
-       - `cli_format = libx264`
-       - `cpu_count = 2`
-       - `b_frames = 0`
-       - `target_resolution = 1080p`
-     - Or write a custom flow (cleaner): output args
-       ```
-       -c:v libx264 -preset medium -crf 22 \
-       -map 0:v -map 0:a -c:a:0 aac -b:a:0 192k -ac 2 \
-       -map 0:a:0 -c:a:1 ac3 -b:a:1 384k \
-       -map 0:s? -c:s copy
-       ```
-   - **Step 3 — Verify**: built-in `ffprobe` sanity check
-   - **Step 4 — Replace original**: enable, with 7-day backup retention.
-3. **Schedule** → Library scan every 30 minutes. Optionally restrict to
-   night hours (22:00 — 07:00) if you want to keep daytime CPU free.
-4. **Workers** → set Healthcheck CPU workers to 2, Transcode CPU workers to 8
-   (leaves 6 cores headroom for Jellyfin runtime transcoding peaks).
+Open `https://tdarr.${DOMAIN}` in browser.
 
-- [ ] Tdarr libraries created
-- [ ] Flow plugin saved
-- [ ] First scan running; queue length visible in dashboard
+### 7.1 First-run wizard
 
-Backlog estimate: 1 TB of mixed library ≈ 16 hours of background work on
-CAX41 with 8 transcode workers. Set it and forget it.
+When the page first loads it asks for an admin password:
+
+- Username: `lorenzo`
+- Password: pick a strong one, save in your password manager. Add it to
+  `config/homarr/` integrations later if you want the Homarr widget.
+
+### 7.2 Libraries — sidebar **Libraries**
+
+Click **+ Add Library** twice, with these EXACT values:
+
+**Library 1 — TV**
+| Field | Value |
+| --- | --- |
+| Name | `tv` |
+| Source folder | `/media/tv` |
+| Cache folder (transcode) | `/temp` |
+| Output folder | `/media/tv` (replace originals in place) |
+| Use folder watcher | `true` |
+| Folder watch sample window | `30` seconds |
+| Container types to scan | `mkv, mp4, m4v, ts, avi, wmv, mov` |
+| Priority | `1` |
+
+**Library 2 — Movies** — same as above but `name=movies` and source/output
+under `/media/movies`.
+
+### 7.3 Flow plugin — sidebar **Flows** → **+ Create New Flow**
+
+Name: `H264-1080p-IT-multi-audio`
+Description: `Idempotent skip-if-already-h264-aac, else transcode to libx264 medium CRF22 keeping all audio tracks`
+
+Add 5 nodes by dragging them onto the canvas (Tdarr v2.x flow editor, the
+node search box is in the sidebar):
+
+**Node 1 — Input File** (auto-placed when you create the flow). Connects
+to Node 2.
+
+**Node 2 — `Check Video Codec`** (community plugin)
+- `codecs`: `h264`
+- `condition`: `equals`
+- Connect output **`Yes (matches)`** → Node 5 (skip path)
+- Connect output **`No`** → Node 3 (transcode path)
+
+**Node 3 — `Check Audio Codec`** (community plugin)
+- `codecs`: `aac`
+- `condition`: `includes`
+- Connect output **`Yes`** → Node 5 (skip — file is already H264 AAC)
+- Connect output **`No`** → Node 4 (transcode)
+
+**Node 4 — `Execute FFmpeg Command`** (community plugin)
+- Custom command:
+  ```
+  -c:v libx264 -preset medium -crf 22
+  -map 0:v -c:v copy
+  -map 0:a -c:a copy
+  -map 0:a:0 -c:a:m aac -b:a:m 192k -ac 2 -metadata:s:a:m title="AAC stereo (added)"
+  -map 0:s? -c:s copy
+  ```
+  
+  This **keeps every original audio track** (`-c:a copy`), then **adds**
+  one AAC stereo fallback (the `-map 0:a:0 -c:a:m aac ...` lines). Result:
+  files have IT + ENG + IT(AAC stereo) tracks, Jellyfin per-user audio
+  preference picks the matching one with zero transcoding at playback.
+
+- Connect to Node 5 (replace).
+
+**Node 5 — `Replace Original File`** (community plugin)
+- `keep_backup`: `true`
+- `backup_days`: `7`
+- This is the terminal node.
+
+Save the flow.
+
+### 7.4 Bind libraries to the flow
+
+Sidebar **Libraries** → click each library → **Flow plugins tab** → set
+the active flow to `H264-1080p-IT-multi-audio`. Save.
+
+### 7.5 Workers — sidebar **Server**
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| CPU healthcheck workers | `2` | Quick scans of metadata |
+| GPU healthcheck workers | `0` | No GPU on Hetzner ARM |
+| CPU transcode workers | `8` | Cap below 16 cores so Jellyfin keeps headroom |
+| GPU transcode workers | `0` | Same |
+| Scheduler | `Always` (or restrict 22:00-07:00 if you want daytime quiet) |
+
+### 7.6 Trigger first scan
+
+Sidebar **Libraries** → on each library click **Scan**. Backlog estimate
+for ~1 TB mixed library: **~16 hours** on CAX41 with 8 workers. Set and
+forget.
+
+- [ ] Both libraries created with the values above
+- [ ] Flow `H264-1080p-IT-multi-audio` saved with 5 nodes
+- [ ] Flow bound to both libraries
+- [ ] Workers configured
+- [ ] First scan running, queue populated
 
 ---
 
 ## 8. Validation
 
-Hit each surface and tick:
+This validation is exhaustive on purpose: hit every surface and verify
+that nothing requires manual reconfiguration.
 
-- [ ] `https://media.${DOMAIN}` — Jellyfin loads, login works, library browsable, a TV episode plays in direct-play
-- [ ] `https://seerr.${DOMAIN}` — Seerr opens, requests page populated
-- [ ] `https://homarr.${DOMAIN}` — dashboard loads, integrations green (qBit on `http://gluetun:8080`)
-- [ ] `https://sonarr.${DOMAIN}` — series visible, indexers green, qBit download client = `gluetun:8080` connecting
-- [ ] `https://radarr.${DOMAIN}` — same checks
-- [ ] `https://prowlarr.${DOMAIN}` — Apps tab green for Sonarr/Radarr; Indexer Proxies still pointing to `100.64.0.3` (Mac); Test on a couple of indexers
-- [ ] `https://bazarr.${DOMAIN}` — connections to Sonarr/Radarr green
-- [ ] `https://qbit.${DOMAIN}` — login works, port-manager sidecar log shows the forwarded port being applied
+### 8.1 Reachability + auth (each web UI)
+
+- [ ] `https://media.${DOMAIN}` — Jellyfin loads, **existing admin login works** (no first-run wizard), library browsable, a TV episode plays in direct-play
+- [ ] `https://seerr.${DOMAIN}` — Seerr opens, request history visible
+- [ ] `https://homarr.${DOMAIN}` — dashboard loads, all integration tiles green (qBit, Sonarr, Radarr, Prowlarr, Jellyfin)
+- [ ] `https://sonarr.${DOMAIN}` — series visible, login works (Forms auth)
+- [ ] `https://radarr.${DOMAIN}` — same
+- [ ] `https://prowlarr.${DOMAIN}` — same
+- [ ] `https://bazarr.${DOMAIN}` — same; Sonarr/Radarr connection status green
+- [ ] `https://qbit.${DOMAIN}` — login with `admin` + permanent password works
 - [ ] `https://tdarr.${DOMAIN}` — webUI accessible, internal node `tdarr-cloud01` reports as Online
+- [ ] `https://headscale.${DOMAIN}/key` — returns "capability version must be set" (proves reachable)
+
+### 8.2 Network plumbing
+
 - [ ] **VPN sanity** (no leak):
   ```sh
   ssh ${USERNAME}@${NEW_IP} 'docker exec gluetun wget -qO- https://ipinfo.io/ip'
   ssh ${USERNAME}@${NEW_IP} 'docker exec qbittorrent wget -qO- https://ipinfo.io/ip'
   # Both must return the same Proton IP, NOT ${NEW_IP}
   ```
+- [ ] **qBit forwarded port aligned**:
+  ```sh
+  ssh ${USERNAME}@${NEW_IP} 'docker exec gluetun cat /gluetun/forwarded_port'
+  ssh ${USERNAME}@${NEW_IP} 'docker logs --tail 20 qb-port-manager 2>&1 | grep -i "set listen"'
+  # Numbers should match within 60s
+  ```
 - [ ] **Tailnet sanity**:
   ```sh
   ssh ${USERNAME}@${NEW_IP} 'sudo tailscale status'
-  # Should show cloud01 + macbookairdilorenzo (100.64.0.3) both online
+  # Should list: cloud01 + macbookairdilorenzo (100.64.0.3), both online
   ```
-- [ ] Trigger one Sonarr search → confirm a download starts → confirm
-      file moves to `/data/media/tv/...` → confirm Tdarr picks it up.
+- [ ] **Home proxy reachable from cloud01**:
+  ```sh
+  ssh ${USERNAME}@${NEW_IP} 'curl -s -x http://100.64.0.3:8888 https://api.ipify.org'
+  # Returns home residential IP, NOT cloud01 public IP
+  ssh ${USERNAME}@${NEW_IP} 'curl -s http://100.64.0.3:8191/'
+  # Returns {"msg": "FlareSolverr is ready!", ...}
+  ```
 
-If anything is red, see the **Rollback** section.
+### 8.3 Servarr state preserved
+
+- [ ] **Sonarr/Radarr Custom Formats**: Settings → Custom Formats → confirm 4 entries each (`x264 / H.264`, `Italian`, `Multi (incl. IT)`, `Multi ITA + Original`)
+- [ ] **Sonarr/Radarr Quality Profiles**: Settings → Profiles → confirm 4 entries each (`HD Italian Pref`, `HD Original Pref`, `HD Multi Strict`, `HD Generic`); spot-check `HD Generic` scores: Italian=-300, Multi+Original=1000, x264=500
+- [ ] **2160p disabled**: open any quality profile → 2160p tier rows are unchecked
+- [ ] **Prowlarr Indexer Proxies**: Settings → Indexers → Indexer Proxies → confirm 2 entries (`FlareSolverr` host=`http://100.64.0.3:8191`, `home-mac` host=`100.64.0.3` port=8888)
+- [ ] **Prowlarr Apps**: Settings → Apps → Sonarr + Radarr connected, Test green for both
+- [ ] **Bazarr providers**: Settings → Providers → only `tvsubtitles` + `yifysubtitles` enabled (OpenSubtitles.com configured but not active)
+- [ ] **Bazarr Language Profile 1 "IT + EN"**: Settings → Languages → profile exists, default for series + movies
+- [ ] **Sonarr download client**: Settings → Download Clients → qBittorrent host=`gluetun` port=`8080` → Test green
+- [ ] **Radarr download client**: same shape, host=`gluetun`
+- [ ] **Sonarr root folder**: `/data/media/tv` (or wherever your existing series are)
+- [ ] **Radarr root folder**: `/data/media/movies`
+
+### 8.4 Jellyfin specifics
+
+- [ ] **Open Subtitles plugin loaded**: Dashboard → My Plugins → "Open Subtitles" listed, status: Active
+- [ ] **Open Subtitles credentials still set**: Plugin settings show username/API key (rsync preserved them)
+- [ ] **Library subtitle providers**: each library → Subtitle Downloads → "Open Subtitles" checked, languages = Italian + English
+- [ ] **Per-user audio/subtitle preferences**: Dashboard → Users → click each user → Display tab → preferences match what you set before
+- [ ] **In-player on-demand subtitle search**: open a video → CC icon → "Search Subtitles" → returns results
+
+### 8.5 End-to-end flow test
+
+- [ ] Trigger Sonarr "Search all monitored" on one episode → confirm an indexer returns results → confirm a download starts → file lands in `/data/torrents/tv/` and Sonarr imports it to `/data/media/tv/...`
+- [ ] Bazarr automatically picks up new file → IT subtitle attached within 5 min (visible in Bazarr → Series → that show → Subtitles tab)
+- [ ] Tdarr picks up the same file from `/media/tv/` → flow runs → file replaced with H.264 multi-audio version (compare `ffprobe` before/after if curious)
+- [ ] Jellyfin shows the new episode in the Recently Added row → playback works direct-play
+
+### 8.6 Recurrent jobs
+
+- [ ] Caddy cert auto-renewal scheduled (default 30 days before expiry):
+  ```sh
+  ssh ${USERNAME}@${NEW_IP} 'docker logs caddy 2>&1 | grep -i "renewal"'
+  ```
+- [ ] Sonarr/Radarr/Bazarr scheduled tasks visible in their respective UIs at System → Tasks
+- [ ] Prowlarr indexer health checks running
+
+If anything in 8.1-8.6 is red, see **Rollback** section.
 
 ---
 
