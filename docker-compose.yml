@@ -270,7 +270,7 @@ services:
       - webUIPort=8265
       - internalNode=true
       - inContainer=true
-      - nodeName=tdarr-cloud01
+      - nodeName=tdarr-server01
       - ffmpegVersion=7
     volumes:
       - ./config/tdarr/server:/app/server
