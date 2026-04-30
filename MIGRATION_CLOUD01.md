@@ -151,25 +151,16 @@ persistent in the configs that rsync — listed here so you don't worry they
   - Reset password → store as `STORAGEBOX_PASSWORD` (ASCII only)
   - Note the user (`u…`) and host (`u….your-storagebox.de`) → fill
     `STORAGEBOX_USER` and `STORAGEBOX_HOST`
-- [ ] **Pre-sync media FSN1 → HEL1** (runs from old VPS, no impact on
-      Jellyfin reads since this just reads the same files we serve):
+- [ ] **Create directory structure on the new box** (the bulk media
+      pre-sync was originally planned here but is no longer needed: the
+      user removed all series before the migration, library starts empty
+      on `cloud01`):
   ```sh
-  # Install lftp on old VPS if missing — supports parallel SFTP transfer.
-  ssh ${USERNAME}@${OLD_IP} 'sudo apt install -y lftp rsync'
-
-  # Sync media tree old box → new box. The old box mounts at
-  # /mnt/storagebox; we use SSH/rsync into the new box.
-  ssh ${USERNAME}@${OLD_IP} bash -s <<EOF
-    set -euo pipefail
-    sshpass -p '${STORAGEBOX_PASSWORD}' \
-      rsync -avh --partial --info=progress2 \
-        -e 'ssh -p 23 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' \
-        /mnt/storagebox/data/ ${STORAGEBOX_USER}@${STORAGEBOX_HOST}:./data/
-  EOF
+  sshpass -p "${STORAGEBOX_PASSWORD}" \
+    ssh -p 23 -o StrictHostKeyChecking=accept-new \
+    ${STORAGEBOX_USER}@${STORAGEBOX_HOST} \
+    'mkdir -p data/media/tv data/media/movies data/torrents/tv data/torrents/movies'
   ```
-  ~100 GB cross-DC at ~30-100 Mbps Hetzner peering = **~30-90 min**. Can
-  run in `screen` / `tmux`. Re-runs are idempotent (rsync resumes); we'll
-  do a final delta sync just before cutover.
 
 ### 1.3 Headscale + qB pre-stop
 
@@ -396,7 +387,7 @@ ssh ${USERNAME}@${NEW_IP} 'sudo mkdir -p /var/lib/tdarr-cache && sudo chown 1000
 
 ## 4. Migrate config from old → new
 
-### 4.1 Final stop of the old stack + media delta-sync
+### 4.1 Final stop of the old stack
 
 ```sh
 ssh ${USERNAME}@${OLD_IP} 'cd /opt/servarr && docker compose down'
@@ -407,20 +398,8 @@ target ~25 minutes.
 
 - [ ] All containers down on `vps-jellyfin`
 
-**Media delta-sync** — replays whatever new files Sonarr/Radarr imported
-since the Phase 1.2 bulk sync. Should be a few hundred MB at most:
-
-```sh
-ssh ${USERNAME}@${OLD_IP} bash -s <<EOF
-  set -euo pipefail
-  sshpass -p '${STORAGEBOX_PASSWORD}' \
-    rsync -avh --partial --delete --info=progress2 \
-      -e 'ssh -p 23 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null' \
-      /mnt/storagebox/data/ ${STORAGEBOX_USER}@${STORAGEBOX_HOST}:./data/
-EOF
-```
-
-- [ ] Delta sync completes (typically <2 min if Phase 1.2 was recent)
+(No media delta-sync needed — library was emptied pre-migration, the new
+HEL1 Storage Box only has empty `data/{media,torrents}/{tv,movies}` dirs.)
 
 ### 4.2 Rsync `/opt/servarr/` to `cloud01`
 
