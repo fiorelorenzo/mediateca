@@ -291,9 +291,9 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         return
     if source.suffix.lower() not in VIDEO_EXTS:
         return
-    # Ignore segments and playlists inside an existing HLS bundle. .parts
-    # holds full path components, e.g. "Foo (2024).hls" — we match the
-    # ".hls" suffix on each component.
+    # Ignore segments and playlists inside an existing HLS bundle.
+    # Bundle dir is named ".{stem}.hls" so any path component ending in
+    # ".hls" (regardless of leading dot) is part of one.
     if any(p.endswith(".hls") for p in source.parts):
         return
     if source.name.endswith(".strm"):
@@ -338,8 +338,11 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
             if not pl.exists() or pl.stat().st_size == 0:
                 raise RuntimeError(f"variant {variant_dir} playlist empty")
 
-        # Atomic move into final location next to source.
-        target_dir = source.with_suffix(".hls")
+        # Atomic move into final location next to source. The bundle dir
+        # name is prefixed with "." so Jellyfin's library scanner ignores
+        # it (Jellyfin skips dotted hidden paths). Caddy still serves it
+        # as a regular path under hls.${DOMAIN}.
+        target_dir = source.parent / f".{source.stem}.hls"
         if target_dir.exists():
             shutil.rmtree(target_dir)
         # Use a rename within the same volume if possible; cache and storagebox
@@ -352,7 +355,8 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
 
         # Write .strm
         strm = source.with_suffix(".strm")
-        url = f"{CDN_BASE}/{urllib.parse.quote(str(rel.with_suffix('.hls')))}/master.m3u8"
+        rel_hls = rel.parent / f".{source.stem}.hls"
+        url = f"{CDN_BASE}/{urllib.parse.quote(str(rel_hls))}/master.m3u8"
         strm.write_text(url + "\n")
         log.info("strm written: %s -> %s", strm, url)
 
