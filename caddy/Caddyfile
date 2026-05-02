@@ -50,6 +50,17 @@ headscale.{$DOMAIN} {
     reverse_proxy headscale:8080
 }
 
-tdarr.{$DOMAIN} {
-    reverse_proxy tdarr:8265
+hls.{$DOMAIN} {
+    # Public HLS CDN: serves segments + playlists from the Storage Box
+    # mounted read-only at /srv/hls in the Caddy container. CORS is open
+    # so HLS.js (browser Jellyfin) can fetch cross-origin if a future
+    # client lives on a different host.
+    header {
+        Cache-Control "public, max-age=86400, immutable"
+        Access-Control-Allow-Origin "*"
+    }
+    encode gzip
+    file_server {
+        root /srv/hls
+    }
 }

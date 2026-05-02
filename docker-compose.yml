@@ -37,6 +37,9 @@ services:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./caddy/data:/data
       - ./caddy/config:/config
+      # Storage Box media tree exposed read-only to serve HLS segments
+      # at hls.${DOMAIN}. Encoder writes here; Caddy only reads.
+      - /mnt/storagebox/data/media:/srv/hls:ro
     environment:
       - DOMAIN=${DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
@@ -246,39 +249,40 @@ services:
       - servarr
 
   # =========================================
-  # Tdarr — asynchronous transcoding pipeline.
-  # Re-encodes new imports to H.264 1080p + AAC stereo, keeping all
-  # original audio tracks. Quality profiles cap at 1080p so Tdarr never
-  # sees 4K. Encode happens on local NVMe (/temp); final result is
-  # written back to the Storage Box via Tdarr's "Replace Original File"
-  # plugin (atomic rename — file remains readable to Jellyfin during
-  # encode, unavailable for ~1-2 s during the swap).
-  # 4c/8t Xeon → 2 parallel FFmpeg workers without saturating the host.
+  # hls-encoder — custom Python service that watches /data/media for
+  # new video files dropped in by Sonarr/Radarr, encodes a 3-variant
+  # H.264 ABR ladder + per-track AAC audio renditions as HLS, writes
+  # a .strm pointing to the public CDN URL, and deletes the source.
+  # See HLS_ABR_DESIGN.md for design + ./hls-encoder/ for the code.
+  # 4c/8t Xeon → 2 parallel FFmpeg workers (single-pass 3-variant encode
+  # already saturates ~6 threads, leaves headroom for everything else).
   # =========================================
-  tdarr:
-    image: ghcr.io/haveagitgat/tdarr:latest
-    container_name: tdarr
+  hls-encoder:
+    build:
+      context: ./hls-encoder
+    image: hls-encoder:local
+    container_name: hls-encoder
     restart: unless-stopped
     cpus: 4.0
     mem_limit: 12g
     environment:
       - TZ=Europe/Rome
-      - PUID=${PUID}
-      - PGID=${PGID}
-      - serverIP=0.0.0.0
-      - serverPort=8266
-      - webUIPort=8265
-      - internalNode=true
-      - inContainer=true
-      - nodeName=tdarr-server01
-      - ffmpegVersion=7
+      - DATA_ROOT=/data
+      - CACHE_ROOT=/cache
+      - STATE_DB=/config/state.db
+      - HLS_CDN_BASE=https://hls.${DOMAIN}
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - WORKERS=2
+      - LOG_LEVEL=INFO
     volumes:
-      - ./config/tdarr/server:/app/server
-      - ./config/tdarr/configs:/app/configs
-      - ./config/tdarr/logs:/app/logs
-      - /mnt/storagebox/data/media:/media
-      # Encode cache on the local NVMe RAID 1, NOT on the Storage Box:
-      # SMB roundtrip per write would tank libx264 throughput.
-      - /var/lib/tdarr-cache:/temp
+      - /mnt/storagebox/data:/data
+      # Encode scratch on local NVMe RAID 1 (~480 GB usable). SMB roundtrip
+      # per write would tank libx264 throughput. Final HLS bundle is moved
+      # to /data at the end. Reused dir name from the previous Tdarr setup.
+      - /var/lib/hls-cache:/cache
+      - ./config/hls-encoder:/config
     networks:
       - servarr
