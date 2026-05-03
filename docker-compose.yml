@@ -277,8 +277,12 @@ services:
       - RADARR_API_KEY=${RADARR_API_KEY}
       # CPU tuning — see hls-encoder/README.md "Tuning rule of thumb".
       # WORKERS * THREADS should be ≤ the cpus: limit above (4.0).
-      - WORKERS=1
-      - THREADS=4
+      # 2 workers × 2 threads = 4 total: best for batch throughput when
+      # multiple imports land at once (Sonarr/Radarr finishing several
+      # downloads concurrently). preset=fast in encoder.py already cuts
+      # per-job CPU cost so 2 concurrent ffmpegs stay within budget.
+      - WORKERS=2
+      - THREADS=2
       - NICE_LEVEL=10
       - MAX_LOAD_AVG_1M=0
       - LOG_LEVEL=INFO

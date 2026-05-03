@@ -159,11 +159,14 @@ def build_ffmpeg_cmd(source: Path, audio_streams: list[dict], out_dir: Path) -> 
         "[v480tmp]scale=-2:480[v480]",
     ]
 
-    # Three video outputs
+    # Three video outputs. preset=fast across the ladder: ~1.5-2× faster
+    # than medium, files marginally larger (5-10%) at same target bitrate.
+    # The bitrate caps below already constrain output size, so the speed
+    # win comes "free" on storage.
     video_specs = [
-        ("[v1080]", "high", "4.0", "medium", "5000k", "5500k", "10000k"),
-        ("[v720]",  "main", "4.0", "medium", "2500k", "2750k", "5000k"),
-        ("[v480]",  "main", "3.1", "fast",   "1000k", "1100k", "2000k"),
+        ("[v1080]", "high", "4.0", "fast", "5000k", "5500k", "10000k"),
+        ("[v720]",  "main", "4.0", "fast", "2500k", "2750k", "5000k"),
+        ("[v480]",  "main", "3.1", "fast", "1000k", "1100k", "2000k"),
     ]
     for i, (label, profile, level, preset, br, maxr, bufs) in enumerate(video_specs):
         cmd += [
