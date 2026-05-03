@@ -275,7 +275,12 @@ services:
       - SONARR_API_KEY=${SONARR_API_KEY}
       - RADARR_URL=http://radarr:7878
       - RADARR_API_KEY=${RADARR_API_KEY}
-      - WORKERS=2
+      # CPU tuning — see hls-encoder/README.md "Tuning rule of thumb".
+      # WORKERS * THREADS should be ≤ the cpus: limit above (4.0).
+      - WORKERS=1
+      - THREADS=4
+      - NICE_LEVEL=10
+      - MAX_LOAD_AVG_1M=0
       - LOG_LEVEL=INFO
     volumes:
       - /mnt/storagebox/data:/data

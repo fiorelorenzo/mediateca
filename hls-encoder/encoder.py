@@ -51,10 +51,23 @@ SONARR_KEY = os.environ.get("SONARR_API_KEY", "")
 RADARR_URL = os.environ.get("RADARR_URL", "").rstrip("/")
 RADARR_KEY = os.environ.get("RADARR_API_KEY", "")
 
-WORKERS = int(os.environ.get("WORKERS", "2"))
+WORKERS = int(os.environ.get("WORKERS", "1"))
+# Per-ffmpeg thread cap. With cpus: 4.0 in compose, libx264 spawning its
+# default ~12 threads against a 4-CPU cgroup quota just thrashes. Bounding
+# at 4 keeps the scheduler honest and produces marginally faster wall-clock
+# than the unbounded default.
+THREADS = int(os.environ.get("THREADS", "4"))
+# Renice ffmpeg so any Jellyfin live-transcode (rare with our HLS pipeline,
+# but possible for non-HLS content) gets priority on the same host.
+NICE_LEVEL = int(os.environ.get("NICE_LEVEL", "10"))
+# Optional load-average gate. 0.0 = disabled. If > 0, the watcher refuses
+# to enqueue new files while 1-minute load exceeds the threshold.
+MAX_LOAD_AVG_1M = float(os.environ.get("MAX_LOAD_AVG_1M", "0"))
 RETRY_LIMIT = int(os.environ.get("RETRY_LIMIT", "3"))
 SETTLE_SECONDS = int(os.environ.get("SETTLE_SECONDS", "30"))
 POLL_INTERVAL = int(os.environ.get("POLL_INTERVAL", "30"))
+STATUS_PATH = Path(os.environ.get("STATUS_PATH", "/config/status.json"))
+STATUS_INTERVAL = int(os.environ.get("STATUS_INTERVAL", "10"))
 
 VIDEO_EXTS = {".mkv", ".mp4", ".m4v", ".ts", ".mov", ".avi"}
 
@@ -135,8 +148,10 @@ def build_ffmpeg_cmd(source: Path, audio_streams: list[dict], out_dir: Path) -> 
     out_dir.mkdir(parents=True, exist_ok=True)
 
     cmd: list[str] = [
+        "nice", "-n", str(NICE_LEVEL),
         "ffmpeg", "-hide_banner", "-loglevel", "warning",
-        "-y",
+        "-stats", "-y",
+        "-threads", str(THREADS),
         "-i", str(source),
         "-filter_complex",
         "[0:v]split=3[v1080][v720tmp][v480tmp];"
@@ -328,7 +343,41 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         cache_dir = CACHE_ROOT / f"job_{int(time.time())}_{os.getpid()}"
         cmd = build_ffmpeg_cmd(source, audios, cache_dir)
         log.debug("ffmpeg: %s", " ".join(cmd))
-        subprocess.run(cmd, check=True, timeout=4 * 3600)
+        t0 = time.time()
+        # ffmpeg writes -stats progress lines to stderr, so we tee them
+        # through to our own log at INFO-level for visibility.
+        proc = subprocess.Popen(
+            cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+            text=True, bufsize=1,
+        )
+        last_progress_log = 0.0
+        for line in proc.stderr:
+            line = line.rstrip()
+            if not line:
+                continue
+            # Throttle progress lines to once every 10s; let warnings through.
+            if line.startswith("frame=") or line.startswith("size="):
+                now = time.time()
+                if now - last_progress_log >= 10:
+                    log.info("ffmpeg %s: %s", rel_str, line)
+                    last_progress_log = now
+            else:
+                log.info("ffmpeg %s: %s", rel_str, line)
+        proc.wait(timeout=4 * 3600)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg exited {proc.returncode}")
+        encode_seconds = time.time() - t0
+        try:
+            duration = float(meta.get("format", {}).get("duration", 0))
+        except (TypeError, ValueError):
+            duration = 0
+        if duration > 0:
+            log.info(
+                "encode complete: %s — %.1fs source in %.1fs wall (%.2fx realtime)",
+                rel_str, duration, encode_seconds, duration / encode_seconds,
+            )
+        else:
+            log.info("encode complete: %s — %.1fs wall", rel_str, encode_seconds)
 
         master = cache_dir / "master.m3u8"
         if not master.exists():
@@ -430,6 +479,11 @@ def worker_loop(conn: sqlite3.Connection, q: queue.Queue) -> None:
     while True:
         path = q.get()
         try:
+            # If a load gate is active and we've crossed the threshold,
+            # requeue and back off rather than piling on.
+            while load_gate_blocked():
+                log.info("load gate active (load1m > %.2f); pausing 60s", MAX_LOAD_AVG_1M)
+                time.sleep(60)
             process(conn, path)
         finally:
             q.task_done()
@@ -450,6 +504,48 @@ def initial_scan(conn: sqlite3.Connection, q: queue.Queue) -> None:
         q.put(p)
 
 
+def load_gate_blocked() -> bool:
+    """True if MAX_LOAD_AVG_1M is set and host load exceeds it."""
+    if MAX_LOAD_AVG_1M <= 0:
+        return False
+    try:
+        load1, _, _ = os.getloadavg()
+    except OSError:
+        return False
+    return load1 > MAX_LOAD_AVG_1M
+
+
+def status_writer(conn: sqlite3.Connection, q: queue.Queue) -> None:
+    """Periodically dump a JSON snapshot of queue + DB state."""
+    while True:
+        try:
+            counts = dict(
+                conn.execute(
+                    "SELECT status, COUNT(*) FROM jobs GROUP BY status"
+                ).fetchall()
+            )
+            try:
+                load1, load5, load15 = os.getloadavg()
+            except OSError:
+                load1 = load5 = load15 = -1.0
+            payload = {
+                "ts": int(time.time()),
+                "queue_pending": q.qsize(),
+                "workers": WORKERS,
+                "threads_per_job": THREADS,
+                "nice": NICE_LEVEL,
+                "load_avg": {"1m": load1, "5m": load5, "15m": load15},
+                "load_gate": MAX_LOAD_AVG_1M,
+                "load_gate_blocking": load_gate_blocked(),
+                "jobs_by_status": counts,
+            }
+            STATUS_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATUS_PATH.write_text(json.dumps(payload, indent=2))
+        except Exception as exc:
+            log.warning("status writer error: %s", exc)
+        time.sleep(STATUS_INTERVAL)
+
+
 def main() -> int:
     log.info("hls-encoder starting; data=%s cache=%s", MEDIA_ROOT, CACHE_ROOT)
     if not MEDIA_ROOT.exists():
@@ -466,13 +562,17 @@ def main() -> int:
     for i in range(WORKERS):
         threading.Thread(target=worker_loop, args=(conn, q), daemon=True, name=f"worker-{i}").start()
 
+    # Start status writer
+    threading.Thread(target=status_writer, args=(conn, q), daemon=True, name="status").start()
+
     # Start watcher (polling — see import note for why)
     handler = NewFileHandler(q)
     obs = Observer(timeout=POLL_INTERVAL)
     obs.schedule(handler, str(MEDIA_ROOT), recursive=True)
     obs.start()
     log.info(
-        "watching %s with %d worker(s), poll=%ds", MEDIA_ROOT, WORKERS, POLL_INTERVAL,
+        "watching %s; workers=%d threads/job=%d nice=%d poll=%ds load_gate=%.2f",
+        MEDIA_ROOT, WORKERS, THREADS, NICE_LEVEL, POLL_INTERVAL, MAX_LOAD_AVG_1M,
     )
 
     try:
