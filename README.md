@@ -25,7 +25,7 @@ zero live transcoding.
 | `sonarr.<DOMAIN>` | Sonarr | TV automation (1080p cap, no auto-upgrades) |
 | `radarr.<DOMAIN>` | Radarr | movie automation (1080p cap, no auto-upgrades) |
 | `prowlarr.<DOMAIN>` | Prowlarr | indexer manager |
-| `bazarr.<DOMAIN>` | Bazarr | subtitles (idle — Jellyfin's Open Subtitles plugin handles on-demand) |
+| `bazarr.<DOMAIN>` | Bazarr | automatic subtitle downloads (Sonarr/Radarr signalR-triggered, drops `.srt` sidecars). Jellyfin's Open Subtitles plugin still handles in-player CC → "Search Subtitles" on-demand queries. |
 | `qbit.<DOMAIN>` | qBittorrent | torrent client (via ProtonVPN, stop-seed-on-completion) |
 | `headscale.<DOMAIN>` | [Headscale](https://github.com/juanfont/headscale) | self-hosted Tailscale coordination server |
 | `hls.<DOMAIN>` | static file server | public read-only CDN for HLS segments + master playlists |
@@ -323,11 +323,25 @@ Add public indexers from Indexers → Add. Tag CF-protected trackers with
 Then Settings → Apps → connect Sonarr (`http://sonarr:8989`) and Radarr
 (`http://radarr:7878`) using their API keys. Indexers sync automatically.
 
-**5. Bazarr** — installed but **automatic mode disabled** by default. The
-Open Subtitles Jellyfin plugin handles on-demand subtitle search through
-the player's CC menu, which gives better results without burning the
-free-tier quota on automatic crawls. If you want Bazarr automatic anyway,
-re-enable providers in `config/bazarr/config/config.yaml`.
+**5. Bazarr** — automatic subtitle downloads enabled. Settings → Sonarr
+(host `sonarr`, port `8989`, API key from `config/sonarr/config.xml`)
+and Radarr (`radarr`/`7878`). The default setup enables 4 providers:
+`opensubtitlescom`, `yifysubtitles`, `tvsubtitles`, `podnapisi`. The
+`opensubtitlescom` provider needs a free or VIP account (credentials
+in `config/bazarr/config/config.yaml` under `opensubtitlescom`); the
+other three are no-auth. Language profile 1 ("IT + EN") is bound as
+default for both series and movies, score thresholds 90/70.
+
+For in-player on-demand subtitle search (CC menu → Search Subtitles),
+Jellyfin's Open Subtitles plugin keeps working independently. To stop
+Jellyfin from also doing its own automatic crawl on top of Bazarr,
+clear the triggers on its scheduled task:
+
+```sh
+JF_TASK=2c66a88bca43e565d7f8099f825478f1   # "Scarica i sottotitoli mancanti"
+curl -sS -X POST "https://media.<DOMAIN>/ScheduledTasks/$JF_TASK/Triggers?api_key=<JF_KEY>" \
+  -H 'Content-Type: application/json' -d '[]'
+```
 
 **6. Seerr** (`https://streaming.<DOMAIN>`) — wizard chooses Jellyfin
 backend → `http://jellyfin:8096` + admin login. Then Settings → Sonarr
