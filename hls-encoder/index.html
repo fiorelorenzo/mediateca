@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HLS Encoder</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #1a1b1e;
+    --panel: #25262b;
+    --border: #373a40;
+    --fg: #c1c2c5;
+    --dim: #909296;
+    --ok: #51cf66;
+    --warn: #ffd43b;
+    --err: #ff6b6b;
+  }
+  body {
+    margin: 0;
+    padding: 12px;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  h1 {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 0 0 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .age { font-size: 11px; color: var(--dim); font-weight: normal; }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+  }
+  .stat {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 8px 10px;
+  }
+  .label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
+  .value { font-size: 18px; font-weight: 600; margin-top: 2px; }
+  .value.ok { color: var(--ok); }
+  .value.warn { color: var(--warn); }
+  .value.err { color: var(--err); }
+  .row {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 1px;
+  }
+  .row .label { font-size: 11px; text-transform: none; letter-spacing: 0; }
+  .footer {
+    margin-top: 10px;
+    font-size: 10px;
+    color: var(--dim);
+    text-align: center;
+  }
+  .err-row { color: var(--err); }
+</style>
+</head>
+<body>
+<h1>HLS Encoder<span class="age" id="age">…</span></h1>
+<div class="grid">
+  <div class="stat">
+    <div class="label">Coda</div>
+    <div class="value" id="pending">—</div>
+  </div>
+  <div class="stat">
+    <div class="label">Workers</div>
+    <div class="value" id="workers">—</div>
+  </div>
+  <div class="stat">
+    <div class="label">Done</div>
+    <div class="value ok" id="done">0</div>
+  </div>
+  <div class="stat">
+    <div class="label">Failed</div>
+    <div class="value err" id="failed">0</div>
+  </div>
+</div>
+<div class="stat" style="margin-top:8px">
+  <div class="label">Load average</div>
+  <div class="row"><span class="label">1m</span><span id="load1">—</span></div>
+  <div class="row"><span class="label">5m</span><span id="load5">—</span></div>
+  <div class="row"><span class="label">15m</span><span id="load15">—</span></div>
+</div>
+<div class="stat" style="margin-top:8px">
+  <div class="label">Config</div>
+  <div class="row"><span class="label">Threads/job</span><span id="threads">—</span></div>
+  <div class="row"><span class="label">Nice</span><span id="nice">—</span></div>
+  <div class="row"><span class="label">Load gate</span><span id="gate">—</span></div>
+</div>
+<div class="footer" id="footer">last poll never</div>
+<script>
+const fmt = (n) => typeof n === "number" ? n.toFixed(2) : "—";
+async function tick() {
+  try {
+    const r = await fetch("/status.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const s = await r.json();
+    const age = Math.max(0, Math.floor(Date.now() / 1000) - s.ts);
+    document.getElementById("age").textContent = age + "s ago";
+    document.getElementById("pending").textContent = s.queue_pending ?? 0;
+    document.getElementById("workers").textContent = s.workers ?? "—";
+    document.getElementById("done").textContent = s.jobs_by_status?.done ?? 0;
+    document.getElementById("failed").textContent = s.jobs_by_status?.failed ?? 0;
+    document.getElementById("load1").textContent = fmt(s.load_avg?.["1m"]);
+    document.getElementById("load5").textContent = fmt(s.load_avg?.["5m"]);
+    document.getElementById("load15").textContent = fmt(s.load_avg?.["15m"]);
+    document.getElementById("threads").textContent = s.threads_per_job ?? "—";
+    document.getElementById("nice").textContent = s.nice ?? "—";
+    document.getElementById("gate").textContent =
+      s.load_gate > 0
+        ? (s.load_gate_blocking ? "BLOCKING" : "OK > " + s.load_gate)
+        : "off";
+    document.getElementById("footer").textContent =
+      "polled " + new Date().toLocaleTimeString();
+  } catch (e) {
+    document.getElementById("footer").textContent = "error: " + e.message;
+    document.getElementById("footer").classList.add("err-row");
+  }
+}
+tick();
+setInterval(tick, 10000);
+</script>
+</body>
+</html>
