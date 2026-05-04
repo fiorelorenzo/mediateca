@@ -7,169 +7,348 @@
 <style>
   :root {
     color-scheme: dark;
-    --bg: #1a1b1e;
-    --panel: #25262b;
-    --panel-2: #2c2e33;
-    --border: #373a40;
-    --fg: #c1c2c5;
-    --dim: #909296;
-    --ok: #51cf66;
-    --warn: #ffd43b;
-    --err: #ff6b6b;
-    --accent: #4dabf7;
+    --bg: #0f1115;
+    --bg-elev: #161922;
+    --panel: #1c2030;
+    --panel-2: #232839;
+    --border: rgba(255,255,255,0.06);
+    --border-strong: rgba(255,255,255,0.12);
+    --fg: #e6e9ef;
+    --fg-mute: #aab1c0;
+    --dim: #6c7387;
+    --accent: #6aa9ff;
+    --accent-glow: rgba(106,169,255,0.18);
+    --ok: #4ade80;
+    --warn: #f7c94b;
+    --err: #f87171;
+    --copy: #22d3ee;
+    --shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.25);
   }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
   body {
     margin: 0;
-    padding: 12px;
-    background: var(--bg);
+    padding: 16px;
+    background:
+      radial-gradient(1200px 600px at 100% -10%, rgba(106,169,255,0.06), transparent 60%),
+      radial-gradient(1000px 500px at -10% 110%, rgba(34,211,238,0.05), transparent 60%),
+      var(--bg);
     color: var(--fg);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+    font-feature-settings: "tnum", "ss01", "cv11";
     font-size: 13px;
-    line-height: 1.4;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  h1 {
-    font-size: 14px;
-    font-weight: 600;
-    margin: 0 0 12px;
+  .card {
+    background: linear-gradient(180deg, var(--panel), var(--panel-2));
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    box-shadow: var(--shadow);
+  }
+  header {
     display: flex;
     align-items: center;
     justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .brand-mark {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--accent), var(--copy));
+    display: grid; place-items: center;
+    color: #0a0d12;
+    font-weight: 700;
+    font-size: 13px;
+    box-shadow: 0 4px 14px var(--accent-glow);
+  }
+  .title { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+  .subtitle { font-size: 11px; color: var(--dim); }
+  .status-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    font-size: 11px;
+    color: var(--fg-mute);
+  }
+  .pulse {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--ok);
+    box-shadow: 0 0 0 0 rgba(74,222,128,0.7);
+    animation: pulse 1.8s infinite;
+  }
+  .pulse.idle { background: var(--dim); animation: none; }
+  .pulse.err { background: var(--err); animation: pulse-err 1s infinite; }
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.6); }
+    70%  { box-shadow: 0 0 0 8px rgba(74,222,128,0); }
+    100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+  }
+  @keyframes pulse-err {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
   h2 {
     font-size: 11px;
+    font-weight: 600;
     color: var(--dim);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin: 14px 0 6px;
+    letter-spacing: 0.1em;
+    margin: 18px 0 8px;
+    display: flex; align-items: center; gap: 8px;
   }
-  .age { font-size: 11px; color: var(--dim); font-weight: normal; }
-  .grid {
+  h2 .count {
+    color: var(--fg-mute);
+    background: var(--bg-elev);
+    padding: 1px 7px;
+    border-radius: 999px;
+    font-size: 10px;
+    letter-spacing: 0.04em;
+  }
+  .stats-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(4, 1fr);
     gap: 8px;
   }
   .stat {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 8px 10px;
+    padding: 10px 12px;
+    position: relative;
   }
-  .label { font-size: 10px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.06em; }
-  .value { font-size: 18px; font-weight: 600; margin-top: 2px; }
-  .value.ok { color: var(--ok); }
-  .value.warn { color: var(--warn); }
-  .value.err { color: var(--err); }
+  .stat .label {
+    font-size: 10px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .stat .value {
+    font-size: 22px;
+    font-weight: 600;
+    margin-top: 4px;
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .stat .value.ok { color: var(--ok); }
+  .stat .value.err { color: var(--err); }
+  .stat .icon {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    color: var(--dim);
+    opacity: 0.6;
+  }
+  .panel {
+    padding: 10px 12px;
+  }
   .row {
     display: flex;
     justify-content: space-between;
-    margin-top: 1px;
-  }
-  .row .label { font-size: 11px; text-transform: none; letter-spacing: 0; }
-  .footer {
-    margin-top: 12px;
-    font-size: 10px;
-    color: var(--dim);
-    text-align: center;
-  }
-  .err-row { color: var(--err); }
-  .active, .history-item {
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin-top: 6px;
+    align-items: baseline;
+    padding: 4px 0;
     font-size: 12px;
   }
-  .active .name, .history-item .name {
-    color: var(--accent);
+  .row + .row { border-top: 1px dashed var(--border); }
+  .row .label {
+    color: var(--fg-mute);
+    font-size: 11px;
+  }
+  .row .v { color: var(--fg); font-variant-numeric: tabular-nums; }
+  .row .v.ok { color: var(--ok); }
+  .row .v.warn { color: var(--warn); }
+  .row .v.err { color: var(--err); }
+  .row .v.dim { color: var(--dim); }
+  .item {
+    padding: 10px 12px;
+    border-radius: 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    margin-top: 8px;
+  }
+  .item + .item { margin-top: 6px; }
+  .item .head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    overflow: hidden;
+  }
+  .item .name {
+    color: var(--fg);
     font-weight: 500;
     overflow-wrap: anywhere;
+    flex: 1 1 auto;
+    min-width: 0;
   }
-  .active .progress {
-    color: var(--dim);
-    font-family: ui-monospace, "SF Mono", Menlo, monospace;
-    font-size: 10px;
-    margin-top: 3px;
-    overflow-wrap: anywhere;
-  }
-  .history-item .meta {
+  .item .meta {
     color: var(--dim);
     font-size: 11px;
-    margin-top: 2px;
+    margin-top: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    overflow-wrap: anywhere;
+  }
+  .progress-bar {
+    height: 4px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .progress-bar > span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent), var(--copy));
+    transition: width 1s linear;
   }
   .badge {
-    display: inline-block;
-    padding: 1px 5px;
-    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    padding: 0 6px;
+    border-radius: 4px;
     font-size: 10px;
-    margin-right: 4px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    flex-shrink: 0;
   }
-  .badge.ok { background: rgba(81,207,102,.15); color: var(--ok); }
-  .badge.err { background: rgba(255,107,107,.15); color: var(--err); }
-  .badge.copy { background: rgba(77,171,247,.15); color: var(--accent); }
-  .empty { color: var(--dim); font-size: 11px; font-style: italic; padding: 4px 0; }
+  .badge.ok    { background: rgba(74,222,128,0.12); color: var(--ok); }
+  .badge.err   { background: rgba(248,113,113,0.12); color: var(--err); }
+  .badge.copy  { background: rgba(34,211,238,0.12); color: var(--copy); }
+  .badge.muted { background: rgba(255,255,255,0.05); color: var(--fg-mute); }
+  .empty {
+    color: var(--dim);
+    font-size: 11px;
+    font-style: italic;
+    padding: 10px 12px;
+    text-align: center;
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    margin-top: 8px;
+  }
+  footer {
+    margin-top: 18px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    color: var(--dim);
+  }
+  footer.error { color: var(--err); }
+  /* compact tweaks for narrow iframes */
+  @media (max-width: 520px) {
+    .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    .stat .value { font-size: 20px; }
+  }
 </style>
 </head>
 <body>
-<h1>HLS Encoder<span class="age" id="age">…</span></h1>
 
-<div class="grid">
-  <div class="stat">
+<header>
+  <div class="brand">
+    <div class="brand-mark">H</div>
+    <div>
+      <div class="title">HLS Encoder</div>
+      <div class="subtitle">Pipeline di codifica adattiva</div>
+    </div>
+  </div>
+  <div class="status-pill" id="status-pill">
+    <span class="pulse idle" id="pulse"></span>
+    <span id="status-text">in attesa</span>
+  </div>
+</header>
+
+<div class="stats-grid">
+  <div class="stat card">
+    <span class="icon">⏳</span>
     <div class="label">Coda</div>
     <div class="value" id="pending">—</div>
   </div>
-  <div class="stat">
+  <div class="stat card">
+    <span class="icon">⚙</span>
     <div class="label">Worker</div>
     <div class="value" id="workers">—</div>
   </div>
-  <div class="stat">
+  <div class="stat card">
+    <span class="icon">✓</span>
     <div class="label">Completati</div>
     <div class="value ok" id="done">0</div>
   </div>
-  <div class="stat">
+  <div class="stat card">
+    <span class="icon">!</span>
     <div class="label">Falliti</div>
     <div class="value err" id="failed">0</div>
   </div>
 </div>
 
-<h2>In elaborazione</h2>
-<div id="active-list"><div class="empty">nessun lavoro in corso</div></div>
+<h2>In elaborazione <span class="count" id="active-count">0</span></h2>
+<div id="active-list"></div>
 
 <h2>Sistema</h2>
-<div class="stat">
-  <div class="row"><span class="label">Carico 1m</span><span id="load1">—</span></div>
-  <div class="row"><span class="label">Carico 5m</span><span id="load5">—</span></div>
-  <div class="row"><span class="label">Carico 15m</span><span id="load15">—</span></div>
-  <div class="row"><span class="label">Cache libera</span><span id="cache">—</span></div>
-  <div class="row"><span class="label">Thread per lavoro</span><span id="threads">—</span></div>
-  <div class="row"><span class="label">Priorità (nice)</span><span id="nice">—</span></div>
-  <div class="row"><span class="label">Soglia carico</span><span id="gate">—</span></div>
+<div class="panel card">
+  <div class="row"><span class="label">Carico 1m</span><span class="v" id="load1">—</span></div>
+  <div class="row"><span class="label">Carico 5m</span><span class="v" id="load5">—</span></div>
+  <div class="row"><span class="label">Carico 15m</span><span class="v" id="load15">—</span></div>
+  <div class="row"><span class="label">Cache libera</span><span class="v" id="cache">—</span></div>
+  <div class="row"><span class="label">Thread per lavoro</span><span class="v dim" id="threads">—</span></div>
+  <div class="row"><span class="label">Priorità (nice)</span><span class="v dim" id="nice">—</span></div>
+  <div class="row"><span class="label">Soglia carico</span><span class="v dim" id="gate">—</span></div>
 </div>
 
-<h2>Storico recente</h2>
-<div id="history-list"><div class="empty">nessun lavoro recente</div></div>
+<h2>Storico recente <span class="count" id="history-count">0</span></h2>
+<div id="history-list"></div>
 
-<div class="footer" id="footer">mai aggiornato</div>
+<footer id="footer">
+  <span id="footer-text">mai aggiornato</span>
+  <span id="age" class="">—</span>
+</footer>
+
 <script>
-const fmt = (n) => typeof n === "number" ? n.toFixed(2) : "—";
-const fmtMs = (sec) => sec >= 60
-  ? Math.floor(sec/60) + "m " + Math.round(sec%60) + "s"
-  : Math.round(sec) + "s";
+const fmt2 = (n) => typeof n === "number" ? n.toFixed(2) : "—";
+const fmtTime = (sec) => {
+  if (sec >= 3600) {
+    const h = Math.floor(sec / 3600);
+    const m = Math.round((sec % 3600) / 60);
+    return `${h}h ${m}m`;
+  }
+  if (sec >= 60) return `${Math.floor(sec / 60)}m ${Math.round(sec % 60)}s`;
+  return `${Math.round(sec)}s`;
+};
+const fmtRelative = (ts) => {
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - ts);
+  if (d < 60) return `${d}s fa`;
+  if (d < 3600) return `${Math.floor(d / 60)}m fa`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h fa`;
+  return `${Math.floor(d / 86400)}g fa`;
+};
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
+));
+const modeLabel = (m) => m === "copy1080" ? "copia 1080p" : "codifica";
+const loadCls = (n, low, high) =>
+  typeof n !== "number" || n < 0 ? "dim" :
+  n < low ? "ok" : n < high ? "warn" : "err";
 
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => (
-    {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
-  ));
-}
-
-// Translate the encoder's machine-readable `mode` field to a human label.
-function modeLabel(m) {
-  return m === "copy1080" ? "copia 1080p" : "codifica";
-}
+// Parse the latest "speed=X.XXx" out of an ffmpeg progress line.
+const parseSpeed = (line) => {
+  const m = String(line || "").match(/speed=\s*([\d.]+)x/);
+  return m ? parseFloat(m[1]) : null;
+};
+// Parse "time=HH:MM:SS.MS" out of an ffmpeg progress line, returns seconds.
+const parseTime = (line) => {
+  const m = String(line || "").match(/time=(\d+):(\d+):([\d.]+)/);
+  return m ? (+m[1] * 3600 + +m[2] * 60 + parseFloat(m[3])) : null;
+};
 
 function renderActive(active) {
   const el = document.getElementById("active-list");
   const entries = Object.entries(active || {});
+  document.getElementById("active-count").textContent = entries.length;
   if (entries.length === 0) {
     el.innerHTML = '<div class="empty">nessun lavoro in corso</div>';
     return;
@@ -177,11 +356,24 @@ function renderActive(active) {
   const now = Math.floor(Date.now() / 1000);
   el.innerHTML = entries.map(([, info]) => {
     const elapsed = now - (info.started || now);
-    const cls = info.mode === "copy1080" ? "copy" : "";
+    const cls = info.mode === "copy1080" ? "copy" : "muted";
     const modeBadge = `<span class="badge ${cls}">${modeLabel(info.mode)}</span>`;
-    return `<div class="active">
-      <div class="name">${modeBadge}${escapeHtml(info.rel || "?")}</div>
-      <div class="progress">+${fmtMs(elapsed)} ${escapeHtml(info.progress || "")}</div>
+    const tDone = parseTime(info.progress);
+    const speed = parseSpeed(info.progress);
+    let pct = 0;
+    if (tDone && info.duration) {
+      pct = Math.min(100, Math.round(100 * tDone / info.duration));
+    }
+    const meta = (speed != null || tDone != null)
+      ? `+${fmtTime(elapsed)} · ${tDone != null ? fmtTime(tDone) + "/" + fmtTime(info.duration || 0) : ""} ${speed != null ? "· " + speed.toFixed(2) + "×" : ""}`
+      : `+${fmtTime(elapsed)} · in avvio…`;
+    return `<div class="item">
+      <div class="head">
+        ${modeBadge}
+        <span class="name">${escapeHtml(info.rel || "?")}</span>
+      </div>
+      <div class="progress-bar"><span style="width:${pct}%"></span></div>
+      <div class="meta">${escapeHtml(meta)}</div>
     </div>`;
   }).join("");
 }
@@ -189,6 +381,7 @@ function renderActive(active) {
 function renderHistory(recent) {
   const el = document.getElementById("history-list");
   const items = (recent || []).slice(0, 8);
+  document.getElementById("history-count").textContent = items.length;
   if (items.length === 0) {
     el.innerHTML = '<div class="empty">nessun lavoro recente</div>';
     return;
@@ -203,15 +396,28 @@ function renderHistory(recent) {
       : '';
     let meta = "";
     if (ok && typeof j.duration === "number" && typeof j.encode_seconds === "number") {
-      meta = `${fmtMs(j.duration)} → ${fmtMs(j.encode_seconds)} (${(j.speed||0).toFixed(2)}×)`;
+      const speedStr = j.speed != null ? `${j.speed.toFixed(2)}×` : "";
+      meta = `${fmtTime(j.duration)} → ${fmtTime(j.encode_seconds)}  ${speedStr}  · ${fmtRelative(j.ts)}`;
     } else if (!ok && j.error) {
-      meta = j.error;
+      meta = `${j.error}  · ${fmtRelative(j.ts)}`;
+    } else {
+      meta = fmtRelative(j.ts);
     }
-    return `<div class="history-item">
-      <div class="name">${resultBadge}${modeBadge}${escapeHtml(j.rel || "?")}</div>
+    return `<div class="item">
+      <div class="head">
+        ${resultBadge}
+        ${modeBadge}
+        <span class="name">${escapeHtml(j.rel || "?")}</span>
+      </div>
       <div class="meta">${escapeHtml(meta)}</div>
     </div>`;
   }).join("");
+}
+
+function setStatus(label, cls) {
+  document.getElementById("status-text").textContent = label;
+  const p = document.getElementById("pulse");
+  p.className = "pulse" + (cls ? " " + cls : "");
 }
 
 async function tick() {
@@ -219,35 +425,63 @@ async function tick() {
     const r = await fetch("/status.json", { cache: "no-store" });
     if (!r.ok) throw new Error("HTTP " + r.status);
     const s = await r.json();
-    const age = Math.max(0, Math.floor(Date.now() / 1000) - s.ts);
-    document.getElementById("age").textContent = age + " s fa";
+
     document.getElementById("pending").textContent = s.queue_pending ?? 0;
     document.getElementById("workers").textContent = s.workers ?? "—";
     document.getElementById("done").textContent = s.jobs_by_status?.done ?? 0;
     document.getElementById("failed").textContent = s.jobs_by_status?.failed ?? 0;
-    document.getElementById("load1").textContent = fmt(s.load_avg?.["1m"]);
-    document.getElementById("load5").textContent = fmt(s.load_avg?.["5m"]);
-    document.getElementById("load15").textContent = fmt(s.load_avg?.["15m"]);
-    document.getElementById("cache").textContent =
-      typeof s.cache_free_gb === "number" ? s.cache_free_gb.toFixed(1) + " GB" : "—";
+
+    const l1 = s.load_avg?.["1m"], l5 = s.load_avg?.["5m"], l15 = s.load_avg?.["15m"];
+    const setLoad = (id, v) => {
+      const el = document.getElementById(id);
+      el.textContent = fmt2(v);
+      el.className = "v " + loadCls(v, 4, 8);
+    };
+    setLoad("load1", l1);
+    setLoad("load5", l5);
+    setLoad("load15", l15);
+
+    const cacheGB = s.cache_free_gb;
+    const cacheEl = document.getElementById("cache");
+    cacheEl.textContent = typeof cacheGB === "number" ? cacheGB.toFixed(1) + " GB" : "—";
+    cacheEl.className = "v " + (
+      typeof cacheGB !== "number" ? "dim" :
+      cacheGB < (s.cache_min_free_gb || 10) ? "err" :
+      cacheGB < (s.cache_min_free_gb || 10) * 2 ? "warn" : "ok"
+    );
+
     document.getElementById("threads").textContent = s.threads_per_job ?? "—";
     document.getElementById("nice").textContent = s.nice ?? "—";
     document.getElementById("gate").textContent =
       s.load_gate > 0
         ? (s.load_gate_blocking ? "BLOCCO ATTIVO" : "soglia " + s.load_gate)
         : "disattivata";
-    renderActive(s.active_jobs);
+
+    const active = s.active_jobs || {};
+    const activeCount = Object.keys(active).length;
+    if (activeCount > 0) {
+      setStatus(`${activeCount} in elaborazione`, null);
+    } else if ((s.queue_pending || 0) > 0) {
+      setStatus(`${s.queue_pending} in coda`, "idle");
+    } else {
+      setStatus("in attesa", "idle");
+    }
+
+    renderActive(active);
     renderHistory(s.recent_jobs);
-    document.getElementById("footer").textContent =
+
+    document.getElementById("footer-text").textContent =
       "aggiornato alle " + new Date().toLocaleTimeString();
-    document.getElementById("footer").classList.remove("err-row");
+    document.getElementById("age").textContent = fmtRelative(s.ts);
+    document.getElementById("footer").classList.remove("error");
   } catch (e) {
-    document.getElementById("footer").textContent = "errore: " + e.message;
-    document.getElementById("footer").classList.add("err-row");
+    setStatus("non raggiungibile", "err");
+    document.getElementById("footer-text").textContent = "errore: " + e.message;
+    document.getElementById("footer").classList.add("error");
   }
 }
 tick();
-setInterval(tick, 10000);
+setInterval(tick, 5000);
 </script>
 </body>
 </html>
