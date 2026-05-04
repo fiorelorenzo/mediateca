@@ -1,21 +1,28 @@
-# Servarr stack on Hetzner Cloud.
-# On-server layout:
-#   /opt/servarr/                   working dir, owner=$USERNAME
-#     docker-compose.yml            this file
-#     .env                          secrets — NEVER commit (gitignored)
-#     config/                       per-container persistent state
-#     caddy/                        Caddyfile + ACME data/config volumes
-#     scripts/                      sidecar shell scripts
-#   /mnt/storagebox/                Hetzner Storage Box mounted via CIFS
-#     data/                         exposed inside containers as /data
-#       torrents/tv/                qBit Sonarr category
-#       torrents/movies/            qBit Radarr category
-#       media/tv/                   Sonarr root folder
-#       media/movies/               Radarr root folder
+# Self-hosted media stack — works on any Linux host with Docker.
+# Storage paths are configurable via .env:
 #
-# Trash-guides layout: everything under one root means Sonarr/Radarr can
-# hardlink imports from /data/torrents/... into /data/media/... instead of
-# copying. Same filesystem, no double-disk-use.
+#   MEDIA_DIR          host path exposed inside *arr/jellyfin/encoder containers
+#                      as /data. Can be a local disk, NFS mount, CIFS mount, etc.
+#                      Layout below MUST exist (created by setup-server.sh or
+#                      manually):
+#                        $MEDIA_DIR/torrents/tv/        qBit Sonarr category
+#                        $MEDIA_DIR/torrents/movies/    qBit Radarr category
+#                        $MEDIA_DIR/media/tv/           Sonarr root folder
+#                        $MEDIA_DIR/media/movies/       Radarr root folder
+#                      The "trash-guides layout": one root means Sonarr/Radarr
+#                      hardlink imports from torrents/ into media/ instead of
+#                      copying — same filesystem, no double-disk-use.
+#   ENCODER_CACHE_DIR  host path mounted as /cache inside hls-encoder. Should
+#                      be on FAST local storage (NVMe ideally) — libx264 will
+#                      saturate it. Don't use the same backend as MEDIA_DIR if
+#                      that's a network mount.
+#
+# Working directory layout (where you run `docker compose up`):
+#   ./docker-compose.yml            this file
+#   ./.env                          secrets — NEVER commit (gitignored)
+#   ./config/                       per-container persistent state
+#   ./caddy/                        Caddyfile + ACME data/config volumes
+#   ./scripts/                      sidecar shell scripts
 
 networks:
   servarr:
@@ -42,7 +49,7 @@ services:
       - ./caddy/config:/config
       # Storage Box media tree exposed read-only to serve HLS segments
       # at hls.${DOMAIN}. Encoder writes here; Caddy only reads.
-      - /mnt/storagebox/data/media:/srv/hls:ro
+      - ${MEDIA_DIR}/media:/srv/hls:ro
       # hls-encoder status snapshot exposed at encoder-status.${DOMAIN}
       # (read-only) for Homarr / external monitoring.
       - ./config/hls-encoder:/srv/encoder-status:ro
@@ -55,7 +62,7 @@ services:
   # =========================================
   # VPN client (ProtonVPN) — shares its network namespace with qbittorrent
   # and qb-port-manager. All torrent traffic exits via the VPN tunnel; the
-  # rest of the stack uses the direct Hetzner network.
+  # rest of the stack uses the host's normal network.
   # =========================================
   gluetun:
     image: qmcgaw/gluetun:latest
@@ -79,7 +86,7 @@ services:
       - FIREWALL_OUTBOUND_SUBNETS=172.18.0.0/16
       - DNS_KEEP_NAMESERVER=on
       - HEALTH_VPN_DURATION_INITIAL=120s
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
     volumes:
       - ./config/gluetun:/gluetun
     ports:
@@ -88,7 +95,7 @@ services:
       - servarr
 
   # =========================================
-  # *arr stack (same as a local install, paths adapted for Storage Box)
+  # *arr stack — paths point to ${MEDIA_DIR} on the host (see top of file)
   # =========================================
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:latest
@@ -100,11 +107,11 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - WEBUI_PORT=8080
     volumes:
       - ./config/qbittorrent:/config
-      - /mnt/storagebox/data:/data
+      - ${MEDIA_DIR}:/data
 
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:nightly
@@ -113,7 +120,7 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
     volumes:
       - ./config/prowlarr:/config
     networks:
@@ -126,10 +133,10 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
     volumes:
       - ./config/sonarr:/config
-      - /mnt/storagebox/data:/data
+      - ${MEDIA_DIR}:/data
     networks:
       - servarr
 
@@ -140,10 +147,10 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
     volumes:
       - ./config/radarr:/config
-      - /mnt/storagebox/data:/data
+      - ${MEDIA_DIR}:/data
     networks:
       - servarr
 
@@ -154,23 +161,19 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
     volumes:
       - ./config/bazarr:/config
-      - /mnt/storagebox/data:/data
+      - ${MEDIA_DIR}:/data
     networks:
       - servarr
 
   # FlareSolverr is intentionally NOT in this compose. Running it on the
-  # VPS (whether direct or behind Gluetun) means Cloudflare sees a
+  # server (whether direct or behind Gluetun) means Cloudflare sees a
   # datacenter or VPN ASN and blocks it anyway. Instead it runs on a
   # residential machine (Mac/Linux/Windows/Raspberry Pi) and Prowlarr
   # reaches it over the private Tailscale/Headscale tailnet — see
   # README "Indexer proxy on a home node" section.
-  #
-  # BitMagnet + Postgres are also intentionally NOT here: the DHT crawler
-  # saturated both vCPU cores of the CPX22 plan. Re-add only after scaling
-  # to CPX32, or with cpus/mem limits applied.
 
   # Syncs qBittorrent's listening port with whatever NAT-PMP port Proton hands
   # out, every 60s. Reads /gluetun/forwarded_port, calls qBit WebUI API.
@@ -186,7 +189,7 @@ services:
       - ./scripts/qb-port-update.sh:/qb-port-update.sh:ro
     environment:
       - INTERVAL=60
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - QBIT_USER=${QBIT_USER}
       - QBIT_PASS=${QBIT_PASS}
     command: sh -c "apk add --no-cache curl >/dev/null 2>&1 && /qb-port-update.sh"
@@ -201,11 +204,11 @@ services:
     environment:
       - PUID=${PUID}
       - PGID=${PGID}
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - JELLYFIN_PublishedServerUrl=https://media.${DOMAIN}
     volumes:
       - ./config/jellyfin:/config
-      - /mnt/storagebox/data/media:/data
+      - ${MEDIA_DIR}/media:/data
     networks:
       - servarr
 
@@ -216,7 +219,7 @@ services:
     restart: unless-stopped
     environment:
       - LOG_LEVEL=info
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - PORT=5055
     volumes:
       - ./config/seerr:/app/config
@@ -253,7 +256,7 @@ services:
     container_name: homarr
     restart: unless-stopped
     environment:
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - SECRET_ENCRYPTION_KEY=${HOMARR_SECRET_ENCRYPTION_KEY}
     volumes:
       - ./config/homarr/appdata:/appdata
@@ -305,8 +308,12 @@ services:
   # H.264 ABR ladder + per-track AAC audio renditions as HLS, writes
   # a .strm pointing to the public CDN URL, and deletes the source.
   # See HLS_ABR_DESIGN.md for design + ./hls-encoder/ for the code.
-  # 4c/8t Xeon → 2 parallel FFmpeg workers (single-pass 3-variant encode
-  # already saturates ~6 threads, leaves headroom for everything else).
+  #
+  # Resource sizing: cpus / mem_limit / WORKERS / THREADS below are
+  # tuned for a 4c/8t host (e.g. Xeon E3-1275v6, Ryzen 5 5600). On
+  # smaller boxes drop ENCODER_CPUS/ENCODER_MEM/WORKERS/THREADS in .env.
+  # Rule of thumb: WORKERS × THREADS ≈ vCPU count. See the encoder
+  # README "Tuning rule of thumb" section for details.
   # =========================================
   hls-encoder:
     build:
@@ -314,16 +321,15 @@ services:
     image: hls-encoder:local
     container_name: hls-encoder
     restart: unless-stopped
-    # The host is a 4c/8t Xeon E3-1275v6. We let the encoder reach all 8
-    # logical CPUs because `nice -n 10` (applied to ffmpeg below) makes it
-    # yield to any higher-priority work — Jellyfin live transcode (rare),
-    # Caddy bursts, etc. With cpus: 4 the container saturated its quota
-    # at 0.5× realtime; lifting to 8 + nice gives full host throughput
+    # We let the encoder reach all logical CPUs because `nice -n 10`
+    # (applied to ffmpeg below) makes it yield to higher-priority work —
+    # Jellyfin live transcode (rare), Caddy bursts, etc. cgroup CPU
+    # throttling at exactly the host CPU count gives full throughput
     # when idle and graceful degradation when busy.
-    cpus: 8.0
-    mem_limit: 12g
+    cpus: ${ENCODER_CPUS:-8.0}
+    mem_limit: ${ENCODER_MEM:-12g}
     environment:
-      - TZ=Europe/Rome
+      - TZ=${TZ:-UTC}
       - DOMAIN=${DOMAIN}
       - DATA_ROOT=/data
       - CACHE_ROOT=/cache
@@ -336,27 +342,28 @@ services:
       - RADARR_URL=http://radarr:7878
       - RADARR_API_KEY=${RADARR_API_KEY}
       # CPU tuning — see hls-encoder/README.md "Tuning rule of thumb".
-      # 2 workers × 4 threads = 8 total, matches cpus: 8.0 above.
-      # Single-file workload uses half the budget; batch (Sonarr/Radarr
-      # finishing several downloads concurrently) saturates it.
-      - WORKERS=2
-      - THREADS=4
-      - NICE_LEVEL=10
-      - MAX_LOAD_AVG_1M=0
+      # WORKERS × THREADS should ≈ vCPU count. Single-file workload uses
+      # half the budget; batch (Sonarr/Radarr finishing several downloads
+      # concurrently) saturates it.
+      - WORKERS=${ENCODER_WORKERS:-2}
+      - THREADS=${ENCODER_THREADS:-4}
+      - NICE_LEVEL=${ENCODER_NICE:-10}
+      - MAX_LOAD_AVG_1M=${ENCODER_MAX_LOAD_AVG_1M:-0}
       # Encoding ladder (kbps targets). maxrate auto = 1.1×, bufsize 2×.
-      - BITRATE_1080P_KBPS=5000
-      - BITRATE_720P_KBPS=2500
-      - BITRATE_480P_KBPS=1000
-      - LIBX264_PRESET=fast
+      - BITRATE_1080P_KBPS=${BITRATE_1080P_KBPS:-5000}
+      - BITRATE_720P_KBPS=${BITRATE_720P_KBPS:-2500}
+      - BITRATE_480P_KBPS=${BITRATE_480P_KBPS:-1000}
+      - LIBX264_PRESET=${LIBX264_PRESET:-fast}
       # Default audio rendition language (ISO-639-2). Empty = first track.
       - DEFAULT_AUDIO_LANG=${DEFAULT_AUDIO_LANG:-}
       - LOG_LEVEL=INFO
     volumes:
-      - /mnt/storagebox/data:/data
-      # Encode scratch on local NVMe RAID 1 (~480 GB usable). SMB roundtrip
-      # per write would tank libx264 throughput. Final HLS bundle is moved
-      # to /data at the end. Reused dir name from the previous Tdarr setup.
-      - /var/lib/hls-cache:/cache
+      - ${MEDIA_DIR}:/data
+      # Encode scratch — should be FAST local storage (NVMe ideal). If
+      # MEDIA_DIR is on a network mount, writing intermediate HLS segments
+      # there directly would tank libx264 throughput. The encoder builds
+      # the bundle here and atomically moves it to /data at the end.
+      - ${ENCODER_CACHE_DIR}:/cache
       - ./config/hls-encoder:/config
     networks:
       - servarr
