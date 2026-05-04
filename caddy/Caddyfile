@@ -58,11 +58,11 @@ headscale.{$DOMAIN} {
     reverse_proxy headscale:8080
 }
 
-# Threadfin — IPTV middleware. Aggregates M3U playlists, dedupes channels,
-# proxies streams (1 connection per channel shared across N Jellyfin clients),
-# emulates HDHomeRun so Jellyfin auto-discovers it.
+# Dispatcharr — IPTV middleware (active fork of xTeVe/Threadfin). Aggregates
+# M3U playlists, applies XMLTV EPG, exposes HDHomeRun emulator on the same
+# port; Jellyfin's Live TV auto-discovers it as a virtual tuner.
 tv.{$DOMAIN} {
-    reverse_proxy threadfin:34400
+    reverse_proxy dispatcharr:9191
 }
 
 encoder-status.{$DOMAIN} {

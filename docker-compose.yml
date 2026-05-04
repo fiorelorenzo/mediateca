@@ -253,33 +253,31 @@ services:
       - servarr
 
   # =========================================
-  # Threadfin — IPTV middleware (xTeVe fork). Ingests M3U playlists from
-  # any number of providers, dedupes/maps channels, applies XMLTV EPG, and
-  # exposes a fake HDHomeRun tuner that Jellyfin's Live TV auto-detects
-  # (Dashboard → Live TV → Add tuner → HDHomeRun → http://threadfin:34400).
-  # Buffers each upstream channel once and fan-outs to N clients, which
-  # avoids the "too many concurrent streams" ban most IPTV providers apply.
-  # WebUI: tv.${DOMAIN}, default user/password set on first run.
+  # Dispatcharr — IPTV middleware (active fork of xTeVe/Threadfin). Ingests
+  # M3U playlists, applies XMLTV EPG, auto-maps channels, exposes a fake
+  # HDHomeRun tuner that Jellyfin's Live TV auto-detects
+  # (Dashboard → Live TV → Add tuner → HDHomeRun → http://dispatcharr:9191).
+  # Django + Postgres + Redis + Celery, all bundled in the AIO image.
+  # Web UI / API: tv.${DOMAIN}, admin user created on first run.
   # =========================================
-  threadfin:
-    image: fyb3roptik/threadfin:latest
-    container_name: threadfin
+  dispatcharr:
+    image: ghcr.io/dispatcharr/dispatcharr:latest
+    container_name: dispatcharr
     restart: unless-stopped
     environment:
-      - PUID=${PUID}
-      - PGID=${PGID}
+      - DISPATCHARR_ENV=aio
+      - REDIS_HOST=localhost
+      - CELERY_BROKER_URL=redis://localhost:6379/0
+      - DISPATCHARR_LOG_LEVEL=info
       - TZ=${TZ:-UTC}
-      # Optional: route Threadfin's outbound HTTP through the home-node
-      # tinyproxy on the tailnet, for sources geo-locked to Italy
-      # (RaiPlay scrapers, Mediaset). Leave unset (default) for sources
-      # that work from a datacenter IP — most international FAST channels
-      # plus iptv-org's curated lists.
+      # Optional: route dispatcharr outbound HTTP through the home-node
+      # tinyproxy on the tailnet for IT geo-locked sources (RaiPlay,
+      # Mediaset). Leave unset for sources that work from datacenter IP.
       # - HTTP_PROXY=http://100.64.0.3:8888
       # - HTTPS_PROXY=http://100.64.0.3:8888
       # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,homarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
     volumes:
-      - ./config/threadfin/conf:/home/threadfin/conf
-      - ./config/threadfin/temp:/tmp/threadfin
+      - ./config/dispatcharr:/data
     networks:
       - servarr
 
