@@ -114,7 +114,7 @@ services:
       - ${MEDIA_DIR}:/data
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:nightly
+    image: lscr.io/linuxserver/prowlarr:latest
     container_name: prowlarr
     restart: unless-stopped
     environment:
