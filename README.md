@@ -1,9 +1,10 @@
-# Self-hosted media stack with HLS adaptive streaming
+# mediateca
 
-A complete, opinionated media server stack you can deploy on **any Linux
-host with Docker** — a cloud VPS, a dedicated server, a NAS, a Raspberry
-Pi for testing, or a spare laptop. Designed to be cheap to run, polite to
-the network, and pleasant to use over a slow connection.
+A self-hosted media server stack with **HLS adaptive-bitrate streaming**.
+Deploy on any Linux host with Docker — a cloud VPS, a dedicated server,
+a NAS, a Raspberry Pi for testing, or a spare laptop. Designed to be
+cheap to run, polite to the network, and pleasant to use over a slow
+connection.
 
 | Feature | Component |
 | --- | --- |
@@ -198,7 +199,7 @@ For the impatient, on a fresh Ubuntu/Debian host:
 ssh root@<HOST-IP>
 export USERNAME=admin SSH_PUBKEY="ssh-ed25519 AAAA..."
 export STORAGE_DRIVER=none           # or 'cifs' / 'nfs' with extras below
-bash <(curl -fsSL https://raw.githubusercontent.com/<you>/jellyfin/main/setup-server.sh)
+bash <(curl -fsSL https://raw.githubusercontent.com/<you>/mediateca/main/setup-server.sh)
 exit
 
 # 2. Push the stack.
