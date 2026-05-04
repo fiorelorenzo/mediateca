@@ -19,9 +19,9 @@ zero live transcoding.
 
 | URL | Service | Notes |
 | --- | --- | --- |
-| `media.<DOMAIN>` | Jellyfin | streaming UI; consumes `.strm` files pointing at the HLS CDN |
-| `seerr.<DOMAIN>` | [Seerr](https://github.com/seerr-team/seerr) | request management (Jellyseerr fork) |
-| `homarr.<DOMAIN>` | Homarr 1.x | dashboard / launcher |
+| **`streaming.<DOMAIN>`** | [Seerr](https://github.com/seerr-team/seerr) | **Public entry point for end users**: catalog browse + request UI. Auth via Jellyfin SSO only (local login disabled). |
+| `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes `.strm` files pointing at the HLS CDN. Linked to from Seerr's "Play on Jellyfin" button. |
+| `homarr.<DOMAIN>` | Homarr 1.x | Admin dashboard / launcher |
 | `sonarr.<DOMAIN>` | Sonarr | TV automation (1080p cap, no auto-upgrades) |
 | `radarr.<DOMAIN>` | Radarr | movie automation (1080p cap, no auto-upgrades) |
 | `prowlarr.<DOMAIN>` | Prowlarr | indexer manager |
@@ -32,8 +32,13 @@ zero live transcoding.
 | `encoder-status.<DOMAIN>` | static file server | encoder live dashboard + `status.json` |
 
 Authentication is each app's own (Forms login on *arr, native login on
-Jellyfin / Seerr / Homarr / qBit). Rationale: simpler and good enough for a
+Jellyfin / Homarr / qBit). Rationale: simpler and good enough for a
 personal stack with strong passwords + fail2ban, no separate SSO layer.
+
+For end-users we have a slightly tighter setup: **Seerr's local login is
+disabled** (`localLogin=false`), so the `streaming.<DOMAIN>` page only
+exposes the "Sign in with Jellyfin" button. Family/friends use one set
+of credentials (their Jellyfin user) for both Seerr and Jellyfin.
 
 ## Network topology
 
@@ -205,8 +210,8 @@ Add per-subdomain A records on your registrar. Example for Namecheap:
 
 | Type | Host | Value |
 | --- | --- | --- |
+| A | `streaming` | `<NEW_IP>` |
 | A | `media` | `<NEW_IP>` |
-| A | `seerr` | `<NEW_IP>` |
 | A | `homarr` | `<NEW_IP>` |
 | A | `sonarr` | `<NEW_IP>` |
 | A | `radarr` | `<NEW_IP>` |
@@ -324,10 +329,19 @@ the player's CC menu, which gives better results without burning the
 free-tier quota on automatic crawls. If you want Bazarr automatic anyway,
 re-enable providers in `config/bazarr/config/config.yaml`.
 
-**6. Seerr** (`https://seerr.<DOMAIN>`) — wizard chooses Jellyfin backend
-→ `http://jellyfin:8096` + admin login. Then Settings → Sonarr
-(`sonarr`/`8989` + API key) and Radarr (`radarr`/`7878` + API key).
-Application URL = `https://seerr.<DOMAIN>`.
+**6. Seerr** (`https://streaming.<DOMAIN>`) — wizard chooses Jellyfin
+backend → `http://jellyfin:8096` + admin login. Then Settings → Sonarr
+(`sonarr`/`8989` + API key) and Radarr (`radarr`/`7878` + API key) and
+mark them as **Default** (`isDefault=true`) so user requests have a
+target. Application URL = `https://streaming.<DOMAIN>`.
+
+To make `streaming.<DOMAIN>` the single user-facing entry-point, also
+set `localLogin=false` in Seerr's main settings (Settings → Users →
+Local Login → off, or directly patch `config/seerr/settings.json`):
+the login page only exposes "Sign in with Jellyfin", which keeps the
+auth surface identical to Jellyfin's. New users come in with the
+default `REQUEST` permission (bit 32) so they can submit requests
+straight away.
 
 **7. Homarr 1.x** (`https://homarr.<DOMAIN>`) — first-run creates admin
 user. Manage → Integrations to register backend connections (URLs use
@@ -337,6 +351,26 @@ board → Edit mode → add tiles + widgets.
 
 To embed the encoder dashboard, add an **Iframe** widget pointing at
 `https://encoder-status.<DOMAIN>/`.
+
+**8. Jellyfin custom CSS** — apply the contents of
+`config/jellyfin-custom.css` via Dashboard → General → Custom CSS code,
+or programmatically:
+
+```sh
+# Reads the CSS from the repo and POSTs it to Jellyfin's branding endpoint.
+JELLYFIN_KEY=$(ssh lorenzo@<NEW_IP> 'sudo find /opt/servarr/config/jellyfin -name "jellyfin.db" | head -1 | xargs sudo sqlite3 -bail "SELECT AccessToken FROM ApiKeys" 2>/dev/null')
+CSS=$(cat config/jellyfin-custom.css)
+BODY=$(jq -nc --arg css "$CSS" '{SplashscreenEnabled: false, CustomCss: $css}')
+curl -sS -X POST "https://media.<DOMAIN>/System/Configuration/branding?api_key=$JELLYFIN_KEY" \
+  -H 'Content-Type: application/json' -d "$BODY"
+```
+
+The shipped CSS imports the [Finity](https://github.com/prism2001/finity)
+theme (minimal variant) and hides the in-player kbps picker (irrelevant
+when watching HLS pass-through content). Each user must additionally set,
+under their **Display** preferences (`/web/#/mypreferencesdisplay.html`):
+Theme = Dark, blurred placeholders ON, backdrops OFF — these are
+per-user and not enforceable server-side.
 
 ## Indexer proxy on a home node
 
