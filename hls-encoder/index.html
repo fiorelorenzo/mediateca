@@ -366,13 +366,13 @@
 <h2>In elaborazione <span class="count" id="active-count">0</span></h2>
 <div id="active-list"></div>
 
-<h2>Carico CPU</h2>
+<h2>Carico encoder</h2>
 <div class="card load-block">
   <div class="load-now">
-    <span class="num" id="load1-num">—</span>
+    <span class="num" id="cpu-num">—</span>
     <span class="label-and-cap">
-      <span class="top">load 1m</span>
-      <span id="load-cap">/ — core</span>
+      <span class="top">% del limite</span>
+      <span id="cpu-cap">— core max</span>
     </span>
   </div>
   <div class="load-bar"><span id="load-bar-fill" style="width:0%"></span></div>
@@ -387,12 +387,12 @@
 
 <h2>Sistema</h2>
 <div class="panel card">
-  <div class="row"><span class="label">Carico 5m</span><span class="v" id="load5">—</span></div>
-  <div class="row"><span class="label">Carico 15m</span><span class="v" id="load15">—</span></div>
   <div class="row"><span class="label">Cache libera</span><span class="v" id="cache">—</span></div>
   <div class="row"><span class="label">Thread per lavoro</span><span class="v dim" id="threads">—</span></div>
   <div class="row"><span class="label">Priorità (nice)</span><span class="v dim" id="nice">—</span></div>
   <div class="row"><span class="label">Soglia carico</span><span class="v dim" id="gate">—</span></div>
+  <div class="row"><span class="label">Carico host 1m</span><span class="v dim" id="load1">—</span></div>
+  <div class="row"><span class="label">Carico host 5m</span><span class="v dim" id="load5">—</span></div>
 </div>
 
 <h2>Storico recente <span class="count" id="history-count">0</span></h2>
@@ -404,12 +404,8 @@
 </footer>
 
 <script>
-// Approximate logical-CPU count from the host. The encoder doesn't expose
-// it directly; the load average gauge scales against this constant. The
-// host is a 4c/8t Xeon E3-1275v6 — see HLS_ABR_DESIGN.md.
-const HOST_CPUS = 8;
-// How many load-1m samples to keep client-side for the sparkline. With a
-// 5s tick this covers ~5 minutes of recent history.
+// How many cpu_percent samples to keep client-side for the sparkline.
+// With a 5s tick this covers ~5 minutes of recent history.
 const SPARK_LEN = 60;
 const sparkData = [];
 
@@ -434,10 +430,12 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
 ));
 const modeLabel = (m) => m === "copy1080" ? "copia 1080p" : "codifica";
-const loadCls = (n) =>
-  typeof n !== "number" || n < 0 ? "dim" :
-  n < HOST_CPUS * 0.5 ? "ok" :
-  n < HOST_CPUS ? "warn" : "err";
+// Color buckets keyed against percentage of the encoder's CPU limit:
+// <50% green (idle/light), 50-85 yellow (working), >85 red (saturated).
+const cpuPctCls = (p) =>
+  typeof p !== "number" || p < 0 ? "dim" :
+  p < 50 ? "ok" :
+  p < 85 ? "warn" : "err";
 
 const parseSpeed = (line) => {
   const m = String(line || "").match(/speed=\s*([\d.]+)x/);
@@ -448,27 +446,28 @@ const parseTime = (line) => {
   return m ? (+m[1] * 3600 + +m[2] * 60 + parseFloat(m[3])) : null;
 };
 
-function renderLoad(load1, load5, load15) {
-  const num = document.getElementById("load1-num");
-  num.textContent = fmt2(load1);
-  num.className = "num " + loadCls(load1);
+function renderLoad(cpuPct, cpuLimit, load1, load5) {
+  const num = document.getElementById("cpu-num");
+  if (typeof cpuPct === "number") {
+    num.textContent = cpuPct.toFixed(1) + "%";
+    num.className = "num " + cpuPctCls(cpuPct);
+  } else {
+    num.textContent = "—";
+    num.className = "num dim";
+  }
+  document.getElementById("cpu-cap").textContent = cpuLimit
+    ? `${cpuLimit} core max`
+    : "limite assente";
 
-  document.getElementById("load-cap").textContent = `/ ${HOST_CPUS} core`;
-
-  const cap = HOST_CPUS * 1.25; // headroom on the bar so red shows clearly
-  const pct = typeof load1 === "number"
-    ? Math.max(0, Math.min(100, (load1 / cap) * 100))
-    : 0;
+  const pct = typeof cpuPct === "number" ? Math.max(0, Math.min(100, cpuPct)) : 0;
   document.getElementById("load-bar-fill").style.width = pct + "%";
 
+  // Host load averages move to the smaller "Sistema" panel as ops detail.
+  document.getElementById("load1").textContent = fmt2(load1);
   document.getElementById("load5").textContent = fmt2(load5);
-  document.getElementById("load5").className = "v " + loadCls(load5);
-  document.getElementById("load15").textContent = fmt2(load15);
-  document.getElementById("load15").className = "v " + loadCls(load15);
 
-  // Sparkline
-  if (typeof load1 === "number" && load1 >= 0) {
-    sparkData.push(load1);
+  if (typeof cpuPct === "number") {
+    sparkData.push(cpuPct);
     if (sparkData.length > SPARK_LEN) sparkData.shift();
   }
   renderSparkline();
@@ -481,7 +480,8 @@ function renderSparkline() {
     return;
   }
   const W = 200, H = 36, pad = 1;
-  const max = Math.max(HOST_CPUS, ...sparkData) * 1.1;
+  // sparkData is in 0–100 percent space, so the y-axis is fixed.
+  const max = 100;
   const dx = (W - pad * 2) / (SPARK_LEN - 1);
   // Right-align: newest sample at right edge.
   const offsetIndex = SPARK_LEN - sparkData.length;
@@ -586,7 +586,12 @@ async function tick() {
     document.getElementById("done").textContent = s.jobs_by_status?.done ?? 0;
     document.getElementById("failed").textContent = s.jobs_by_status?.failed ?? 0;
 
-    renderLoad(s.load_avg?.["1m"], s.load_avg?.["5m"], s.load_avg?.["15m"]);
+    renderLoad(
+      s.cpu_percent,
+      s.cpu_limit,
+      s.load_avg?.["1m"],
+      s.load_avg?.["5m"],
+    );
 
     const cacheGB = s.cache_free_gb;
     const cacheEl = document.getElementById("cache");

@@ -313,16 +313,21 @@ def build_ffmpeg_cmd(
         "-i", str(source),
     ]
 
+    # `format=yuv420p` before the split forces 8-bit pixel format. libx264
+    # `high` profile rejects 10-bit input ("doesn't support a bit depth of 10"),
+    # which is what 10-bit HEVC sources (common: HEVC-d3g, HEVC-PSA, x265) feed
+    # if not converted. Doing the conversion once before split is cheaper than
+    # per-output -pix_fmt flags.
     if copy_1080p:
         # 1080p comes straight from input (no filter graph), 720p+480p are
-        # downscaled. The split source for filters is 0:v:0 too.
+        # downscaled. copy_1080p is gated on h264 8-bit input only, so the
+        # bypassed stream is already compliant.
         cmd += [
             "-filter_complex",
-            "[0:v:0]split=2[v720tmp][v480tmp];"
+            "[0:v:0]format=yuv420p,split=2[v720tmp][v480tmp];"
             "[v720tmp]scale=-2:720[v720];"
             "[v480tmp]scale=-2:480[v480]",
         ]
-        # v0 = copy
         cmd += ["-map", "0:v:0", "-c:v:0", "copy"]
         encoded_specs = [
             ("[v720]", "main", "4.0", "fast", "2500k", "2750k", "5000k", 1),
@@ -331,7 +336,7 @@ def build_ffmpeg_cmd(
     else:
         cmd += [
             "-filter_complex",
-            "[0:v:0]split=3[v1080][v720tmp][v480tmp];"
+            "[0:v:0]format=yuv420p,split=3[v1080][v720tmp][v480tmp];"
             "[v720tmp]scale=-2:720[v720];"
             "[v480tmp]scale=-2:480[v480]",
         ]
@@ -760,12 +765,58 @@ def load_gate_blocked() -> bool:
     return load1 > MAX_LOAD_AVG_1M
 
 
+def cgroup_cpu_usage_us() -> Optional[int]:
+    """Cumulative CPU usage in microseconds, read from the container's
+    own cgroup. Supports cgroup v2 (modern) with v1 fallback."""
+    try:
+        with open("/sys/fs/cgroup/cpu.stat") as f:
+            for line in f:
+                if line.startswith("usage_usec "):
+                    return int(line.split()[1])
+    except FileNotFoundError:
+        pass
+    try:
+        with open("/sys/fs/cgroup/cpuacct/cpuacct.usage") as f:
+            return int(f.read().strip()) // 1000  # ns → us
+    except FileNotFoundError:
+        return None
+
+
+def cgroup_cpu_limit() -> Optional[float]:
+    """Effective CPU limit (number of logical CPUs) the container is
+    allowed to use. None = unlimited / unknown."""
+    try:
+        with open("/sys/fs/cgroup/cpu.max") as f:
+            quota_s, period_s = f.read().split()
+            if quota_s == "max":
+                return None
+            return int(quota_s) / int(period_s)
+    except (FileNotFoundError, ValueError):
+        pass
+    try:
+        with open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us") as fq, \
+             open("/sys/fs/cgroup/cpu/cpu.cfs_period_us") as fp:
+            quota = int(fq.read().strip())
+            period = int(fp.read().strip())
+        if quota <= 0 or period <= 0:
+            return None
+        return quota / period
+    except (FileNotFoundError, ValueError):
+        return None
+
+
 # ---------------------------------------------------------------------------
 # Status snapshot + retention sweep
 # ---------------------------------------------------------------------------
 
 
 def status_writer(conn: sqlite3.Connection, q: queue.Queue) -> None:
+    # Prime delta-based CPU sampling so the first emitted snapshot has a
+    # meaningful percent (instead of None) within ~STATUS_INTERVAL seconds.
+    prev_usage_us = cgroup_cpu_usage_us()
+    prev_ts_mono = time.monotonic()
+    cpu_limit = cgroup_cpu_limit()
+
     while not SHUTDOWN.is_set():
         try:
             counts = dict(
@@ -777,6 +828,24 @@ def status_writer(conn: sqlite3.Connection, q: queue.Queue) -> None:
                 load1, load5, load15 = os.getloadavg()
             except OSError:
                 load1 = load5 = load15 = -1.0
+
+            # Container CPU usage as a percent of its cgroup limit. This is
+            # what we surface in the dashboard — the host load average is
+            # too noisy and operator-only.
+            cpu_percent: Optional[float] = None
+            cur_usage_us = cgroup_cpu_usage_us()
+            cur_ts_mono = time.monotonic()
+            if cur_usage_us is not None and prev_usage_us is not None and cpu_limit:
+                delta_us = cur_usage_us - prev_usage_us
+                elapsed_us = (cur_ts_mono - prev_ts_mono) * 1_000_000
+                if elapsed_us > 0:
+                    cpu_percent = round(
+                        (delta_us / elapsed_us / cpu_limit) * 100, 1
+                    )
+                    cpu_percent = max(0.0, min(cpu_percent, 100.0))
+            prev_usage_us = cur_usage_us
+            prev_ts_mono = cur_ts_mono
+
             with ACTIVE_JOBS_LOCK:
                 active = {
                     p: dict(d) for p, d in ACTIVE_JOBS.items()
@@ -789,6 +858,8 @@ def status_writer(conn: sqlite3.Connection, q: queue.Queue) -> None:
                 "workers": WORKERS,
                 "threads_per_job": THREADS,
                 "nice": NICE_LEVEL,
+                "cpu_percent": cpu_percent,
+                "cpu_limit": cpu_limit,
                 "load_avg": {"1m": load1, "5m": load5, "15m": load15},
                 "load_gate": MAX_LOAD_AVG_1M,
                 "load_gate_blocking": load_gate_blocked(),
