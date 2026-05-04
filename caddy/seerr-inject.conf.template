@@ -19,16 +19,19 @@ server {
     listen 80;
     server_name _;
 
-    # Self-contained JS endpoint we inject into the HTML response below.
-    # Two responsibilities (kept small enough to inline):
-    #   _killBlank: rewrite a[target=_blank] → same-tab for Jellyfin links.
-    #   _addLiveTv: insert a fixed floating button bottom-right linking to
-    #               Jellyfin's Live TV section.
+    # Self-contained JS endpoint injected into Seerr's HTML response.
+    # Two responsibilities, kept small enough to inline:
+    #   _killBlank:    rewrite a[target=_blank] → same-tab for Jellyfin links.
+    #   _addLiveTvNav: clone Seerr's "Movies" sidebar item, swap icon/text/href
+    #                  to a Live TV entry pointing at Jellyfin, insert before
+    #                  the original. Cloning preserves Seerr's hashed Tailwind
+    #                  classes so the new item matches the rest pixel-perfect
+    #                  even after Seerr version bumps.
     # Both run on initial load + MutationObserver to survive Next.js
     # client-side route changes that re-render the DOM.
     location = /__seerr-inject/no-blank.js {
         default_type application/javascript;
-        return 200 'var _JF_HOST="${JELLYFIN_HOST}";var _LIVETV_URL="${LIVETV_URL}";function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname===_JF_HOST){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}function _addLiveTv(){if(document.getElementById("__livetv_pill"))return;if(!document.body)return;var a=document.createElement("a");a.id="__livetv_pill";a.href=_LIVETV_URL;a.textContent="📺 Live TV";a.style.cssText="position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 16px;background:#4f46e5;color:#fff;border-radius:24px;font:600 14px/1 system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:transform .15s";a.onmouseenter=function(){a.style.transform="scale(1.05)"};a.onmouseleave=function(){a.style.transform="scale(1)"};document.body.appendChild(a);}_killBlank();_addLiveTv();new MutationObserver(function(){_killBlank();_addLiveTv();}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["href","target"]});';
+        return 200 'var _JF_HOST="${JELLYFIN_HOST}";var _LIVETV_URL="${LIVETV_URL}";var _TV_SVG=\'<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 20.25h12m-7.5-3v3m3-3v3m-10.125-3h17.25c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125Z"/></svg>\';function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname===_JF_HOST){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}function _findMoviesAnchor(){return document.querySelector(\'nav a[href="/discover/movies"], aside a[href="/discover/movies"], a[href="/discover/movies"]\');}function _addLiveTvNav(){if(document.getElementById("__livetv_nav"))return;var ma=_findMoviesAnchor();if(!ma)return;var li=ma.closest("li")||ma.parentElement;if(!li||!li.parentElement)return;var clone=li.cloneNode(true);clone.id="__livetv_nav";clone.querySelectorAll(\'[aria-current]\').forEach(function(e){e.removeAttribute("aria-current");});clone.className=(clone.className||"").split(/\\s+/).filter(function(c){return!/active|current/i.test(c);}).join(" ");var ca=clone.querySelector("a");if(!ca){return;}ca.href=_LIVETV_URL;ca.className=(ca.className||"").split(/\\s+/).filter(function(c){return!/active|current/i.test(c);}).join(" ");var oldSvg=ca.querySelector("svg");if(oldSvg){var t=document.createElement("div");t.innerHTML=_TV_SVG;var newSvg=t.firstChild;if(oldSvg.getAttribute("class"))newSvg.setAttribute("class",oldSvg.getAttribute("class"));oldSvg.parentNode.replaceChild(newSvg,oldSvg);}ca.querySelectorAll("span,div").forEach(function(s){if(s.children.length===0&&s.textContent&&s.textContent.trim()){s.textContent="Live TV";}});li.parentElement.insertBefore(clone,li);}_killBlank();_addLiveTvNav();new MutationObserver(function(){_killBlank();_addLiveTvNav();}).observe(document.documentElement,{childList:true,subtree:true});';
     }
 
     location / {
