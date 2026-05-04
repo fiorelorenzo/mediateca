@@ -22,9 +22,12 @@ media.{$DOMAIN} {
 # (family, friends). They land on the Seerr request UI, log in with
 # Jellyfin credentials (Seerr local login is disabled, only mediaServerLogin
 # is exposed), browse the catalog, and the "Play on Jellyfin" button
-# bounces them to media.{$DOMAIN} for items already in the library.
+# bounces them to media.{$DOMAIN} for items already in the library —
+# routed through seerr-inject (tiny nginx) which rewrites the HTML
+# response so Jellyfin links open in the same tab. See
+# docker-compose.yml + caddy/seerr-inject.conf.
 streaming.{$DOMAIN} {
-    reverse_proxy seerr:5055
+    reverse_proxy seerr-inject:80
 }
 
 homarr.{$DOMAIN} {

@@ -220,6 +220,23 @@ services:
     networks:
       - servarr
 
+  # =========================================
+  # nginx sidecar that wraps Seerr to inject a tiny client-side script
+  # which removes target="_blank" from links pointing at media.${DOMAIN}.
+  # Caddy points streaming.${DOMAIN} → this container → seerr.
+  # See caddy/seerr-inject.conf for the why and what.
+  # =========================================
+  seerr-inject:
+    image: nginx:alpine
+    container_name: seerr-inject
+    restart: unless-stopped
+    depends_on:
+      - seerr
+    volumes:
+      - ./caddy/seerr-inject.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - servarr
+
   homarr:
     image: ghcr.io/homarr-labs/homarr:latest
     container_name: homarr
