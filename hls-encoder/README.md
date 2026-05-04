@@ -51,6 +51,17 @@ See `../HLS_ABR_DESIGN.md` for the full design and rationale.
 | `HISTORY_LIMIT` | `20` | Number of recent jobs surfaced in `status.json`. |
 | `LOG_LEVEL` | `INFO` | Standard Python log levels |
 
+## What the watcher does (and doesn't) pick up
+
+The watcher walks `MEDIA_ROOT` recursively looking for files matching
+`VIDEO_EXTS` (`.mkv`, `.mp4`, `.m4v`, `.ts`, `.mov`, `.avi`). It
+explicitly **skips** any path whose components end in `.hls` or
+`.hls.tmp` — those are this encoder's own output bundles (final and
+in-progress staging). Without that skip, the encoder would re-discover
+its own emitted `.ts` segments inside `<title>/.<basename>.hls.tmp/v480/`
+and queue them as fresh sources, exploding the state DB by ~hundreds
+of rows per single 4K encode (one row per segment file).
+
 ## State machine + recovery
 
 State.db is SQLite in WAL mode, safe across multiple worker threads. Each
@@ -60,7 +71,10 @@ on the next watcher hit until `attempts ≥ RETRY_LIMIT`.
 If the encoder crashes mid-encode, the `in_progress` row is rewritten to
 `failed` (with `last_error="stale in_progress"`) on the next startup, and
 the file is requeued for retry. The cache directory used by the dead job
-is cleaned up by the startup orphan sweep.
+is cleaned up by the startup orphan sweep, and any abandoned `.hls.tmp`
+directories under `MEDIA_ROOT` are removed (those would otherwise be
+written through the same idempotency check on retry, but cleaning them
+is faster).
 
 `SIGTERM` triggers graceful shutdown: in-flight ffmpeg processes get
 `SIGTERM` themselves, workers stop accepting new jobs, and the main loop

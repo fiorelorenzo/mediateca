@@ -589,9 +589,26 @@ python3 scripts/provision-dispatcharr.py \
     --password <password>
 ```
 
-Expect ~3-5 minutes end to end. About 685 channels show up afterward
-(some duplicates and the Geo-blocked entries will fail to play from
-datacenter IPs — see geo-locked section below).
+Expect ~3-5 minutes end to end. The script:
+
+1. Adds 4 M3U sources + 4 XMLTV EPG sources.
+2. Triggers Dispatcharr's M3U / EPG import tasks.
+3. Waits for downloads + parsing to complete (poll-loop, ~1-2 min).
+4. Materializes one Channel per imported stream (~685 raw streams).
+5. Triggers EPG auto-match (binds Channel ↔ EPG by `tvg-id`).
+6. **Dedupes Channels** by normalized base name, keeping the
+   highest-quality variant: drops resolution suffixes like `(720p)`
+   `(1080p)` `(SD)` `(HD)`, `+1` / `+2` timeshifts, `[Geo-blocked]` /
+   `[Italy]` / `[Not 24/7]` markers, then collapses the survivors.
+   Quality preference: 1080p / FHD > HD > 720p > rest. Typical reduction:
+   ~685 → ~590 channels (-14%), eliminating visually duplicate program
+   tiles in Jellyfin's Live TV grid.
+
+**Caveats:**
+- Geo-blocked entries stay in the lineup but fail to play from the
+  datacenter IP. See section 3 below.
+- Re-running the script is safe (idempotent) — it skips sources and
+  channels that already exist by name.
 
 **Playlists (M3U)** the script adds:
 
@@ -642,18 +659,29 @@ it adds latency to every M3U / EPG fetch and stream.
 In Jellyfin: Dashboard → Live TV:
 
 - **Tuner Devices → +** → Type: **HDHomeRun**, URL:
-  `http://dispatcharr:9191/hdhr`.
+  `http://dispatcharr:9191/hdhr`. Save.
 - **TV Guide Data Providers → + → XMLTV** → File or URL:
-  `http://dispatcharr:9191/output/epg`. Enable for the tuner.
+  `http://dispatcharr:9191/output/epg`. Enable for the tuner above.
+  Save.
 
-Apply, scan. Channels appear under Jellyfin's Live TV tab. EPG
-populates immediately (the XMLTV file is regenerated dynamically by
-Dispatcharr on every request).
+Channels appear under Jellyfin's Live TV tab once the next "Refresh
+Guide" scheduled task runs (Dashboard → Scheduled Tasks → Refresh
+Guide → click play to force it now). The XMLTV file is regenerated
+dynamically by Dispatcharr on every request, so it's always current.
+
+After re-running `provision-dispatcharr.py` (e.g. to re-dedupe), force
+Jellyfin to refresh its lineup cache: open the Tuner Device entry and
+click Save again, then re-run the Refresh Guide task. Otherwise
+Jellyfin keeps serving the stale channel list.
 
 End-users hit the same `streaming.<DOMAIN>` (Seerr) entry point as
-before; the floating **📺 Live TV** pill in the bottom-right corner of
-Seerr — injected by the `seerr-inject` sidecar — bounces them to
-Jellyfin's Live TV section in the same tab.
+before. The `seerr-inject` sidecar (nginx) clones Seerr's existing
+"Movies" sidebar entry, swaps icon (Heroicons TV outline), text
+(`Live TV`), and href (Jellyfin's `/web/index.html#/livetv.html`),
+then inserts the result before the original — so the new item
+inherits Seerr's hashed Tailwind classes and matches the rest of
+the menu pixel-perfect across Seerr version bumps. Cosmetically
+indistinguishable from a native Seerr feature.
 
 ### 5 — Grey-market providers (deferred)
 
@@ -902,6 +930,11 @@ ssh <USERNAME>@<HOST-IP> "
 | Bazarr never downloads subtitles | `opensubtitlescom` requires an account; the other 3 providers don't | Add credentials in Bazarr → Settings → Providers, or rely on the no-auth providers (`yifysubtitles`, `tvsubtitles`, `podnapisi`). |
 | Seerr "Sign in with Jellyfin" fails | Jellyfin user has no library access | Jellyfin → Dashboard → Users → grant the user library permissions; Seerr inherits them. |
 | Encoder OOM-killed mid-job | `ENCODER_MEM` too small for source | Raise `ENCODER_MEM` in `.env` or drop `ENCODER_WORKERS` to 1 to halve peak memory. |
+| Encoder dashboard "Completed" counter explodes (~hundreds) for a single import | Watcher re-discovering its own `.hls.tmp/` segments as sources | Already fixed in encoder.py (skip filter excludes both `.hls` and `.hls.tmp`). If you see this on an older build, rebuild: `docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder` and clean stale rows: `sudo sqlite3 /opt/servarr/config/hls-encoder/state.db "DELETE FROM jobs WHERE path LIKE '%.hls.tmp/%';"`. |
+| Jellyfin Live TV grid shows duplicate program tiles (e.g. 3× same show) | Multiple channel variants (HD/SD/+1/[Geo-blocked]) mapped to same EPG entry | Re-run `scripts/provision-dispatcharr.py` (the dedupe pass collapses variants by base name); then on Jellyfin, re-save the Tuner Device entry and run "Refresh Guide" task to bust the lineup cache. |
+| Jellyfin still shows old channel count after Dispatcharr changes | Jellyfin caches the HDHomeRun lineup until the tuner config is re-saved | Dashboard → Live TV → Tuner Devices → click the Dispatcharr entry → Save (no fields need to change). Then run the Refresh Guide scheduled task. |
+| Dispatcharr first-run page returns 423 "Locked" | First-run requires creating an admin user before any API call works | Run the `manage.py createsuperuser` snippet from the Live TV section. |
+| Seerr sidebar `Live TV` link missing | nginx envsubst tripped on `$` in the rendered config (e.g. regex anchor in `seerr-inject.conf.template`) | Check `docker logs seerr-inject` for `[emerg] invalid variable name`. Avoid bare `$` in the JS string, use explicit equality checks instead of `^foo$` regex anchors. |
 
 ## Security model
 
@@ -1053,7 +1086,8 @@ of the above. Total for the reference setup: ~€63/mo.
 │   ├── README.md                     # env reference + tuning notes
 │   └── index.html                    # live dashboard served at encoder-status.<DOMAIN>
 └── scripts/
-    └── qb-port-update.sh             # VPN NAT-PMP → qBit port sidecar
+    ├── qb-port-update.sh             # VPN NAT-PMP → qBit port sidecar
+    └── provision-dispatcharr.py      # idempotent IPTV bootstrap (M3U/EPG/channels/dedupe)
 ```
 
 ## License
