@@ -744,7 +744,7 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         return
     if source.suffix.lower() not in VIDEO_EXTS:
         return
-    if any(p.endswith(".hls") for p in source.parts):
+    if any(p.endswith(".hls") or p.endswith(".hls.tmp") for p in source.parts):
         return
     if source.name.endswith(".strm"):
         return
@@ -989,7 +989,7 @@ class NewFileHandler(FileSystemEventHandler):
     def _eligible(p: Path) -> bool:
         if p.suffix.lower() not in VIDEO_EXTS:
             return False
-        if any(part.endswith(".hls") for part in p.parts):
+        if any(part.endswith(".hls") or part.endswith(".hls.tmp") for part in p.parts):
             return False
         return True
 
@@ -1034,7 +1034,7 @@ def initial_scan(conn: sqlite3.Connection, q: queue.Queue) -> None:
             continue
         if p.suffix.lower() not in VIDEO_EXTS:
             continue
-        if any(part.endswith(".hls") for part in p.parts):
+        if any(part.endswith(".hls") or part.endswith(".hls.tmp") for part in p.parts):
             continue
         state = job_get(conn, str(p))
         if state and state["status"] == "in_progress":
