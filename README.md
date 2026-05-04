@@ -572,19 +572,29 @@ Open `https://tv.<DOMAIN>` and walk through Threadfin's first-run wizard:
 
 Settings → Playlist → Add (M3U), repeat for each:
 
-| Source | M3U URL | EPG URL |
+**Playlists (M3U)** — Settings → Playlist → New, repeat:
+
+| Source | M3U URL | Channels |
 | --- | --- | --- |
-| iptv-org Italy | `https://iptv-org.github.io/iptv/countries/it.m3u` | use the per-country EPG project at <https://github.com/iptv-org/epg> |
-| Pluto TV (IT) | `https://i.mjh.nz/PlutoTV/it.m3u8` | `https://i.mjh.nz/PlutoTV/it.xml.gz` |
-| Samsung TV Plus (IT) | `https://i.mjh.nz/SamsungTVPlus/it.m3u8` | `https://i.mjh.nz/SamsungTVPlus/it.xml.gz` |
-| Plex FAST (multi) | `https://i.mjh.nz/Plex/all.m3u8` | `https://i.mjh.nz/Plex/all.xml.gz` |
-| Free-TV / IPTV Italy | `https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_italy.m3u8` | reuse iptv-org epg |
+| iptv-org Italy | `https://iptv-org.github.io/iptv/countries/it.m3u` | ~275 (RAI, Mediaset FTA, local, music; some marked `[Geo-blocked]`) |
+| Free-TV Italy | `https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_italy.m3u8` | ~388 |
+| Pluto TV (IT slice) | `https://raw.githubusercontent.com/iptv-org/iptv/master/streams/it_pluto.m3u` | ~115 |
+| Samsung TV Plus (IT slice) | `https://raw.githubusercontent.com/iptv-org/iptv/master/streams/it_samsung.m3u` | ~12 |
 
-Settings → XMLTV → Add the EPG URLs above.
+**EPG (XMLTV)** — Settings → XMLTV → New:
 
-The [Matt Huisman scrapers](https://i.mjh.nz/) (Pluto/Samsung/Plex) are
-the most reliable: maintained, region-filtered, EPG bundled. Start with
-those and iptv-org IT for ~200 stable channels with metadata.
+| EPG | URL |
+| --- | --- |
+| Open-EPG Italy (FTA + Sky) | `https://www.open-epg.com/files/italy.xml` |
+| Open-EPG Italy alternate | `https://www.open-epg.com/files/italy1.xml` |
+| EPGShare IT (extended) | `https://epgshare01.online/epgshare01/epg_ripper_IT1.xml.gz` |
+| Pluto TV IT | `https://i.mjh.nz/PlutoTV/it.xml.gz` |
+| Samsung TV Plus IT | `https://i.mjh.nz/SamsungTVPlus/it.xml.gz` |
+
+Matt Huisman's `i.mjh.nz` no longer publishes per-region M3U playlists
+(only EPG XML), so for Pluto / Samsung+ channels we pull the curated
+slices iptv-org maintains in their repo. After all sources are loaded
+Threadfin auto-merges channel ↔ EPG by `tvg-id` matching.
 
 ### 3 — Italian geo-locked sources (RaiPlay, etc.)
 
