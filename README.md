@@ -560,20 +560,38 @@ which avoids the "too many concurrent streams" ban most providers apply.
 
 ### 1 — First-run setup
 
-Open `https://tv.<DOMAIN>` and create the admin user (Dispatcharr's
-first-run page asks for username + password directly, no wizard).
-
-### 2 — Add free + Italian sources
-
-Either via UI (M3U Accounts → Add, EPG Sources → Add) or via the bundled
-provisioning script that hits the REST API:
+Dispatcharr exposes a full UI at `https://tv.<DOMAIN>` and a REST API at
+`/api/`. The first run requires creating an admin user. Easiest is via
+Django shell from the host:
 
 ```sh
-ssh <USERNAME>@<HOST-IP>
-cd /opt/servarr
-docker compose exec dispatcharr \
-  python manage.py shell < /data/provision-italy.py
+ssh <USERNAME>@<HOST-IP> '
+docker exec -i dispatcharr python manage.py shell <<PY
+from django.contrib.auth import get_user_model
+U = get_user_model()
+U.objects.create_superuser("admin", "admin@example.com", "<choose-strong-password>")
+PY
+'
 ```
+
+### 2 — Provision sources via the bundled script
+
+`scripts/provision-dispatcharr.py` hits the Dispatcharr REST API and
+performs end-to-end setup: adds 4 M3U sources, 4 XMLTV EPG sources,
+triggers refresh, materializes one Channel per imported stream, and
+fires EPG auto-match. Idempotent (skips sources/channels already
+present). Run from any machine that can reach `tv.<DOMAIN>`:
+
+```sh
+python3 scripts/provision-dispatcharr.py \
+    --base https://tv.<DOMAIN> \
+    --username admin \
+    --password <password>
+```
+
+Expect ~3-5 minutes end to end. About 685 channels show up afterward
+(some duplicates and the Geo-blocked entries will fail to play from
+datacenter IPs — see geo-locked section below).
 
 **Playlists (M3U)** the script adds:
 
@@ -621,9 +639,16 @@ it adds latency to every M3U / EPG fetch and stream.
 
 ### 4 — Wire Dispatcharr to Jellyfin
 
-In Jellyfin: Dashboard → Live TV → Add Tuner → **HDHomeRun**, URL:
-`http://dispatcharr:9191`. Apply, scan. Channels appear under the Live
-TV tab. EPG populates after the next scheduled XMLTV refresh.
+In Jellyfin: Dashboard → Live TV:
+
+- **Tuner Devices → +** → Type: **HDHomeRun**, URL:
+  `http://dispatcharr:9191/hdhr`.
+- **TV Guide Data Providers → + → XMLTV** → File or URL:
+  `http://dispatcharr:9191/output/epg`. Enable for the tuner.
+
+Apply, scan. Channels appear under Jellyfin's Live TV tab. EPG
+populates immediately (the XMLTV file is regenerated dynamically by
+Dispatcharr on every request).
 
 End-users hit the same `streaming.<DOMAIN>` (Seerr) entry point as
 before; the floating **📺 Live TV** pill in the bottom-right corner of
