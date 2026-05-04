@@ -5,8 +5,14 @@
 # version bump, so we intercept the HTML response and drop in a small
 # script that removes the target on Jellyfin-bound links.
 #
-# Caddy proxies streaming.${DOMAIN} → seerr-inject:80 (this server)
-#                                  → seerr:5055 (real backend)
+# This file is processed by envsubst at container start (nginx:alpine
+# auto-runs that on anything in /etc/nginx/templates/*.template). The
+# only variable substituted is ${JELLYFIN_HOST} below — everything
+# else uses nginx's own $variable syntax (no braces) which envsubst
+# leaves alone.
+#
+# Caddy proxies streaming.<DOMAIN> → seerr-inject:80 (this server)
+#                                 → seerr:5055 (real backend)
 
 server {
     listen 80;
@@ -15,10 +21,13 @@ server {
     # Self-contained JS endpoint we inject into the HTML response
     # below. document.body may not exist when this script first runs
     # (we inject before </body>, but Next.js may still be hydrating);
-    # the MutationObserver handles links rendered later.
+    # the MutationObserver handles links rendered later. The hostname
+    # check restricts the rewrite to links that actually point at the
+    # configured Jellyfin host so we don't disturb other external
+    # links that legitimately want to open in a new tab.
     location = /__seerr-inject/no-blank.js {
         default_type application/javascript;
-        return 200 'function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname==="media.<DOMAIN>"){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}\n_killBlank();\nnew MutationObserver(_killBlank).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["href","target"]});';
+        return 200 'var _JF_HOST="${JELLYFIN_HOST}";function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname===_JF_HOST){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}\n_killBlank();\nnew MutationObserver(_killBlank).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["href","target"]});';
     }
 
     location / {

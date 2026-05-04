@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -314,11 +314,11 @@
 <header>
   <div class="brand">
     <div class="title">HLS Encoder</div>
-    <div class="subtitle">Pipeline di codifica adattiva</div>
+    <div class="subtitle">Adaptive bitrate encoding pipeline</div>
   </div>
   <div class="status-pill" id="status-pill">
     <span class="pulse idle" id="pulse"></span>
-    <span id="status-text">in attesa</span>
+    <span id="status-text">idle</span>
   </div>
 </header>
 
@@ -344,36 +344,36 @@
 <div class="stats-grid">
   <div class="stat card">
     <span class="icon-corner"><svg class="icon"><use href="#i-queue"/></svg></span>
-    <div class="label">Coda</div>
+    <div class="label">Queue</div>
     <div class="value" id="pending">—</div>
   </div>
   <div class="stat card">
     <span class="icon-corner"><svg class="icon"><use href="#i-cog"/></svg></span>
-    <div class="label">Worker</div>
+    <div class="label">Workers</div>
     <div class="value" id="workers">—</div>
   </div>
   <div class="stat card">
     <span class="icon-corner"><svg class="icon"><use href="#i-check"/></svg></span>
-    <div class="label">Completati</div>
+    <div class="label">Completed</div>
     <div class="value ok" id="done">0</div>
   </div>
   <div class="stat card">
     <span class="icon-corner"><svg class="icon"><use href="#i-alert"/></svg></span>
-    <div class="label">Falliti</div>
+    <div class="label">Failed</div>
     <div class="value err" id="failed">0</div>
   </div>
 </div>
 
-<h2>In elaborazione <span class="count" id="active-count">0</span></h2>
+<h2>In progress <span class="count" id="active-count">0</span></h2>
 <div id="active-list"></div>
 
-<h2>Carico encoder</h2>
+<h2>Encoder load</h2>
 <div class="card load-block">
   <div class="load-now">
     <span class="num" id="cpu-num">—</span>
     <span class="label-and-cap">
-      <span class="top">% del limite</span>
-      <span id="cpu-cap">— core max</span>
+      <span class="top">% of limit</span>
+      <span id="cpu-cap">— cores max</span>
     </span>
   </div>
   <div class="load-bar"><span id="load-bar-fill" style="width:0%"></span></div>
@@ -386,21 +386,21 @@
   </div>
 </div>
 
-<h2>Sistema</h2>
+<h2>System</h2>
 <div class="panel card">
-  <div class="row"><span class="label">Cache libera</span><span class="v" id="cache">—</span></div>
-  <div class="row"><span class="label">Thread per lavoro</span><span class="v dim" id="threads">—</span></div>
-  <div class="row"><span class="label">Priorità (nice)</span><span class="v dim" id="nice">—</span></div>
-  <div class="row"><span class="label">Soglia carico</span><span class="v dim" id="gate">—</span></div>
-  <div class="row"><span class="label">Carico host 1m</span><span class="v dim" id="load1">—</span></div>
-  <div class="row"><span class="label">Carico host 5m</span><span class="v dim" id="load5">—</span></div>
+  <div class="row"><span class="label">Cache free</span><span class="v" id="cache">—</span></div>
+  <div class="row"><span class="label">Threads per job</span><span class="v dim" id="threads">—</span></div>
+  <div class="row"><span class="label">Nice priority</span><span class="v dim" id="nice">—</span></div>
+  <div class="row"><span class="label">Load gate</span><span class="v dim" id="gate">—</span></div>
+  <div class="row"><span class="label">Host load 1m</span><span class="v dim" id="load1">—</span></div>
+  <div class="row"><span class="label">Host load 5m</span><span class="v dim" id="load5">—</span></div>
 </div>
 
-<h2>Storico recente <span class="count" id="history-count">0</span></h2>
+<h2>Recent history <span class="count" id="history-count">0</span></h2>
 <div id="history-list"></div>
 
 <footer id="footer">
-  <span id="footer-text">mai aggiornato</span>
+  <span id="footer-text">never updated</span>
   <span id="age">—</span>
 </footer>
 
@@ -422,15 +422,15 @@ const fmtTime = (sec) => {
 };
 const fmtRelative = (ts) => {
   const d = Math.max(0, Math.floor(Date.now() / 1000) - ts);
-  if (d < 60) return `${d}s fa`;
-  if (d < 3600) return `${Math.floor(d / 60)}m fa`;
-  if (d < 86400) return `${Math.floor(d / 3600)}h fa`;
-  return `${Math.floor(d / 86400)}g fa`;
+  if (d < 60) return `${d}s ago`;
+  if (d < 3600) return `${Math.floor(d / 60)}m ago`;
+  if (d < 86400) return `${Math.floor(d / 3600)}h ago`;
+  return `${Math.floor(d / 86400)}d ago`;
 };
 const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
 ));
-const modeLabel = (m) => m === "copy1080" ? "copia 1080p" : "codifica";
+const modeLabel = (m) => m === "copy1080" ? "copy 1080p" : "encode";
 // Color buckets keyed against percentage of the encoder's CPU limit:
 // <50% green (idle/light), 50-85 yellow (working), >85 red (saturated).
 const cpuPctCls = (p) =>
@@ -457,8 +457,8 @@ function renderLoad(cpuPct, cpuLimit, load1, load5) {
     num.className = "num dim";
   }
   document.getElementById("cpu-cap").textContent = cpuLimit
-    ? `${cpuLimit} core max`
-    : "limite assente";
+    ? `${cpuLimit} cores max`
+    : "no limit set";
 
   const pct = typeof cpuPct === "number" ? Math.max(0, Math.min(100, cpuPct)) : 0;
   document.getElementById("load-bar-fill").style.width = pct + "%";
@@ -506,7 +506,7 @@ function renderActive(active) {
   const entries = Object.entries(active || {});
   document.getElementById("active-count").textContent = entries.length;
   if (entries.length === 0) {
-    el.innerHTML = '<div class="empty">nessun lavoro in corso</div>';
+    el.innerHTML = '<div class="empty">no jobs in flight</div>';
     return;
   }
   const now = Math.floor(Date.now() / 1000);
@@ -522,7 +522,7 @@ function renderActive(active) {
     }
     const meta = (speed != null || tDone != null)
       ? `+${fmtTime(elapsed)} · ${tDone != null ? fmtTime(tDone) + "/" + fmtTime(info.duration || 0) : ""} ${speed != null ? "· " + speed.toFixed(2) + "×" : ""}`
-      : `+${fmtTime(elapsed)} · in avvio…`;
+      : `+${fmtTime(elapsed)} · starting…`;
     return `<div class="item">
       <div class="head">
         ${modeBadge}
@@ -539,16 +539,16 @@ function renderHistory(recent) {
   const items = (recent || []).slice(0, 8);
   document.getElementById("history-count").textContent = items.length;
   if (items.length === 0) {
-    el.innerHTML = '<div class="empty">nessun lavoro recente</div>';
+    el.innerHTML = '<div class="empty">no recent jobs</div>';
     return;
   }
   el.innerHTML = items.map(j => {
     const ok = j.result === "ok";
     const resultBadge = ok
       ? '<span class="badge ok">ok</span>'
-      : '<span class="badge err">errore</span>';
+      : '<span class="badge err">error</span>';
     const modeBadge = j.mode === "copy1080"
-      ? '<span class="badge copy">copia</span>'
+      ? '<span class="badge copy">copy</span>'
       : '';
     let meta = "";
     if (ok && typeof j.duration === "number" && typeof j.encode_seconds === "number") {
@@ -610,29 +610,29 @@ async function tick() {
     document.getElementById("nice").textContent = s.nice ?? "—";
     document.getElementById("gate").textContent =
       s.load_gate > 0
-        ? (s.load_gate_blocking ? "BLOCCO ATTIVO" : "soglia " + s.load_gate)
-        : "disattivata";
+        ? (s.load_gate_blocking ? "BLOCKING" : "threshold " + s.load_gate)
+        : "off";
 
     const active = s.active_jobs || {};
     const activeCount = Object.keys(active).length;
     if (activeCount > 0) {
-      setStatus(`${activeCount} in elaborazione`, null);
+      setStatus(`${activeCount} in progress`, null);
     } else if ((s.queue_pending || 0) > 0) {
-      setStatus(`${s.queue_pending} in coda`, "idle");
+      setStatus(`${s.queue_pending} queued`, "idle");
     } else {
-      setStatus("in attesa", "idle");
+      setStatus("idle", "idle");
     }
 
     renderActive(active);
     renderHistory(s.recent_jobs);
 
     document.getElementById("footer-text").textContent =
-      "aggiornato alle " + new Date().toLocaleTimeString();
+      "updated at " + new Date().toLocaleTimeString();
     document.getElementById("age").textContent = fmtRelative(s.ts);
     document.getElementById("footer").classList.remove("error");
   } catch (e) {
-    setStatus("non raggiungibile", "err");
-    document.getElementById("footer-text").textContent = "errore: " + e.message;
+    setStatus("unreachable", "err");
+    document.getElementById("footer-text").textContent = "error: " + e.message;
     document.getElementById("footer").classList.add("error");
   }
 }

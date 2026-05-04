@@ -232,8 +232,16 @@ services:
     restart: unless-stopped
     depends_on:
       - seerr
+    environment:
+      # nginx:alpine's entrypoint runs envsubst on
+      # /etc/nginx/templates/*.template at startup; the only variable
+      # we substitute is JELLYFIN_HOST below.
+      - JELLYFIN_HOST=media.${DOMAIN}
+      # Limit envsubst to the variables we actually want; defends
+      # against accidental substitution of unrelated env names.
+      - NGINX_ENVSUBST_FILTER=^JELLYFIN_HOST$$
     volumes:
-      - ./caddy/seerr-inject.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./caddy/seerr-inject.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks:
       - servarr
 
@@ -293,10 +301,13 @@ services:
     mem_limit: 12g
     environment:
       - TZ=Europe/Rome
+      - DOMAIN=${DOMAIN}
       - DATA_ROOT=/data
       - CACHE_ROOT=/cache
       - STATE_DB=/config/state.db
-      - HLS_CDN_BASE=https://hls.${DOMAIN}
+      # HLS_CDN_BASE auto-derives to https://hls.${DOMAIN} when DOMAIN
+      # is set; uncomment to override.
+      # - HLS_CDN_BASE=https://hls.${DOMAIN}
       - SONARR_URL=http://sonarr:8989
       - SONARR_API_KEY=${SONARR_API_KEY}
       - RADARR_URL=http://radarr:7878
@@ -309,6 +320,13 @@ services:
       - THREADS=4
       - NICE_LEVEL=10
       - MAX_LOAD_AVG_1M=0
+      # Encoding ladder (kbps targets). maxrate auto = 1.1×, bufsize 2×.
+      - BITRATE_1080P_KBPS=5000
+      - BITRATE_720P_KBPS=2500
+      - BITRATE_480P_KBPS=1000
+      - LIBX264_PRESET=fast
+      # Default audio rendition language (ISO-639-2). Empty = first track.
+      - DEFAULT_AUDIO_LANG=${DEFAULT_AUDIO_LANG:-}
       - LOG_LEVEL=INFO
     volumes:
       - /mnt/storagebox/data:/data

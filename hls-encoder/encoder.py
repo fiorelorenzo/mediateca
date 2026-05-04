@@ -53,12 +53,24 @@ MEDIA_ROOT = DATA_ROOT / "media"
 CACHE_ROOT = Path(os.environ.get("CACHE_ROOT", "/cache"))
 STATE_DB = Path(os.environ.get("STATE_DB", "/config/state.db"))
 
-CDN_BASE = os.environ.get("HLS_CDN_BASE", "https://hls.<DOMAIN>").rstrip("/")
+# Public base URL written into .strm files. If unset but DOMAIN is
+# provided, defaults to https://hls.<DOMAIN>. The empty fallback fails
+# loudly at first use rather than emitting an .strm pointing nowhere.
+_DOMAIN = os.environ.get("DOMAIN", "").strip()
+CDN_BASE = (
+    os.environ.get("HLS_CDN_BASE")
+    or (f"https://hls.{_DOMAIN}" if _DOMAIN else "")
+).rstrip("/")
 
 SONARR_URL = os.environ.get("SONARR_URL", "").rstrip("/")
 SONARR_KEY = os.environ.get("SONARR_API_KEY", "")
 RADARR_URL = os.environ.get("RADARR_URL", "").rstrip("/")
 RADARR_KEY = os.environ.get("RADARR_API_KEY", "")
+
+# Path prefixes used to route a relative path to Sonarr (TV) or Radarr
+# (movies). They must match the layout your *arrs use under MEDIA_ROOT.
+TV_PATH_PREFIX = os.environ.get("TV_PATH_PREFIX", "tv/")
+MOVIES_PATH_PREFIX = os.environ.get("MOVIES_PATH_PREFIX", "movies/")
 
 WORKERS = int(os.environ.get("WORKERS", "1"))
 THREADS = int(os.environ.get("THREADS", "4"))
@@ -77,10 +89,6 @@ MIN_CACHE_FREE_GB = int(os.environ.get("MIN_CACHE_FREE_GB", "10"))
 # deletes them. 0 = keep forever.
 DB_RETENTION_DAYS = int(os.environ.get("DB_RETENTION_DAYS", "30"))
 
-# Bitrate ceiling under which the 1080p variant can be bitstream-copied
-# instead of re-encoded. Matches the maxrate of the libx264 1080p target.
-COPY_1080P_MAX_BITRATE = int(os.environ.get("COPY_1080P_MAX_BITRATE", "5500000"))
-
 STATUS_PATH = Path(os.environ.get("STATUS_PATH", "/config/status.json"))
 STATUS_INTERVAL = int(os.environ.get("STATUS_INTERVAL", "10"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
@@ -88,12 +96,36 @@ HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
 # Audio rendition with this language tag becomes default in the master
 # playlist. Falls back to the first rendition if the chosen language
 # isn't present in the source. Empty string = always use the first track.
-DEFAULT_AUDIO_LANG = os.environ.get("DEFAULT_AUDIO_LANG", "ita").strip().lower()
+DEFAULT_AUDIO_LANG = os.environ.get("DEFAULT_AUDIO_LANG", "").strip().lower()
 
 # How long Sonarr/Radarr GET responses are reused across consecutive
 # encodes before being re-fetched. Saves N×library-size JSON when N
 # items finish in burst.
 ARR_CACHE_TTL_SECONDS = int(os.environ.get("ARR_CACHE_TTL_SECONDS", "300"))
+
+# libx264 preset applied to every variant. Trade-off: fast = ~2× speed
+# vs medium with marginally larger files; medium = better
+# compression. veryfast / superfast / ultrafast are options too.
+LIBX264_PRESET = os.environ.get("LIBX264_PRESET", "fast").strip()
+
+# Target bitrate (kbps) per variant. maxrate auto-derived as 1.1× and
+# bufsize as 2× target, matching the ratios H.264 streaming guides
+# typically recommend. Setting BITRATE_*_KBPS=0 isn't supported —
+# every variant must have a usable target.
+BITRATE_1080P_KBPS = int(os.environ.get("BITRATE_1080P_KBPS", "5000"))
+BITRATE_720P_KBPS = int(os.environ.get("BITRATE_720P_KBPS", "2500"))
+BITRATE_480P_KBPS = int(os.environ.get("BITRATE_480P_KBPS", "1000"))
+
+# Bitrate ceiling (bits/s) under which the 1080p variant can be
+# bitstream-copied instead of re-encoded. Defaults to 1.1 × the target
+# 1080p bitrate so it matches the maxrate cap; overridable for users
+# who prefer a stricter or looser threshold.
+COPY_1080P_MAX_BITRATE = int(
+    os.environ.get(
+        "COPY_1080P_MAX_BITRATE",
+        str(int(BITRATE_1080P_KBPS * 1100)),
+    )
+)
 
 VIDEO_EXTS = {".mkv", ".mp4", ".m4v", ".ts", ".mov", ".avi"}
 
@@ -368,32 +400,62 @@ def build_ffmpeg_cmd(
     # which is what 10-bit HEVC sources (common: HEVC-d3g, HEVC-PSA, x265) feed
     # if not converted. Doing the conversion once before split is cheaper than
     # per-output -pix_fmt flags.
+
+    def _spec(label: str, profile: str, level: str,
+              target_kbps: int, idx: int) -> tuple:
+        # maxrate = 1.1× target, bufsize = 2× target — typical streaming guidance.
+        return (
+            label, profile, level, LIBX264_PRESET,
+            f"{target_kbps}k",
+            f"{int(target_kbps * 1.1)}k",
+            f"{int(target_kbps * 2)}k",
+            idx,
+        )
+
+    # Each variant's scale is capped to a max W×H box, preserving the
+    # source aspect ratio and never upscaling:
+    #   scale='min(W,iw)':'min(H,ih)':force_original_aspect_ratio=decrease
+    # Then a second scale rounds dimensions to even numbers (libx264 +
+    # yuv420p requires even W and H).
+    #
+    # Critical for cinemascope/4K sources: scaling height alone to 1080
+    # on a 3840×1600 frame yields 2592×1080, whose ~11000 macroblocks
+    # exceed libx264 level 4.0's 8192-MB limit. Capping to a 1920×1080
+    # box scales it correctly to 1920×800.
+    def _scale(W: int, H: int) -> str:
+        return (
+            f"scale='min({W},iw)':'min({H},ih)':"
+            f"force_original_aspect_ratio=decrease,"
+            f"scale=w='trunc(iw/2)*2':h='trunc(ih/2)*2'"
+        )
+
     if copy_1080p:
-        # 1080p comes straight from input (no filter graph), 720p+480p are
-        # downscaled. copy_1080p is gated on h264 8-bit input only, so the
-        # bypassed stream is already compliant.
+        # 1080p comes straight from input (no scale needed); 720p+480p
+        # are downscaled. copy_1080p is gated on h264 ≤1080p so the
+        # bypassed stream is already within profile high@4.0.
         cmd += [
             "-filter_complex",
             "[0:v:0]format=yuv420p,split=2[v720tmp][v480tmp];"
-            "[v720tmp]scale=-2:720[v720];"
-            "[v480tmp]scale=-2:480[v480]",
+            f"[v720tmp]{_scale(1280, 720)}[v720];"
+            f"[v480tmp]{_scale(854, 480)}[v480]",
         ]
         cmd += ["-map", "0:v:0", "-c:v:0", "copy"]
         encoded_specs = [
-            ("[v720]", "main", "4.0", "fast", "2500k", "2750k", "5000k", 1),
-            ("[v480]", "main", "3.1", "fast", "1000k", "1100k", "2000k", 2),
+            _spec("[v720]", "main", "4.0", BITRATE_720P_KBPS, 1),
+            _spec("[v480]", "main", "3.1", BITRATE_480P_KBPS, 2),
         ]
     else:
         cmd += [
             "-filter_complex",
-            "[0:v:0]format=yuv420p,split=3[v1080][v720tmp][v480tmp];"
-            "[v720tmp]scale=-2:720[v720];"
-            "[v480tmp]scale=-2:480[v480]",
+            "[0:v:0]format=yuv420p,split=3[v1080tmp][v720tmp][v480tmp];"
+            f"[v1080tmp]{_scale(1920, 1080)}[v1080];"
+            f"[v720tmp]{_scale(1280, 720)}[v720];"
+            f"[v480tmp]{_scale(854, 480)}[v480]",
         ]
         encoded_specs = [
-            ("[v1080]", "high", "4.0", "fast", "5000k", "5500k", "10000k", 0),
-            ("[v720]",  "main", "4.0", "fast", "2500k", "2750k", "5000k", 1),
-            ("[v480]",  "main", "3.1", "fast", "1000k", "1100k", "2000k", 2),
+            _spec("[v1080]", "high", "4.0", BITRATE_1080P_KBPS, 0),
+            _spec("[v720]",  "main", "4.0", BITRATE_720P_KBPS, 1),
+            _spec("[v480]",  "main", "3.1", BITRATE_480P_KBPS, 2),
         ]
 
     for label, profile, level, preset, br, maxr, bufs, idx in encoded_specs:
@@ -511,14 +573,14 @@ def _arr_invalidate(cache_attr: str) -> None:
 
 def arr_unmonitor(rel_path: str) -> None:
     """Best-effort: tell Sonarr (TV) or Radarr (movies) to stop monitoring."""
-    if rel_path.startswith("tv/") and SONARR_URL and SONARR_KEY:
+    if rel_path.startswith(TV_PATH_PREFIX) and SONARR_URL and SONARR_KEY:
         _sonarr_unmonitor(rel_path)
-    elif rel_path.startswith("movies/") and RADARR_URL and RADARR_KEY:
+    elif rel_path.startswith(MOVIES_PATH_PREFIX) and RADARR_URL and RADARR_KEY:
         _radarr_unmonitor(rel_path)
 
 
 def _sonarr_unmonitor(rel_path: str) -> None:
-    full = f"/data/media/{rel_path}"
+    full = str(MEDIA_ROOT / rel_path)
     files = _arr_get(
         f"{SONARR_URL}/api/v3/episodefile",
         {"apikey": SONARR_KEY},
@@ -557,7 +619,7 @@ def _sonarr_unmonitor(rel_path: str) -> None:
 
 
 def _radarr_unmonitor(rel_path: str) -> None:
-    full = f"/data/media/{rel_path}"
+    full = str(MEDIA_ROOT / rel_path)
     movies = _arr_get(
         f"{RADARR_URL}/api/v3/movie",
         {"apikey": RADARR_KEY},
@@ -1154,6 +1216,12 @@ def install_signal_handlers() -> None:
 
 def main() -> int:
     log.info("hls-encoder starting; data=%s cache=%s", MEDIA_ROOT, CACHE_ROOT)
+    if not CDN_BASE:
+        log.error(
+            "no CDN base URL configured. Set HLS_CDN_BASE explicitly, "
+            "or set DOMAIN so we can default to https://hls.<DOMAIN>",
+        )
+        return 1
     if not MEDIA_ROOT.exists():
         log.error("media root does not exist: %s", MEDIA_ROOT)
         return 1

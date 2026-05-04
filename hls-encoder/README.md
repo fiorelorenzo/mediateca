@@ -25,14 +25,22 @@ See `../HLS_ABR_DESIGN.md` for the full design and rationale.
 | `STATE_DB` | `/config/state.db` | SQLite job state |
 | `STATUS_PATH` | `/config/status.json` | Periodic JSON snapshot of queue + jobs (for Homarr widget or cron-based monitoring) |
 | `STATUS_INTERVAL` | `10` | Seconds between status writes |
-| `HLS_CDN_BASE` | `https://hls.<DOMAIN>` | Public base URL written into `.strm` files |
+| `HLS_CDN_BASE` | `https://hls.<DOMAIN>` if `DOMAIN` is set, else required | Public base URL written into `.strm` files. The encoder refuses to start if neither this nor `DOMAIN` is set. |
+| `DOMAIN` | — | Used only as a fallback to derive `HLS_CDN_BASE`. |
 | `SONARR_URL` / `SONARR_API_KEY` | — | If unset, no `monitored=false` callback for TV |
 | `RADARR_URL` / `RADARR_API_KEY` | — | Same for movies |
 | `WORKERS` | `1` | Parallel ffmpeg jobs. **Default 1**: a single libx264 single-pass multi-bitrate encode is already CPU-saturating at the per-job thread budget; 2+ concurrent jobs on a 4c/8t Xeon thrash the scheduler and finish slower wall-clock than serial. |
 | `THREADS` | `4` | Per-ffmpeg `-threads` cap. Aim for `WORKERS * THREADS ≤ Docker cpus`. |
 | `NICE_LEVEL` | `10` | `nice -n` applied to ffmpeg subprocess. Keeps Jellyfin live-transcode (rare with HLS pipeline but possible) prioritized. |
 | `MAX_LOAD_AVG_1M` | `0` (disabled) | If > 0, workers pause when the 1-minute system load average exceeds this number. Useful for a desktop-doubling-as-server. |
-| `DEFAULT_AUDIO_LANG` | `ita` | ISO-639-2 code; the matching audio rendition is marked `default:YES` in the master playlist. Falls back to the first track if the language isn't present. Empty string disables. |
+| `DEFAULT_AUDIO_LANG` | `""` (first track) | ISO-639-2 code; the matching audio rendition is marked `default:YES` in the master playlist. Falls back to the first track if the language isn't present. |
+| `LIBX264_PRESET` | `fast` | libx264 speed/quality preset applied to every encoded variant: `ultrafast`, `superfast`, `veryfast`, `faster`, `fast`, `medium`, `slow`, `slower`, `veryslow`. |
+| `BITRATE_1080P_KBPS` | `5000` | Target bitrate (kbps) for the 1080p variant. `maxrate` auto-derives to 1.1×, `bufsize` to 2×. |
+| `BITRATE_720P_KBPS` | `2500` | Same, 720p. |
+| `BITRATE_480P_KBPS` | `1000` | Same, 480p. |
+| `COPY_1080P_MAX_BITRATE` | `1.1 × BITRATE_1080P_KBPS × 1000` (bits/s) | Source 1080p H.264 streams at or below this bitrate are bitstream-copied instead of re-encoded. |
+| `TV_PATH_PREFIX` | `tv/` | Path prefix under `MEDIA_ROOT` that routes a finished encode to Sonarr's `arr_unmonitor`. |
+| `MOVIES_PATH_PREFIX` | `movies/` | Same for Radarr. |
 | `ARR_CACHE_TTL_SECONDS` | `300` | How long Sonarr/Radarr GET responses are reused across consecutive `arr_unmonitor` calls. Saves N×library-size JSON when N items finish in burst. |
 | `RETRY_LIMIT` | `3` | Retries before giving up |
 | `SETTLE_SECONDS` | `30` | How long file size must be stable before encoding |
