@@ -262,7 +262,7 @@ services:
   # WebUI: tv.${DOMAIN}, default user/password set on first run.
   # =========================================
   threadfin:
-    image: ghcr.io/threadfin/threadfin:latest
+    image: fyb3roptik/threadfin:latest
     container_name: threadfin
     restart: unless-stopped
     environment:
