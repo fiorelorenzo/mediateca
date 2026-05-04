@@ -22,6 +22,15 @@ seerr.{$DOMAIN} {
     reverse_proxy seerr:5055
 }
 
+# Public-facing entry point. Same backend as seerr.{$DOMAIN}; this is the
+# URL we hand out to non-technical users (family, friends). They land on
+# the request UI, log in with Jellyfin credentials (SSO), browse, and the
+# "Play on Jellyfin" button bounces them to media.{$DOMAIN} for items
+# already in the library. seerr.{$DOMAIN} is kept as the admin alias.
+streaming.{$DOMAIN} {
+    reverse_proxy seerr:5055
+}
+
 homarr.{$DOMAIN} {
     reverse_proxy homarr:7575
 }
