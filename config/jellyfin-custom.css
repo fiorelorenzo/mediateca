@@ -6,13 +6,21 @@
  *   body: {"SplashscreenEnabled": false, "CustomCss": "<contents>"}
  *
  * To revert: clear the field and save.
- *
- * NOTE: tried Ultrachromic Novachromic preset earlier — looked too
- * bright. Reverted to stock Jellyfin dark theme; only the kbps-picker
- * hide rule survives.
  */
 
-/* Hide bitrate/quality picker in the video player options menu.
+/* ------------------------------------------------------------
+ * Finity (minimal variant) — modern, dark, Plex-ish theme.
+ * https://github.com/prism2001/finity
+ *
+ * NOTE: requires the user-level "Dark" theme in Jellyfin settings.
+ * For the show backdrop gradient mask to render correctly, also
+ * enable "blurred placeholders" + disable "backdrops" under the
+ * user's Display preferences.
+ * ------------------------------------------------------------ */
+@import url("https://cdn.jsdelivr.net/gh/prism2001/finity@main/minimal/finity-minimal.css");
+
+/* ------------------------------------------------------------
+ * Hide bitrate/quality picker in the video player options menu.
  * The HLS .strm content the encoder produces switches variants
  * client-side via HLS.js, so the manual kbps picker is misleading
  * (shows a number that doesn't match any of our 3 ladder variants
