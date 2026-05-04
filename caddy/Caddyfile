@@ -50,6 +50,18 @@ headscale.{$DOMAIN} {
     reverse_proxy headscale:8080
 }
 
+encoder-status.{$DOMAIN} {
+    # Read-only snapshot of the hls-encoder queue state. Refreshed by
+    # the encoder every STATUS_INTERVAL seconds (default 10s). Pollable
+    # by Homarr / cron / Prometheus blackbox.
+    header {
+        Cache-Control "no-store"
+        Access-Control-Allow-Origin "*"
+    }
+    root * /srv/encoder-status
+    file_server
+}
+
 hls.{$DOMAIN} {
     # Public HLS CDN: serves segments + playlists from the Storage Box
     # mounted read-only at /srv/hls in the Caddy container. CORS is open

@@ -40,6 +40,9 @@ services:
       # Storage Box media tree exposed read-only to serve HLS segments
       # at hls.${DOMAIN}. Encoder writes here; Caddy only reads.
       - /mnt/storagebox/data/media:/srv/hls:ro
+      # hls-encoder status snapshot exposed at encoder-status.${DOMAIN}
+      # (read-only) for Homarr / external monitoring.
+      - ./config/hls-encoder:/srv/encoder-status:ro
     environment:
       - DOMAIN=${DOMAIN}
       - ACME_EMAIL=${ACME_EMAIL}
