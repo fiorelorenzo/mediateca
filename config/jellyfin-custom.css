@@ -1,0 +1,17 @@
+/* Custom CSS injected into Jellyfin web client via:
+     Dashboard → General → Custom CSS code
+   or programmatically via:
+     POST /System/Configuration/branding
+     body: {"CustomCss": "...", "SplashscreenEnabled": false}
+
+   The HLS pipeline (see HLS_ABR_DESIGN.md) produces .strm files with a
+   master playlist of 3 video variants. HLS.js (and native player)
+   handle ABR client-side, so Jellyfin's manual kbps picker is
+   misleading — it shows a number that doesn't match any of our
+   variants and can't actually force a specific one for HLS pass-through
+   playback. Hide it. */
+
+.actionSheet [data-id="quality"],
+button[data-id="quality"] {
+    display: none !important;
+}

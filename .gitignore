@@ -12,6 +12,7 @@ caddy/config/
 !config/headscale/
 config/headscale/*
 !config/headscale/config.yaml
+!config/jellyfin-custom.css
 
 # Tooling
 .claude/
