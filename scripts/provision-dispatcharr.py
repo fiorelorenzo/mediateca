@@ -150,6 +150,45 @@ def main():
     # --- 6. EPG auto-match ---
     st, _ = c.req("POST", "/api/channels/channels/match-epg/")
     print(f"  match-epg trigger: HTTP {st}")
+
+    # --- 7. dedupe channels by normalized base name (drop +1 timeshifts,
+    #         resolution variants, [Geo-blocked]/[Italy] tags). Keep the
+    #         highest-quality copy. ---
+    import re
+    from collections import defaultdict
+    chans = bulk_get(c, "/api/channels/channels/")
+
+    def base_name(n):
+        s = (n or "").lower()
+        s = re.sub(r"\([0-9]+p\)", "", s)
+        s = re.sub(r"\[(geo-?blocked|italy|not 24/7|music|news|movies?|series|sport[s]?|"
+                   r"entertainment|general|kids|lifestyle)\]", "", s)
+        s = re.sub(r"\b(hd|sd|fullhd|fhd|uhd|4k)\b", "", s)
+        s = re.sub(r"\s*\+\s*\d+\b", "", s)
+        return re.sub(r"[^a-z0-9]+", "", s)
+
+    def quality(n):
+        s = (n or "").lower()
+        if "1080" in s or "fhd" in s:        return 4
+        if "hd" in s:                         return 3
+        if "720" in s:                        return 2
+        if "+1" in s or "+2" in s:            return 0
+        return 1
+
+    groups = defaultdict(list)
+    for ch in chans:
+        if ch:
+            groups[base_name(ch["name"])].append(ch)
+    deleted = 0
+    for k, members in groups.items():
+        if len(members) <= 1:
+            continue
+        members.sort(key=lambda ch: -quality(ch["name"]))
+        for ch in members[1:]:
+            st, _ = c.req("DELETE", f"/api/channels/channels/{ch['id']}/")
+            if st in (200, 204):
+                deleted += 1
+    print(f"  deduped: removed {deleted} duplicate channels")
     print("\nDONE — point Jellyfin at:")
     print("    Tuner    HDHomeRun  http://dispatcharr:9191/hdhr")
     print("    EPG XML  http://dispatcharr:9191/output/epg")
