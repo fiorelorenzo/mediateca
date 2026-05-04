@@ -13,6 +13,7 @@ connection.
 | TV / movie automation | [Sonarr](https://sonarr.tv) / [Radarr](https://radarr.video) |
 | Indexer aggregation | [Prowlarr](https://prowlarr.com) |
 | Subtitles | [Bazarr](https://bazarr.media) |
+| Live TV middleware (M3U / EPG / HDHomeRun emulator for Jellyfin) | [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) |
 | BitTorrent client | [qBittorrent](https://www.qbittorrent.org) (forced through ProtonVPN) |
 | Reverse proxy + automatic HTTPS | [Caddy](https://caddyserver.com) |
 | Admin dashboard | [Homarr 1.x](https://homarr.dev) |
@@ -39,6 +40,7 @@ required**, smooth playback even from mobile networks.
   - [5. Configure `.env`](#5-configure-env)
   - [6. Start the stack](#6-start-the-stack)
 - [Service configuration](#service-configuration)
+- [Live TV via Dispatcharr](#live-tv-via-dispatcharr)
 - [Indexer proxy on a home node](#indexer-proxy-on-a-home-node)
 - [Maintenance](#maintenance)
 - [Troubleshooting](#troubleshooting)
