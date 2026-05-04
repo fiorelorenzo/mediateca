@@ -32,6 +32,8 @@ See `../HLS_ABR_DESIGN.md` for the full design and rationale.
 | `THREADS` | `4` | Per-ffmpeg `-threads` cap. Aim for `WORKERS * THREADS ≤ Docker cpus`. |
 | `NICE_LEVEL` | `10` | `nice -n` applied to ffmpeg subprocess. Keeps Jellyfin live-transcode (rare with HLS pipeline but possible) prioritized. |
 | `MAX_LOAD_AVG_1M` | `0` (disabled) | If > 0, workers pause when the 1-minute system load average exceeds this number. Useful for a desktop-doubling-as-server. |
+| `DEFAULT_AUDIO_LANG` | `ita` | ISO-639-2 code; the matching audio rendition is marked `default:YES` in the master playlist. Falls back to the first track if the language isn't present. Empty string disables. |
+| `ARR_CACHE_TTL_SECONDS` | `300` | How long Sonarr/Radarr GET responses are reused across consecutive `arr_unmonitor` calls. Saves N×library-size JSON when N items finish in burst. |
 | `RETRY_LIMIT` | `3` | Retries before giving up |
 | `SETTLE_SECONDS` | `30` | How long file size must be stable before encoding |
 | `POLL_INTERVAL` | `30` | watchdog filesystem poll interval (CIFS doesn't deliver inotify) |

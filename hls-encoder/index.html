@@ -586,11 +586,14 @@ async function tick() {
     document.getElementById("done").textContent = s.jobs_by_status?.done ?? 0;
     document.getElementById("failed").textContent = s.jobs_by_status?.failed ?? 0;
 
+    // `host_load_avg` is the new key; fall back to `load_avg` for
+    // older payloads while the encoder rolls out.
+    const hostLoad = s.host_load_avg ?? s.load_avg ?? {};
     renderLoad(
       s.cpu_percent,
       s.cpu_limit,
-      s.load_avg?.["1m"],
-      s.load_avg?.["5m"],
+      hostLoad["1m"],
+      hostLoad["5m"],
     );
 
     const cacheGB = s.cache_free_gb;

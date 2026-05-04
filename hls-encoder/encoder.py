@@ -85,6 +85,16 @@ STATUS_PATH = Path(os.environ.get("STATUS_PATH", "/config/status.json"))
 STATUS_INTERVAL = int(os.environ.get("STATUS_INTERVAL", "10"))
 HISTORY_LIMIT = int(os.environ.get("HISTORY_LIMIT", "20"))
 
+# Audio rendition with this language tag becomes default in the master
+# playlist. Falls back to the first rendition if the chosen language
+# isn't present in the source. Empty string = always use the first track.
+DEFAULT_AUDIO_LANG = os.environ.get("DEFAULT_AUDIO_LANG", "ita").strip().lower()
+
+# How long Sonarr/Radarr GET responses are reused across consecutive
+# encodes before being re-fetched. Saves N×library-size JSON when N
+# items finish in burst.
+ARR_CACHE_TTL_SECONDS = int(os.environ.get("ARR_CACHE_TTL_SECONDS", "300"))
+
 VIDEO_EXTS = {".mkv", ".mp4", ".m4v", ".ts", ".mov", ".avi"}
 
 logging.basicConfig(
@@ -144,7 +154,9 @@ def db_init() -> sqlite3.Connection:
             updated_at INTEGER NOT NULL,
             duration_seconds REAL,
             encode_seconds REAL,
-            mode TEXT
+            mode TEXT,
+            source_size INTEGER,
+            source_mtime INTEGER
         )
         """
     )
@@ -153,6 +165,8 @@ def db_init() -> sqlite3.Connection:
         "duration_seconds REAL",
         "encode_seconds REAL",
         "mode TEXT",
+        "source_size INTEGER",
+        "source_mtime INTEGER",
     ):
         try:
             conn.execute(f"ALTER TABLE jobs ADD COLUMN {col_def}")
@@ -163,21 +177,45 @@ def db_init() -> sqlite3.Connection:
 
 def job_get(conn: sqlite3.Connection, path: str) -> Optional[dict]:
     row = conn.execute(
-        "SELECT status, attempts FROM jobs WHERE path = ?", (path,),
+        "SELECT status, attempts, source_size, source_mtime FROM jobs WHERE path = ?",
+        (path,),
     ).fetchone()
     if not row:
         return None
-    return {"status": row[0], "attempts": row[1]}
+    return {
+        "status": row[0],
+        "attempts": row[1],
+        "source_size": row[2],
+        "source_mtime": row[3],
+    }
+
+
+def _source_signature(path: Path) -> Optional[tuple[int, int]]:
+    """(size, mtime_int) for comparison; None if file not readable."""
+    try:
+        st = path.stat()
+        return (st.st_size, int(st.st_mtime))
+    except OSError:
+        return None
 
 
 def claim_job(conn: sqlite3.Connection, path: str) -> bool:
-    """Atomically reserve `path`. Returns True if this caller should encode it."""
+    """Atomically reserve `path`. Returns True if this caller should encode it.
+
+    A row with status='done' is NOT a block: the encoder normally deletes
+    the source on success, so seeing the file again means either:
+      a) the user re-imported (re-added in Sonarr/Radarr) — re-encode
+      b) the unlink at the end of a previous encode failed silently —
+         the bundle is already complete and we just need to clean up
+    process() distinguishes the two by comparing the source signature
+    (size + mtime) against what's stored in the jobs row.
+    """
     with CLAIM_LOCK:
         state = job_get(conn, path)
         if state:
-            if state["status"] in ("done", "in_progress"):
+            if state["status"] == "in_progress":
                 return False
-            if state["attempts"] >= RETRY_LIMIT:
+            if state["status"] == "failed" and state["attempts"] >= RETRY_LIMIT:
                 return False
         now = int(time.time())
         conn.execute(
@@ -203,6 +241,8 @@ def job_finish(
     duration_seconds: Optional[float] = None,
     encode_seconds: Optional[float] = None,
     mode: Optional[str] = None,
+    source_size: Optional[int] = None,
+    source_mtime: Optional[int] = None,
 ) -> None:
     now = int(time.time())
     conn.execute(
@@ -213,19 +253,29 @@ def job_finish(
             updated_at = ?,
             duration_seconds = COALESCE(?, duration_seconds),
             encode_seconds = COALESCE(?, encode_seconds),
-            mode = COALESCE(?, mode)
+            mode = COALESCE(?, mode),
+            source_size = COALESCE(?, source_size),
+            source_mtime = COALESCE(?, source_mtime)
         WHERE path = ?
         """,
-        (status, error, now, duration_seconds, encode_seconds, mode, path),
+        (status, error, now, duration_seconds, encode_seconds, mode,
+         source_size, source_mtime, path),
     )
 
 
 def recover_stale_in_progress(conn: sqlite3.Connection) -> None:
-    """Mark in_progress jobs from a previous run as failed so they retry."""
+    """Mark in_progress jobs from a previous run as failed so they retry.
+
+    Increments `attempts` so a deterministic crash (file that always
+    crashes ffmpeg) eventually trips the retry limit instead of looping.
+    """
     n = conn.execute(
-        "UPDATE jobs SET status='failed', "
-        "last_error='stale in_progress (process died)', "
-        "updated_at=? WHERE status='in_progress'",
+        "UPDATE jobs SET "
+        "  status='failed', "
+        "  attempts = attempts + 1, "
+        "  last_error='stale in_progress (process died)', "
+        "  updated_at=? "
+        "WHERE status='in_progress'",
         (int(time.time()),),
     ).rowcount
     if n:
@@ -361,16 +411,32 @@ def build_ffmpeg_cmd(
             f"-sc_threshold:v:{idx}", "0",
         ]
 
-    # One audio output per source audio stream. With `name:` set in
-    # var_stream_map FFmpeg uses the name as the directory token.
+    # Pre-flight: drop audio streams without a usable `index` field
+    # (corrupted / non-standard ffprobe output). One audio output per
+    # remaining track. With `name:` set in var_stream_map FFmpeg uses
+    # the name as the directory token.
+    sane_audio = [a for a in audio_streams if isinstance(a.get("index"), int)]
+
     var_stream_parts = [
         "v:0,agroup:audio,name:v1080",
         "v:1,agroup:audio,name:v720",
         "v:2,agroup:audio,name:v480",
     ]
-    for i, astream in enumerate(audio_streams):
+
+    # Pick the index whose language tag matches DEFAULT_AUDIO_LANG; fall
+    # back to 0 (the first track) if no match. With DEFAULT_AUDIO_LANG=""
+    # we always use 0.
+    audio_langs = [
+        (a.get("tags", {}).get("language") or "und").lower()
+        for a in sane_audio
+    ]
+    default_idx = 0
+    if DEFAULT_AUDIO_LANG and DEFAULT_AUDIO_LANG in audio_langs:
+        default_idx = audio_langs.index(DEFAULT_AUDIO_LANG)
+
+    for i, astream in enumerate(sane_audio):
         src_idx = astream["index"]
-        lang = astream.get("tags", {}).get("language", "und")
+        lang = audio_langs[i]
         cmd += [
             "-map", f"0:{src_idx}",
             f"-c:a:{i}", "aac",
@@ -378,10 +444,21 @@ def build_ffmpeg_cmd(
             f"-ac:{i}", "2",
             f"-ar:{i}", "48000",
         ]
-        default = ",default:YES" if i == 0 else ""
+        default = ",default:YES" if i == default_idx else ""
         var_stream_parts.append(
             f"a:{i},agroup:audio,name:audio_{lang}_{i},language:{lang}{default}"
         )
+
+    # If the source has no audio at all, drop the AUDIO group entirely
+    # from the variant declarations — HLS spec requires a referenced
+    # group to actually exist. Video-only is a rare case (silent films,
+    # old documentaries) but harmless to support.
+    if not sane_audio:
+        var_stream_parts = [
+            "v:0,name:v1080",
+            "v:1,name:v720",
+            "v:2,name:v480",
+        ]
 
     cmd += [
         "-f", "hls",
@@ -401,6 +478,36 @@ def build_ffmpeg_cmd(
 # Sonarr / Radarr API
 # ---------------------------------------------------------------------------
 
+# (data, fetched_at_monotonic). The encoder serialises calls anyway, so a
+# plain global with a lock is enough — no need for an LRU.
+_arr_cache_lock = threading.Lock()
+_sonarr_episodefile_cache: tuple[Optional[list], float] = (None, 0.0)
+_radarr_movie_cache: tuple[Optional[list], float] = (None, 0.0)
+
+
+def _arr_get(url: str, params: dict, cache_attr: str) -> Optional[list]:
+    """GET that caches the result for ARR_CACHE_TTL_SECONDS. cache_attr is
+    the name of the global tuple holding (data, ts)."""
+    with _arr_cache_lock:
+        data, ts = globals()[cache_attr]
+        if data is not None and (time.monotonic() - ts) < ARR_CACHE_TTL_SECONDS:
+            return data
+    try:
+        r = requests.get(url, params=params, timeout=15)
+        r.raise_for_status()
+        fresh = r.json()
+    except Exception as exc:
+        log.warning("arr GET %s failed: %s", url, exc)
+        return None
+    with _arr_cache_lock:
+        globals()[cache_attr] = (fresh, time.monotonic())
+    return fresh
+
+
+def _arr_invalidate(cache_attr: str) -> None:
+    with _arr_cache_lock:
+        globals()[cache_attr] = (None, 0.0)
+
 
 def arr_unmonitor(rel_path: str) -> None:
     """Best-effort: tell Sonarr (TV) or Radarr (movies) to stop monitoring."""
@@ -412,23 +519,24 @@ def arr_unmonitor(rel_path: str) -> None:
 
 def _sonarr_unmonitor(rel_path: str) -> None:
     full = f"/data/media/{rel_path}"
+    files = _arr_get(
+        f"{SONARR_URL}/api/v3/episodefile",
+        {"apikey": SONARR_KEY},
+        "_sonarr_episodefile_cache",
+    )
+    if files is None:
+        return
+    target = next((ef for ef in files if ef.get("path") == full), None)
+    if not target:
+        log.warning("sonarr: no episodefile match for %s", full)
+        return
     try:
-        r = requests.get(
-            f"{SONARR_URL}/api/v3/episodefile",
-            params={"apikey": SONARR_KEY},
-            timeout=10,
-        )
-        r.raise_for_status()
-        target = next((ef for ef in r.json() if ef.get("path") == full), None)
-        if not target:
-            log.warning("sonarr: no episodefile match for %s", full)
-            return
         sid = target["seriesId"]
         eid = target["id"]
         re_resp = requests.get(
             f"{SONARR_URL}/api/v3/episode",
             params={"seriesId": sid, "apikey": SONARR_KEY},
-            timeout=10,
+            timeout=15,
         )
         re_resp.raise_for_status()
         eps = [e["id"] for e in re_resp.json() if e.get("episodeFileId") == eid]
@@ -437,39 +545,46 @@ def _sonarr_unmonitor(rel_path: str) -> None:
                 f"{SONARR_URL}/api/v3/episode/monitor",
                 params={"apikey": SONARR_KEY},
                 json={"episodeIds": eps, "monitored": False},
-                timeout=10,
+                timeout=15,
             )
             log.info("sonarr: unmonitored %d episode(s) for %s", len(eps), full)
     except Exception as exc:
         log.warning("sonarr unmonitor failed for %s: %s", rel_path, exc)
+    finally:
+        # the file's monitored state changed; a stale cache would mismatch
+        # the next encode for the same series.
+        _arr_invalidate("_sonarr_episodefile_cache")
 
 
 def _radarr_unmonitor(rel_path: str) -> None:
     full = f"/data/media/{rel_path}"
+    movies = _arr_get(
+        f"{RADARR_URL}/api/v3/movie",
+        {"apikey": RADARR_KEY},
+        "_radarr_movie_cache",
+    )
+    if movies is None:
+        return
+    target = next(
+        (m for m in movies if m.get("movieFile", {}).get("path") == full),
+        None,
+    )
+    if not target:
+        log.warning("radarr: no movie match for %s", full)
+        return
     try:
-        r = requests.get(
-            f"{RADARR_URL}/api/v3/movie",
-            params={"apikey": RADARR_KEY},
-            timeout=10,
-        )
-        r.raise_for_status()
-        target = next(
-            (m for m in r.json() if m.get("movieFile", {}).get("path") == full),
-            None,
-        )
-        if not target:
-            log.warning("radarr: no movie match for %s", full)
-            return
         target["monitored"] = False
         requests.put(
             f"{RADARR_URL}/api/v3/movie/{target['id']}",
             params={"apikey": RADARR_KEY},
             json=target,
-            timeout=10,
+            timeout=15,
         )
         log.info("radarr: unmonitored movie for %s", full)
     except Exception as exc:
         log.warning("radarr unmonitor failed for %s: %s", rel_path, exc)
+    finally:
+        _arr_invalidate("_radarr_movie_cache")
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +653,19 @@ def _untrack_proc(path: str) -> None:
         ACTIVE_PROCS.pop(path, None)
 
 
+def _bundle_complete(target_dir: Path) -> bool:
+    """True if the .hls bundle on disk is structurally complete."""
+    if not target_dir.is_dir():
+        return False
+    if not (target_dir / "master.m3u8").exists():
+        return False
+    for v in ("v1080", "v720", "v480"):
+        pl = target_dir / v / "playlist.m3u8"
+        if not pl.exists() or pl.stat().st_size == 0:
+            return False
+    return True
+
+
 def process(conn: sqlite3.Connection, source: Path) -> None:
     if not source.exists():
         return
@@ -551,27 +679,72 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
     rel = source.relative_to(MEDIA_ROOT)
     rel_str = str(rel)
     src_key = str(source)
+    target_dir = source.parent / f".{source.stem}.hls"
+    strm_path = source.with_suffix(".strm")
+
+    # Idempotency: if the bundle is already complete AND the source's
+    # signature matches what we encoded last time, just clean up the
+    # leftover source and call it done. This handles the case where a
+    # previous run wrote the bundle but failed to unlink the source
+    # (e.g. CIFS hiccup), so we don't waste hours re-encoding.
+    sig = _source_signature(source)
+    state_pre = job_get(conn, src_key)
+    if (
+        state_pre
+        and state_pre["status"] == "done"
+        and sig is not None
+        and state_pre.get("source_size") == sig[0]
+        and state_pre.get("source_mtime") == sig[1]
+        and _bundle_complete(target_dir)
+        and strm_path.exists()
+    ):
+        log.info("already encoded, cleaning up leftover source: %s", rel_str)
+        try:
+            source.unlink()
+        except OSError as exc:
+            log.warning("could not unlink leftover source %s: %s", source, exc)
+        return
 
     if not claim_job(conn, src_key):
         return
 
     log.info("encoding: %s", rel_str)
     cache_dir: Optional[Path] = None
+    proc: Optional[subprocess.Popen] = None
     duration = 0.0
     encode_seconds = 0.0
     mode = "encode"
+    expected_failure = False  # decides log.warning vs log.exception
     try:
         _wait_settled(source)
         if SHUTDOWN.is_set():
+            expected_failure = True
             raise RuntimeError("shutdown requested before encode start")
 
+        # Re-stat after settle (mtime may have moved while file was being
+        # written). This is the signature we'll persist on success.
+        sig = _source_signature(source)
+        if sig is None:
+            expected_failure = True
+            raise RuntimeError("source vanished during settle")
+
         meta = ffprobe(source)
-        videos = [s for s in meta.get("streams", []) if s.get("codec_type") == "video"]
-        audios = [s for s in meta.get("streams", []) if s.get("codec_type") == "audio"]
+        # Skip cover-art / poster streams (mjpeg-style attached_pic) so
+        # the real video stream is what drives the encode.
+        videos = [
+            s for s in meta.get("streams", [])
+            if s.get("codec_type") == "video"
+            and not s.get("disposition", {}).get("attached_pic")
+        ]
+        audios = [
+            s for s in meta.get("streams", [])
+            if s.get("codec_type") == "audio"
+        ]
         if not videos:
+            expected_failure = True
             raise RuntimeError("no video stream")
         if not audios:
-            raise RuntimeError("no audio stream")
+            log.warning("source has no audio: %s — encoding video-only", rel_str)
         try:
             duration = float(meta.get("format", {}).get("duration", 0) or 0)
         except (TypeError, ValueError):
@@ -584,28 +757,46 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         cmd = build_ffmpeg_cmd(source, audios, cache_dir, copy_1080p=copy_1080)
         log.debug("ffmpeg: %s", " ".join(cmd))
 
-        _set_active(src_key, started=int(time.time()), mode=mode, duration=duration, rel=rel_str)
+        _set_active(
+            src_key, started=int(time.time()), mode=mode,
+            duration=duration, rel=rel_str,
+        )
         t0 = time.time()
         proc = subprocess.Popen(
             cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
-            text=True, bufsize=1,
+            text=True, bufsize=1, start_new_session=True,
         )
         _track_proc(src_key, proc)
+
         last_log = 0.0
-        for line in proc.stderr:
-            line = line.rstrip()
-            if not line:
-                continue
-            if line.startswith("frame=") or line.startswith("size="):
-                _set_active(src_key, progress=line, last_progress_ts=int(time.time()))
-                now = time.time()
-                if now - last_log >= 10:
+        try:
+            for line in proc.stderr:
+                line = line.rstrip()
+                if not line:
+                    continue
+                if line.startswith("frame=") or line.startswith("size="):
+                    _set_active(
+                        src_key, progress=line,
+                        last_progress_ts=int(time.time()),
+                    )
+                    now = time.time()
+                    if now - last_log >= 10:
+                        log.info("ffmpeg %s: %s", rel_str, line)
+                        last_log = now
+                else:
                     log.info("ffmpeg %s: %s", rel_str, line)
-                    last_log = now
-            else:
-                log.info("ffmpeg %s: %s", rel_str, line)
-        proc.wait(timeout=4 * 3600)
-        _untrack_proc(src_key)
+            proc.wait(timeout=4 * 3600)
+        finally:
+            # Make sure we don't leak ffmpeg if anything in the read loop
+            # raised — terminate, then wait briefly.
+            if proc.poll() is None:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait(timeout=5)
+
         if proc.returncode != 0:
             raise RuntimeError(f"ffmpeg exited {proc.returncode}")
         encode_seconds = time.time() - t0
@@ -615,34 +806,44 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
                 mode, rel_str, duration, encode_seconds, duration / encode_seconds,
             )
         else:
-            log.info("encode complete (%s): %s — %.1fs wall", mode, rel_str, encode_seconds)
+            log.info("encode complete (%s): %s — %.1fs wall",
+                     mode, rel_str, encode_seconds)
 
-        master = cache_dir / "master.m3u8"
-        if not master.exists():
-            raise RuntimeError("master.m3u8 missing after ffmpeg")
-        for variant_dir in ("v1080", "v720", "v480"):
-            pl = cache_dir / variant_dir / "playlist.m3u8"
-            if not pl.exists() or pl.stat().st_size == 0:
-                raise RuntimeError(f"variant {variant_dir} playlist empty")
+        if not _bundle_complete(cache_dir):
+            raise RuntimeError("bundle missing master/variant playlists after ffmpeg")
 
-        target_dir = source.parent / f".{source.stem}.hls"
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        if cache_dir.stat().st_dev == target_dir.parent.stat().st_dev:
-            cache_dir.rename(target_dir)
+        # Move into final location via a sibling .tmp dir on the
+        # destination filesystem. This narrows the "missing bundle"
+        # window from minutes (full copytree to CIFS) to a single
+        # rmtree+rename, which is sub-second on CIFS.
+        staging_dir = source.parent / f".{source.stem}.hls.tmp"
+        if staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
+        if cache_dir.stat().st_dev == staging_dir.parent.stat().st_dev:
+            cache_dir.rename(staging_dir)
         else:
-            shutil.copytree(cache_dir, target_dir)
-            shutil.rmtree(cache_dir)
+            shutil.copytree(cache_dir, staging_dir)
+            shutil.rmtree(cache_dir, ignore_errors=True)
         cache_dir = None  # don't double-clean below
 
-        strm = source.with_suffix(".strm")
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        staging_dir.rename(target_dir)
+
         rel_hls = rel.parent / f".{source.stem}.hls"
         url = f"{CDN_BASE}/{urllib.parse.quote(str(rel_hls))}/master.m3u8"
-        strm.write_text(url + "\n")
-        log.info("strm written: %s -> %s", strm, url)
+        strm_path.write_text(url + "\n")
+        log.info("strm written: %s -> %s", strm_path, url)
 
-        source.unlink()
-        log.info("source deleted: %s", source)
+        try:
+            source.unlink()
+            log.info("source deleted: %s", source)
+        except OSError as exc:
+            # The bundle is complete and the .strm is in place. We accept
+            # the source as a leftover; next encoder pass with matching
+            # signature will skip via the idempotency check.
+            log.warning("source unlink failed (will retry next pass): %s — %s",
+                        source, exc)
 
         arr_unmonitor(rel_str)
 
@@ -651,6 +852,8 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
             duration_seconds=duration,
             encode_seconds=encode_seconds,
             mode=mode,
+            source_size=sig[0],
+            source_mtime=sig[1],
         )
         _push_recent({
             "ts": int(time.time()),
@@ -663,7 +866,10 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         })
     except Exception as exc:
         msg = str(exc)
-        log.exception("failed: %s -> %s", rel_str, msg)
+        if expected_failure:
+            log.warning("failed: %s -> %s", rel_str, msg)
+        else:
+            log.exception("failed: %s -> %s", rel_str, msg)
         job_finish(conn, src_key, "failed", error=msg, mode=mode)
         _push_recent({
             "ts": int(time.time()),
@@ -739,7 +945,13 @@ def worker_loop(conn: sqlite3.Connection, q: queue.Queue) -> None:
 
 
 def initial_scan(conn: sqlite3.Connection, q: queue.Queue) -> None:
-    """Catch up on files that arrived while encoder was down."""
+    """Catch up on files that arrived while encoder was down.
+
+    Enqueues anything not currently held by another worker and not in a
+    permanently-failed state. 'done' rows are still enqueued because the
+    file's presence implies a re-import; process() short-circuits if the
+    source signature hasn't actually changed since the previous encode.
+    """
     for p in MEDIA_ROOT.rglob("*"):
         if not p.is_file():
             continue
@@ -748,9 +960,10 @@ def initial_scan(conn: sqlite3.Connection, q: queue.Queue) -> None:
         if any(part.endswith(".hls") for part in p.parts):
             continue
         state = job_get(conn, str(p))
-        if state and state["status"] == "done":
+        if state and state["status"] == "in_progress":
             continue
-        if state and state["attempts"] >= RETRY_LIMIT:
+        if (state and state["status"] == "failed"
+                and state["attempts"] >= RETRY_LIMIT):
             continue
         q.put(p)
 
@@ -858,9 +1071,13 @@ def status_writer(conn: sqlite3.Connection, q: queue.Queue) -> None:
                 "workers": WORKERS,
                 "threads_per_job": THREADS,
                 "nice": NICE_LEVEL,
+                "default_audio_lang": DEFAULT_AUDIO_LANG,
                 "cpu_percent": cpu_percent,
                 "cpu_limit": cpu_limit,
-                "load_avg": {"1m": load1, "5m": load5, "15m": load15},
+                # `host_load_avg` is renamed from `load_avg` to make
+                # crystal clear it's the host's, not the container's.
+                # Container CPU is `cpu_percent` above.
+                "host_load_avg": {"1m": load1, "5m": load5, "15m": load15},
                 "load_gate": MAX_LOAD_AVG_1M,
                 "load_gate_blocking": load_gate_blocked(),
                 "cache_free_gb": round(cache_free_gb(), 1),
@@ -897,15 +1114,19 @@ def install_signal_handlers() -> None:
     def handler(signum, frame):
         log.info("received signal %d, shutting down", signum)
         SHUTDOWN.set()
-        # Send SIGTERM to in-flight ffmpeg so the container exits cleanly.
+        # Send SIGTERM to the whole process group of each in-flight
+        # ffmpeg (we use start_new_session=True), so any helpers ffmpeg
+        # spawned go down with it instead of being reparented to PID 1.
         with ACTIVE_PROCS_LOCK:
             procs = list(ACTIVE_PROCS.items())
         for path, proc in procs:
             try:
                 log.info("terminating ffmpeg for %s", path)
-                proc.terminate()
-            except Exception:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except (ProcessLookupError, PermissionError):
                 pass
+            except Exception as exc:
+                log.warning("could not signal ffmpeg pgid=%s: %s", proc.pid, exc)
 
     signal.signal(signal.SIGTERM, handler)
     signal.signal(signal.SIGINT, handler)
