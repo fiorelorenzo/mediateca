@@ -1,15 +1,16 @@
 # Tiny nginx middleware between Caddy and Seerr.
-# Reason it exists: Seerr's "Play on Jellyfin" button is hardcoded in
-# the React bundle with target="_blank". We don't want to fork Seerr
-# and we don't want to hand-patch the .next/static chunks at every
-# version bump, so we intercept the HTML response and drop in a small
-# script that removes the target on Jellyfin-bound links.
+# Two reasons it exists:
+#   1. Seerr's "Play on Jellyfin" button is hardcoded in the React bundle
+#      with target="_blank". We rewrite those links to open in the same tab.
+#   2. Seerr has no Live TV concept; we inject a small floating "Live TV"
+#      pill that deep-links to Jellyfin's Live TV UI, so end-users see
+#      one entry point at streaming.<DOMAIN>.
 #
 # This file is processed by envsubst at container start (nginx:alpine
 # auto-runs that on anything in /etc/nginx/templates/*.template). The
-# only variable substituted is ${JELLYFIN_HOST} below — everything
-# else uses nginx's own $variable syntax (no braces) which envsubst
-# leaves alone.
+# only variables substituted are ${JELLYFIN_HOST} and ${LIVETV_URL}
+# below — everything else uses nginx's own $variable syntax (no braces)
+# which envsubst leaves alone.
 #
 # Caddy proxies streaming.<DOMAIN> → seerr-inject:80 (this server)
 #                                 → seerr:5055 (real backend)
@@ -18,16 +19,16 @@ server {
     listen 80;
     server_name _;
 
-    # Self-contained JS endpoint we inject into the HTML response
-    # below. document.body may not exist when this script first runs
-    # (we inject before </body>, but Next.js may still be hydrating);
-    # the MutationObserver handles links rendered later. The hostname
-    # check restricts the rewrite to links that actually point at the
-    # configured Jellyfin host so we don't disturb other external
-    # links that legitimately want to open in a new tab.
+    # Self-contained JS endpoint we inject into the HTML response below.
+    # Two responsibilities (kept small enough to inline):
+    #   _killBlank: rewrite a[target=_blank] → same-tab for Jellyfin links.
+    #   _addLiveTv: insert a fixed floating button bottom-right linking to
+    #               Jellyfin's Live TV section.
+    # Both run on initial load + MutationObserver to survive Next.js
+    # client-side route changes that re-render the DOM.
     location = /__seerr-inject/no-blank.js {
         default_type application/javascript;
-        return 200 'var _JF_HOST="${JELLYFIN_HOST}";function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname===_JF_HOST){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}\n_killBlank();\nnew MutationObserver(_killBlank).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["href","target"]});';
+        return 200 'var _JF_HOST="${JELLYFIN_HOST}";var _LIVETV_URL="${LIVETV_URL}";function _killBlank(){document.querySelectorAll(\'a[target="_blank"]\').forEach(function(a){try{var u=new URL(a.href);if(u.hostname===_JF_HOST){a.removeAttribute("target");a.removeAttribute("rel");}}catch(e){}});}function _addLiveTv(){if(document.getElementById("__livetv_pill"))return;if(!document.body)return;var a=document.createElement("a");a.id="__livetv_pill";a.href=_LIVETV_URL;a.textContent="📺 Live TV";a.style.cssText="position:fixed;bottom:20px;right:20px;z-index:9999;padding:10px 16px;background:#4f46e5;color:#fff;border-radius:24px;font:600 14px/1 system-ui,sans-serif;text-decoration:none;box-shadow:0 4px 12px rgba(0,0,0,.3);transition:transform .15s";a.onmouseenter=function(){a.style.transform="scale(1.05)"};a.onmouseleave=function(){a.style.transform="scale(1)"};document.body.appendChild(a);}_killBlank();_addLiveTv();new MutationObserver(function(){_killBlank();_addLiveTv();}).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:["href","target"]});';
     }
 
     location / {

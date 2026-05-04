@@ -64,6 +64,7 @@ your `DOMAIN`:
 | `radarr.<DOMAIN>` | Radarr | Movie automation |
 | `prowlarr.<DOMAIN>` | Prowlarr | Indexer manager |
 | `bazarr.<DOMAIN>` | Bazarr | Automatic subtitle downloads |
+| `tv.<DOMAIN>` | Threadfin | IPTV middleware (HDHomeRun emulator for Jellyfin Live TV) |
 | `qbit.<DOMAIN>` | qBittorrent | Torrent client (egress via ProtonVPN) |
 | `headscale.<DOMAIN>` | Headscale | Self-hosted Tailscale coordination server |
 | `hls.<DOMAIN>` | static file server | Public read-only CDN for HLS segments + master playlists |
@@ -324,6 +325,7 @@ your server's public IPv4. Use AAAA for v6 if you have it.
 | A | `radarr` | `<HOST-IP>` |
 | A | `prowlarr` | `<HOST-IP>` |
 | A | `bazarr` | `<HOST-IP>` |
+| A | `tv` | `<HOST-IP>` |
 | A | `qbit` | `<HOST-IP>` |
 | A | `headscale` | `<HOST-IP>` |
 | A | `hls` | `<HOST-IP>` |
@@ -545,6 +547,94 @@ when watching HLS pass-through content). Each user must additionally
 set, under their Display preferences (`/web/#/mypreferencesdisplay.html`):
 Theme = Dark, blurred placeholders ON, backdrops OFF — these are
 per-user and not enforceable server-side.
+
+## Live TV via Threadfin
+
+The stack ships with **[Threadfin](https://github.com/Threadfin/Threadfin)**
+(an actively-maintained xTeVe fork) as an IPTV middleware. It ingests
+any number of M3U playlists, dedupes / maps channels, applies XMLTV EPG,
+and exposes a fake **HDHomeRun** tuner that Jellyfin's Live TV
+auto-detects. Critical feature for self-hosted IPTV: it **buffers each
+upstream channel once** and fans the stream out to N Jellyfin clients,
+which avoids the "too many concurrent streams" ban most providers apply.
+
+### 1 — First-run setup
+
+Open `https://tv.<DOMAIN>` and walk through Threadfin's first-run wizard:
+
+- Set an admin user + password.
+- Tuners: leave at default (1) for now; raise once you know how many
+  channels your viewers will watch concurrently.
+- Buffer: enable, mode `Threadfin` (built-in, no ffmpeg needed for most
+  M3U sources).
+
+### 2 — Add free + Italian sources
+
+Settings → Playlist → Add (M3U), repeat for each:
+
+| Source | M3U URL | EPG URL |
+| --- | --- | --- |
+| iptv-org Italy | `https://iptv-org.github.io/iptv/countries/it.m3u` | use the per-country EPG project at <https://github.com/iptv-org/epg> |
+| Pluto TV (IT) | `https://i.mjh.nz/PlutoTV/it.m3u8` | `https://i.mjh.nz/PlutoTV/it.xml.gz` |
+| Samsung TV Plus (IT) | `https://i.mjh.nz/SamsungTVPlus/it.m3u8` | `https://i.mjh.nz/SamsungTVPlus/it.xml.gz` |
+| Plex FAST (multi) | `https://i.mjh.nz/Plex/all.m3u8` | `https://i.mjh.nz/Plex/all.xml.gz` |
+| Free-TV / IPTV Italy | `https://raw.githubusercontent.com/Free-TV/IPTV/master/playlists/playlist_italy.m3u8` | reuse iptv-org epg |
+
+Settings → XMLTV → Add the EPG URLs above.
+
+The [Matt Huisman scrapers](https://i.mjh.nz/) (Pluto/Samsung/Plex) are
+the most reliable: maintained, region-filtered, EPG bundled. Start with
+those and iptv-org IT for ~200 stable channels with metadata.
+
+### 3 — Italian geo-locked sources (RaiPlay, etc.)
+
+Endpoints like RaiPlay's HLS feeds check geographic IP. The server is
+in a datacenter (DE / FI / wherever) — those streams will fail.
+
+The same indexer-proxy pattern used for Prowlarr works here: route
+Threadfin's outbound HTTP through the home-node `tinyproxy` so requests
+exit with an Italian residential IP.
+
+In `docker-compose.yml`, uncomment the proxy env block on the threadfin
+service:
+
+```yaml
+- HTTP_PROXY=http://100.64.0.3:8888
+- HTTPS_PROXY=http://100.64.0.3:8888
+- NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,homarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
+```
+
+Replace `100.64.0.3` with your home node's tailnet IP. Then
+`docker compose up -d --force-recreate threadfin`.
+
+**Don't enable the proxy until you actually need IT-locked sources** —
+it adds latency to every M3U/EPG fetch and stream.
+
+### 4 — Wire Threadfin to Jellyfin
+
+In Jellyfin: Dashboard → Live TV → Add Tuner → **HDHomeRun**, URL:
+`http://threadfin:34400`. Apply, scan. Channels appear under the Live
+TV tab. EPG populates after the next scheduled XMLTV refresh
+(Threadfin defaults to every 4 hours; you can force it from
+Settings → XMLTV → Update now).
+
+End-users hit the same `streaming.<DOMAIN>` (Seerr) entry point as
+before; the floating **📺 Live TV** pill in the bottom-right corner of
+Seerr — injected by the `seerr-inject` sidecar — bounces them to
+Jellyfin's Live TV section in the same tab.
+
+### 5 — Grey-market providers (deferred)
+
+Paid IPTV resellers exist that bundle Sky / DAZN / Netflix / pay-TV
+into a single M3U for €10-15/month. They're **illegal** in most
+jurisdictions (unauthorized retransmission), unstable (frequent
+takedowns), and exposing a datacenter host to known grey-market URLs
+risks DMCA / takedown notices reaching the cloud provider. This stack
+deliberately doesn't recommend specific providers — if you go that
+route, you'll need to:
+
+- Always route Threadfin through `home-proxy` (residential exit), and
+- Audit the provider's M3U/EPG host reputation before enabling.
 
 ## Indexer proxy on a home node
 

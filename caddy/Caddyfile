@@ -58,6 +58,13 @@ headscale.{$DOMAIN} {
     reverse_proxy headscale:8080
 }
 
+# Threadfin — IPTV middleware. Aggregates M3U playlists, dedupes channels,
+# proxies streams (1 connection per channel shared across N Jellyfin clients),
+# emulates HDHomeRun so Jellyfin auto-discovers it.
+tv.{$DOMAIN} {
+    reverse_proxy threadfin:34400
+}
+
 encoder-status.{$DOMAIN} {
     # Read-only snapshot of the hls-encoder queue state. Refreshed by
     # the encoder every STATUS_INTERVAL seconds (default 10s). Pollable

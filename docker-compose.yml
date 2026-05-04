@@ -240,14 +240,46 @@ services:
       - seerr
     environment:
       # nginx:alpine's entrypoint runs envsubst on
-      # /etc/nginx/templates/*.template at startup; the only variable
-      # we substitute is JELLYFIN_HOST below.
+      # /etc/nginx/templates/*.template at startup. Variables below get
+      # substituted into the rendered config.
       - JELLYFIN_HOST=media.${DOMAIN}
+      - LIVETV_URL=https://media.${DOMAIN}/web/index.html#/livetv.html
       # Limit envsubst to the variables we actually want; defends
       # against accidental substitution of unrelated env names.
-      - NGINX_ENVSUBST_FILTER=^JELLYFIN_HOST$$
+      - NGINX_ENVSUBST_FILTER=^(JELLYFIN_HOST|LIVETV_URL)$$
     volumes:
       - ./caddy/seerr-inject.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks:
+      - servarr
+
+  # =========================================
+  # Threadfin — IPTV middleware (xTeVe fork). Ingests M3U playlists from
+  # any number of providers, dedupes/maps channels, applies XMLTV EPG, and
+  # exposes a fake HDHomeRun tuner that Jellyfin's Live TV auto-detects
+  # (Dashboard → Live TV → Add tuner → HDHomeRun → http://threadfin:34400).
+  # Buffers each upstream channel once and fan-outs to N clients, which
+  # avoids the "too many concurrent streams" ban most IPTV providers apply.
+  # WebUI: tv.${DOMAIN}, default user/password set on first run.
+  # =========================================
+  threadfin:
+    image: ghcr.io/threadfin/threadfin:latest
+    container_name: threadfin
+    restart: unless-stopped
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ:-UTC}
+      # Optional: route Threadfin's outbound HTTP through the home-node
+      # tinyproxy on the tailnet, for sources geo-locked to Italy
+      # (RaiPlay scrapers, Mediaset). Leave unset (default) for sources
+      # that work from a datacenter IP — most international FAST channels
+      # plus iptv-org's curated lists.
+      # - HTTP_PROXY=http://100.64.0.3:8888
+      # - HTTPS_PROXY=http://100.64.0.3:8888
+      # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,homarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
+    volumes:
+      - ./config/threadfin/conf:/home/threadfin/conf
+      - ./config/threadfin/temp:/tmp/threadfin
     networks:
       - servarr
 
