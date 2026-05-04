@@ -10,10 +10,12 @@ or commercial-VPN ASNs. A custom **`hls-encoder`** service produces a
 it via a public CDN subdomain — Jellyfin streams `.strm` references with
 zero live transcoding.
 
-> The stack currently runs on `server01`, a Hetzner Server Auction
-> dedicated (Xeon E3-1275v6, 64 GB ECC, 2× 512 GB NVMe RAID 1, HEL1).
-> The original CPX22 cloud VPS in Falkenstein was retired on 2026-04-30 —
-> see git log for the migration commits.
+> The reference deployment runs on a Hetzner Server Auction dedicated
+> (Xeon E3-1275v6, 64 GB ECC, 2× 512 GB NVMe RAID 1). Examples below use
+> `<HOSTNAME>` for the server hostname, `<USERNAME>` for the Linux user,
+> and `<NEW_IP>` for the public IPv4 — substitute your own values. The
+> stack also runs unmodified on Hetzner Cloud (CPX/CAX) and on any other
+> Docker host that can reach a CIFS-mounted Storage Box.
 
 ## Stack at a glance
 
@@ -43,7 +45,7 @@ of credentials (their Jellyfin user) for both Seerr and Jellyfin.
 ## Network topology
 
 ```
-internet ──► server01 (Hetzner dedicated) ──► Caddy (TLS) ──► docker network "servarr"
+internet ──► <HOSTNAME> (Hetzner dedicated) ──► Caddy (TLS) ──► docker network "servarr"
                                                   │
                                                   ├── jellyfin / sonarr / radarr / bazarr
                                                   ├── seerr / homarr / prowlarr
@@ -56,7 +58,7 @@ internet ──► server01 (Hetzner dedicated) ──► Caddy (TLS) ──► 
 
                        Tailscale tailnet (WireGuard P2P, encrypted)
                        ────────────────────────────────────────────
-                       ├── server01            100.64.0.1
+                       ├── <HOSTNAME>            100.64.0.1
                        └── home-node           100.64.0.3   (Mac / Pi at home)
                               ├── tinyproxy    :8888  (HTTP proxy → residential IP)
                               └── flaresolverr :8191  (Cloudflare challenge solver)
@@ -70,7 +72,7 @@ route all their outbound traffic through the VPN tunnel.
 `/gluetun/forwarded_port` every 60 s and pokes the qBit WebUI API to keep
 its listening port aligned with the Proton NAT-PMP-assigned port.
 
-`headscale` is the open-source Tailscale coordination server. The server01
+`headscale` is the open-source Tailscale coordination server. The <HOSTNAME>
 host joins its own tailnet via the official Tailscale client; a residential
 machine at home joins the same tailnet and runs `tinyproxy` and/or
 `flaresolverr`. Prowlarr uses those as Indexer Proxies, so scraping queries
@@ -140,7 +142,7 @@ drives.
 #    the email, then run installimage with a non-interactive config:
 ssh root@<NEW_IP>
 cat > /tmp/install.conf <<'CONF'
-HOSTNAME server01
+HOSTNAME <HOSTNAME>
 DRIVE1 /dev/nvme0n1
 DRIVE2 /dev/nvme1n1
 SWRAID 1
@@ -177,7 +179,7 @@ script and a one-shot env file from your laptop:
 
 ```sh
 cat > /tmp/server-env.sh <<EOF
-export USERNAME='lorenzo'
+export USERNAME='<USERNAME>'         # the non-root user to create
 export STORAGEBOX_USER='uXXXXXX'
 export STORAGEBOX_HOST='uXXXXXX.your-storagebox.de'
 export STORAGEBOX_PASSWORD='ASCII-only password'
@@ -201,7 +203,7 @@ ssh root@<NEW_IP> 'set -a && source /root/server-env.sh && set +a && bash /root/
 After it finishes, root SSH is disabled. Reconnect as the new user:
 
 ```sh
-ssh lorenzo@<NEW_IP>
+ssh <USERNAME>@<NEW_IP>
 ```
 
 ## Phase 3 — DNS
@@ -234,18 +236,34 @@ dig +short media.<DOMAIN> @dns1.registrar-servers.com
 
 ## Phase 4 — Deploy the stack
 
+### `.env` reference
+
+`.env.template` lists every variable; copy it to `.env` and fill in:
+
+| Variable | Required | Notes |
+| --- | --- | --- |
+| `DOMAIN` | yes | Bare domain (no scheme). All subdomains derive from this. |
+| `ACME_EMAIL` | yes | Used by Caddy for Let's Encrypt registration. |
+| `PUID` / `PGID` | yes | UID/GID owning files written by *arr containers. Match the user created by `setup-server.sh` (default 1000:1000). |
+| `HOMARR_SECRET_ENCRYPTION_KEY` | yes | `openssl rand -hex 32`. Encrypts Homarr's stored integration credentials — keep a backup; if you change it, stored secrets become unreadable. |
+| `WIREGUARD_PRIVATE_KEY` | yes | From the ProtonVPN dashboard's WireGuard config (NAT-PMP ON, P2P-friendly country). |
+| `WIREGUARD_ADDRESSES` | yes | Same source, e.g. `10.2.0.2/32`. |
+| `VPN_SERVER_COUNTRIES` | yes | Country Gluetun selects servers from. P2P-friendly: Switzerland, Netherlands, Iceland, Sweden. |
+| `SONARR_API_KEY` / `RADARR_API_KEY` | post-Phase-5 | Filled in after first start; the encoder uses them to flip `monitored=false`. |
+| `QBIT_USER` / `QBIT_PASS` | post-Phase-5 | Same WebUI credentials used by the port-manager sidecar. |
+| `DEFAULT_AUDIO_LANG` | optional | ISO-639-2 (e.g. `ita`). HLS rendition for that language is marked `default:YES`. Empty = first track. |
+
+### Push and start
+
 From your laptop:
 
 ```sh
 cp .env.template .env
-# Edit .env. Generate secrets with:
-#   openssl rand -hex 32   # HOMARR_SECRET_ENCRYPTION_KEY
-# Sonarr/Radarr API keys are read from their config.xml after first start
-# (see Phase 5).
+# Edit .env (see table above).
 
 # Push everything to /opt/servarr on the server.
 rsync -av --exclude='.git' --exclude='.claude' \
-  ./ lorenzo@<NEW_IP>:/opt/servarr/
+  ./ <USERNAME>@<NEW_IP>:/opt/servarr/
 ```
 
 On the server:
@@ -279,7 +297,7 @@ Per-user audio/subtitle defaults live under Dashboard → Users → click user
 from the container:
 
 ```sh
-ssh lorenzo@<NEW_IP> 'docker logs qbittorrent | grep -i "temporary password"'
+ssh <USERNAME>@<NEW_IP> 'docker logs qbittorrent | grep -i "temporary password"'
 ```
 
 Set a permanent password under **Tools → Options → Web UI → Authentication**.
@@ -338,7 +356,7 @@ Jellyfin from also doing its own automatic crawl on top of Bazarr,
 clear the triggers on its scheduled task:
 
 ```sh
-JF_TASK=2c66a88bca43e565d7f8099f825478f1   # "Scarica i sottotitoli mancanti"
+JF_TASK=2c66a88bca43e565d7f8099f825478f1   # stable GUID of "Download missing subtitles"
 curl -sS -X POST "https://media.<DOMAIN>/ScheduledTasks/$JF_TASK/Triggers?api_key=<JF_KEY>" \
   -H 'Content-Type: application/json' -d '[]'
 ```
@@ -372,7 +390,7 @@ or programmatically:
 
 ```sh
 # Reads the CSS from the repo and POSTs it to Jellyfin's branding endpoint.
-JELLYFIN_KEY=$(ssh lorenzo@<NEW_IP> 'sudo find /opt/servarr/config/jellyfin -name "jellyfin.db" | head -1 | xargs sudo sqlite3 -bail "SELECT AccessToken FROM ApiKeys" 2>/dev/null')
+JELLYFIN_KEY=$(ssh <USERNAME>@<NEW_IP> 'sudo find /opt/servarr/config/jellyfin -name "jellyfin.db" | head -1 | xargs sudo sqlite3 -bail "SELECT AccessToken FROM ApiKeys" 2>/dev/null')
 CSS=$(cat config/jellyfin-custom.css)
 BODY=$(jq -nc --arg css "$CSS" '{SplashscreenEnabled: false, CustomCss: $css}')
 curl -sS -X POST "https://media.<DOMAIN>/System/Configuration/branding?api_key=$JELLYFIN_KEY" \
@@ -395,7 +413,7 @@ The only sustainable workaround is to source scraping requests from a
 **residential IP** at home: a Mac, Linux box, Windows machine, or
 Raspberry Pi.
 
-The home node joins the same Headscale tailnet as `server01` (encrypted
+The home node joins the same Headscale tailnet as `<HOSTNAME>` (encrypted
 P2P WireGuard via the coordination server at `https://headscale.<DOMAIN>`)
 and runs two services Prowlarr can reach over the tailnet:
 
@@ -407,17 +425,20 @@ and runs two services Prowlarr can reach over the tailnet:
 
 ### Step 1 — Bring up the coordination server
 
-Already part of `docker-compose.yml`:
+Headscale's official image is distroless, so the config is rendered from
+`config/headscale/config.yaml.template` (which references `${DOMAIN}`) by
+a one-shot `headscale-init` sidecar that runs before the daemon. No
+manual templating needed — `docker compose up -d` does it:
 
 ```sh
-docker compose up -d headscale
+docker compose up -d headscale-init headscale
 curl -I https://headscale.<DOMAIN>/key   # 400-class is fine, means it's reachable
 ```
 
 Create a user and pre-auth keys (one per node you want to enroll):
 
 ```sh
-docker exec headscale headscale users create lorenzo
+docker exec headscale headscale users create <USERNAME>
 docker exec headscale headscale users list   # note the numeric id, e.g. 1
 docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
 # → tskey-auth-...SERVER01-KEY...
@@ -425,7 +446,7 @@ docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
 # → tskey-auth-...HOME-KEY...
 ```
 
-### Step 2 — Enroll the server01 host in the tailnet
+### Step 2 — Enroll the <HOSTNAME> host in the tailnet
 
 So Prowlarr's container can resolve `100.x.y.z` for the home node, the
 **host** (not the Docker bridge) needs Tailscale running:
@@ -435,7 +456,7 @@ curl -fsSL https://tailscale.com/install.sh | sudo sh
 sudo tailscale up \
   --login-server=https://headscale.<DOMAIN> \
   --authkey=<SERVER01-KEY> \
-  --hostname=server01
+  --hostname=<HOSTNAME>
 sudo tailscale ip -4
 # → 100.64.0.1
 ```
@@ -460,10 +481,10 @@ sudo /opt/homebrew/bin/tailscale up \
 ```
 
 If the auth key has already expired, Tailscale falls back to interactive
-registration: paste the URL it prints, then on `server01`:
+registration: paste the URL it prints, then on `<HOSTNAME>`:
 
 ```sh
-docker exec headscale headscale nodes register --user lorenzo --key <THE-KEY-IT-PRINTED>
+docker exec headscale headscale nodes register --user <USERNAME> --key <THE-KEY-IT-PRINTED>
 ```
 
 Configure tinyproxy (Apple Silicon path; on Intel use `/usr/local/etc/`):
@@ -511,16 +532,16 @@ docker run -d --name flaresolverr --restart unless-stopped \
   ghcr.io/flaresolverr/flaresolverr:latest
 ```
 
-### Step 4 — Smoke-test from server01
+### Step 4 — Smoke-test from <HOSTNAME>
 
 ```sh
-ssh lorenzo@<NEW_IP>
+ssh <USERNAME>@<NEW_IP>
 sudo tailscale status
-# Should show server01 + the home node, both online.
+# Should show <HOSTNAME> + the home node, both online.
 
 # Plain HTTP proxy works and exits with the home IP:
 curl -x http://<home-tailnet-ip>:8888 https://api.ipify.org
-# → your residential IP, NOT the server01 IP
+# → your residential IP, NOT the <HOSTNAME> IP
 
 # FlareSolverr is alive:
 curl -s http://<home-tailnet-ip>:8191/
@@ -539,7 +560,7 @@ host field on both Prowlarr indexer proxies to the Pi's tailnet IP, then
 stop tinyproxy/flaresolverr on the original machine. The headscale DB
 keeps both registered; you can either leave the old one in place or
 `docker exec headscale headscale nodes delete --identifier <id>` it.
-Nothing on `server01` changes.
+Nothing on `<HOSTNAME>` changes.
 
 ## Indexer notes
 
@@ -562,7 +583,7 @@ to fail this way despite the challenge being solved. Stick to the non-CF
 alternatives above for consistent results, or switch to Usenet (NZBgeek,
 DrunkenSlug) for industrial-strength TV/movie coverage.
 
-Don't connect `server01` directly to public trackers without one of these
+Don't connect `<HOSTNAME>` directly to public trackers without one of these
 proxies — you'll get rate-limited or banned, polluting IP reputation for
 everything else hosted there.
 
@@ -572,30 +593,30 @@ everything else hosted there.
 
 ```sh
 # Pull image updates (Caddy, Jellyfin, qBit, etc.)
-ssh lorenzo@<NEW_IP> 'cd /opt/servarr && docker compose pull && docker compose up -d'
+ssh <USERNAME>@<NEW_IP> 'cd /opt/servarr && docker compose pull && docker compose up -d'
 
 # Rebuild the encoder after editing hls-encoder/encoder.py:
-ssh lorenzo@<NEW_IP> 'cd /opt/servarr && docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder'
+ssh <USERNAME>@<NEW_IP> 'cd /opt/servarr && docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder'
 
 # Backup config (small, ~600 MB):
-ssh lorenzo@<NEW_IP> 'sudo tar czf /tmp/servarr-backup-$(date +%F).tgz \
+ssh <USERNAME>@<NEW_IP> 'sudo tar czf /tmp/servarr-backup-$(date +%F).tgz \
   -C /opt/servarr config caddy/Caddyfile docker-compose.yml .env hls-encoder'
-scp lorenzo@<NEW_IP>:/tmp/servarr-backup-*.tgz ~/Backups/
+scp <USERNAME>@<NEW_IP>:/tmp/servarr-backup-*.tgz ~/Backups/
 ```
 
 ### Health checks
 
 ```sh
 # Cert renewals (Caddy auto-rotates ~30 days before expiry):
-ssh lorenzo@<NEW_IP> 'docker logs caddy 2>&1 | grep -i "certificate obtained" | tail'
+ssh <USERNAME>@<NEW_IP> 'docker logs caddy 2>&1 | grep -i "certificate obtained" | tail'
 
 # VPN no-leak check (both should return the same Proton IP):
-ssh lorenzo@<NEW_IP> 'docker exec gluetun wget -qO- https://ipinfo.io/ip'
-ssh lorenzo@<NEW_IP> 'docker exec qbittorrent wget -qO- https://ipinfo.io/ip'
+ssh <USERNAME>@<NEW_IP> 'docker exec gluetun wget -qO- https://ipinfo.io/ip'
+ssh <USERNAME>@<NEW_IP> 'docker exec qbittorrent wget -qO- https://ipinfo.io/ip'
 
 # qBit forwarded port matches Proton's:
-ssh lorenzo@<NEW_IP> 'docker exec gluetun cat /gluetun/forwarded_port'
-ssh lorenzo@<NEW_IP> 'docker logs --tail 5 qb-port-manager 2>&1 | grep "listen_port"'
+ssh <USERNAME>@<NEW_IP> 'docker exec gluetun cat /gluetun/forwarded_port'
+ssh <USERNAME>@<NEW_IP> 'docker logs --tail 5 qb-port-manager 2>&1 | grep "listen_port"'
 
 # Encoder dashboard (also works in browser):
 curl -s https://encoder-status.<DOMAIN>/status.json | jq '.jobs_by_status, .active_jobs'
@@ -607,7 +628,7 @@ The encoder dedupes by source path in its SQLite state DB. To force a
 re-encode:
 
 ```sh
-ssh lorenzo@<NEW_IP> "
+ssh <USERNAME>@<NEW_IP> "
   rm -rf '/mnt/storagebox/data/media/movies/Foo (2024)' &&
   sudo sqlite3 /opt/servarr/config/hls-encoder/state.db \
     \"DELETE FROM jobs WHERE path LIKE '%Foo (2024)%'\"
@@ -615,6 +636,20 @@ ssh lorenzo@<NEW_IP> "
 # Re-import via Sonarr/Radarr or drop the source mkv back in;
 # the encoder picks it up within POLL_INTERVAL (30 s default).
 ```
+
+## Troubleshooting
+
+| Symptom | Likely cause | Fix |
+| --- | --- | --- |
+| Caddy logs `acme: timeout` or `connection refused` on first start | DNS for that subdomain hasn't propagated, or port 80 is firewalled | Wait for the registrar's NS to publish the record; check the Hetzner Cloud Firewall has TCP 80/443 inbound. |
+| `mount.cifs: bad UNC` or `iocharset utf8 not found` | Storage Box password contains non-ASCII chars, or kernel lacks `nls_utf8` | Reset the Storage Box password to ASCII-only; ensure `linux-modules-extra-$(uname -r)` is installed (handled by `setup-server.sh`). |
+| qBittorrent shows "no incoming connections" | Proton's NAT-PMP port not yet propagated to qBit | Check `docker logs qb-port-manager` for the latest `listen_port` update; the sidecar polls every 60s. |
+| Gluetun and qBittorrent return different IPs | `network_mode: service:gluetun` not actually applied | Recreate the qBit container: `docker compose up -d --force-recreate qbittorrent`. |
+| Encoder dashboard returns 404 | `encoder-status.<DOMAIN>` DNS missing, or `./config/hls-encoder` not yet populated | Add the A record; the dashboard appears once the encoder writes its first `status.json` (within `STATUS_INTERVAL` of startup). |
+| Encoder marks every job `failed` with `stale in_progress` | Container restarted mid-encode | Expected behaviour — those rows are auto-requeued and retried up to `RETRY_LIMIT`. |
+| Tailscale `up` fails with `unexpected control plane error` | The auth key has expired | Generate a fresh key: `docker exec headscale headscale preauthkeys create --user 1 --expiration 1h`. |
+| Bazarr never downloads subtitles | `opensubtitlescom` requires a free account; the other 3 providers don't | Add credentials in Bazarr → Settings → Providers, or rely on the no-auth providers (`yifysubtitles`, `tvsubtitles`, `podnapisi`). |
+| Seerr "Sign in with Jellyfin" fails | Jellyfin user has no library access | Jellyfin → Dashboard → Users → grant the user library permissions; Seerr inherits them. |
 
 ## Cost (May 2026 reference)
 
@@ -656,7 +691,12 @@ truly unmetered 1 Gbit/s NIC, ECC RAM, 64 GB RAM, RAID 1 NVMe.
 ├── .env.template            # variable schema; copy to .env locally
 ├── docker-compose.yml       # the whole stack
 ├── caddy/
-│   └── Caddyfile            # reverse proxy + automatic TLS
+│   ├── Caddyfile                       # reverse proxy + automatic TLS
+│   └── seerr-inject.conf.template      # nginx envsubst template (DOMAIN-aware)
+├── config/
+│   ├── headscale/
+│   │   └── config.yaml.template        # rendered into headscale-rendered volume by headscale-init
+│   └── jellyfin-custom.css             # apply via Dashboard → General → Custom CSS
 ├── hls-encoder/
 │   ├── Dockerfile           # python:3.12-slim + ffmpeg + tini
 │   ├── encoder.py           # watcher, HLS encode, .strm, monitor=false

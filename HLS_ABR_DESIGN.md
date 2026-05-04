@@ -200,7 +200,7 @@ the name as the directory token replacing `%v` in segment/playlist paths.
 
 ## Performance
 
-Measured on `server01` (Xeon E3-1275v6, 4c/8t @ 3.8-4.2 GHz boost) with
+Measured on the reference deployment (Xeon E3-1275v6, 4c/8t @ 3.8-4.2 GHz boost) with
 a synthetic 60 s 1080p source + 2 audio tracks, defaults
 `WORKERS=2 THREADS=4 cpus:8.0`:
 

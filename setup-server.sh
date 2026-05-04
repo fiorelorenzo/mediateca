@@ -5,7 +5,7 @@
 # non-root user, and disables root SSH access.
 #
 # Required environment variables (export before running):
-#   USERNAME             non-root user to create (e.g. lorenzo)
+#   USERNAME             non-root user to create
 #   STORAGEBOX_USER      Storage Box username (uXXXXXX)
 #   STORAGEBOX_HOST      Storage Box host (uXXXXXX.your-storagebox.de)
 #   STORAGEBOX_PASSWORD  Storage Box password (ASCII only — CIFS hates Unicode)

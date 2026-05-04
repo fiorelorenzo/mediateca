@@ -1,4 +1,4 @@
-server_url: https://headscale.<DOMAIN>
+server_url: https://headscale.${DOMAIN}
 listen_addr: 0.0.0.0:8080
 metrics_listen_addr: 127.0.0.1:9090
 grpc_listen_addr: 127.0.0.1:50443
@@ -35,7 +35,7 @@ log:
 
 dns:
   magic_dns: true
-  base_domain: ts.<DOMAIN>
+  base_domain: ts.${DOMAIN}
   nameservers:
     global:
       - 1.1.1.1
