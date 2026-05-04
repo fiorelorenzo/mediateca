@@ -6,23 +6,17 @@
  *   body: {"SplashscreenEnabled": false, "CustomCss": "<contents>"}
  *
  * To revert: clear the field and save.
+ *
+ * NOTE: tried Ultrachromic Novachromic preset earlier — looked too
+ * bright. Reverted to stock Jellyfin dark theme; only the kbps-picker
+ * hide rule survives.
  */
 
-/* ------------------------------------------------------------
- * Ultrachromic — Novachromic preset.
- * Community CSS theme that gives Jellyfin a more cinematic,
- * "Netflix-like" feel: bigger backdrops, posters, and headers.
- * Repo: https://github.com/CTalvio/Ultrachromic
- * ------------------------------------------------------------ */
-@import url('https://cdn.jsdelivr.net/gh/CTalvio/Ultrachromic/presets/novachromic_preset.css');
-
-/* ------------------------------------------------------------
- * Hide bitrate/quality picker in the video player options menu.
+/* Hide bitrate/quality picker in the video player options menu.
  * The HLS .strm content the encoder produces switches variants
  * client-side via HLS.js, so the manual kbps picker is misleading
  * (shows a number that doesn't match any of our 3 ladder variants
- * and can't actually force a specific one for HLS pass-through).
- * ------------------------------------------------------------ */
+ * and can't actually force a specific one for HLS pass-through). */
 .actionSheet [data-id="quality"],
 button[data-id="quality"] {
     display: none !important;
