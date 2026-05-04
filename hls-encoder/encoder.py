@@ -593,13 +593,23 @@ def _radarr_unmonitor(rel_path: str) -> None:
 
 
 def cleanup_cache_orphans() -> None:
-    """Remove any /cache/job_* dirs left over from a previous run."""
-    if not CACHE_ROOT.exists():
-        return
-    for p in CACHE_ROOT.glob("job_*"):
-        if p.is_dir():
-            log.info("removing stale cache: %s", p)
-            shutil.rmtree(p, ignore_errors=True)
+    """Remove transient artifacts left by a killed previous run.
+
+    - /cache/job_*       : ffmpeg scratch dirs (local NVMe)
+    - MEDIA_ROOT/**/*.hls.tmp/ : staging dirs from mid-rename failures
+      (Storage Box). These are dotted so Jellyfin already ignores them,
+      but they cost disk and confuse `du`.
+    """
+    if CACHE_ROOT.exists():
+        for p in CACHE_ROOT.glob("job_*"):
+            if p.is_dir():
+                log.info("removing stale cache: %s", p)
+                shutil.rmtree(p, ignore_errors=True)
+    if MEDIA_ROOT.exists():
+        for p in MEDIA_ROOT.rglob("*.hls.tmp"):
+            if p.is_dir():
+                log.info("removing stale staging dir: %s", p)
+                shutil.rmtree(p, ignore_errors=True)
 
 
 def cache_free_gb() -> float:
@@ -657,7 +667,8 @@ def _bundle_complete(target_dir: Path) -> bool:
     """True if the .hls bundle on disk is structurally complete."""
     if not target_dir.is_dir():
         return False
-    if not (target_dir / "master.m3u8").exists():
+    master = target_dir / "master.m3u8"
+    if not master.exists() or master.stat().st_size == 0:
         return False
     for v in ("v1080", "v720", "v480"):
         pl = target_dir / v / "playlist.m3u8"
@@ -710,6 +721,7 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
 
     log.info("encoding: %s", rel_str)
     cache_dir: Optional[Path] = None
+    staging_dir: Optional[Path] = None
     proc: Optional[subprocess.Popen] = None
     duration = 0.0
     encode_seconds = 0.0
@@ -829,6 +841,7 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         if target_dir.exists():
             shutil.rmtree(target_dir)
         staging_dir.rename(target_dir)
+        staging_dir = None  # promoted to target_dir; nothing to clean
 
         rel_hls = rel.parent / f".{source.stem}.hls"
         url = f"{CDN_BASE}/{urllib.parse.quote(str(rel_hls))}/master.m3u8"
@@ -880,6 +893,8 @@ def process(conn: sqlite3.Connection, source: Path) -> None:
         })
         if cache_dir is not None and cache_dir.exists():
             shutil.rmtree(cache_dir, ignore_errors=True)
+        if staging_dir is not None and staging_dir.exists():
+            shutil.rmtree(staging_dir, ignore_errors=True)
     finally:
         _untrack_proc(src_key)
         _clear_active(src_key)
