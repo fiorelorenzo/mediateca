@@ -47,25 +47,33 @@
     border-radius: 10px;
     box-shadow: var(--shadow);
   }
+  /* ---------- Inline icon (Lucide-style: 14px, 1.5 stroke) ---------- */
+  .icon {
+    width: 14px; height: 14px;
+    stroke: currentColor;
+    stroke-width: 1.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    fill: none;
+    flex-shrink: 0;
+  }
+  .stat .icon-corner {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    color: var(--dim);
+    opacity: 0.6;
+  }
+  /* ---------- Header ---------- */
   header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 14px;
   }
-  .brand { display: flex; align-items: center; gap: 10px; }
-  .brand-mark {
-    width: 28px; height: 28px;
-    border-radius: 8px;
-    background: linear-gradient(135deg, var(--accent), var(--copy));
-    display: grid; place-items: center;
-    color: #0a0d12;
-    font-weight: 700;
-    font-size: 13px;
-    box-shadow: 0 4px 14px var(--accent-glow);
-  }
+  .brand { display: flex; flex-direction: column; }
   .title { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
-  .subtitle { font-size: 11px; color: var(--dim); }
+  .subtitle { font-size: 11px; color: var(--dim); margin-top: 1px; }
   .status-pill {
     display: flex; align-items: center; gap: 6px;
     padding: 4px 10px;
@@ -93,6 +101,7 @@
     0%, 100% { opacity: 1; }
     50% { opacity: 0.4; }
   }
+  /* ---------- Section headers ---------- */
   h2 {
     font-size: 11px;
     font-weight: 600;
@@ -110,6 +119,7 @@
     font-size: 10px;
     letter-spacing: 0.04em;
   }
+  /* ---------- Stat grid ---------- */
   .stats-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
@@ -134,13 +144,7 @@
   }
   .stat .value.ok { color: var(--ok); }
   .stat .value.err { color: var(--err); }
-  .stat .icon {
-    position: absolute;
-    top: 10px;
-    right: 12px;
-    color: var(--dim);
-    opacity: 0.6;
-  }
+  /* ---------- Generic rows ---------- */
   .panel {
     padding: 10px 12px;
   }
@@ -152,15 +156,84 @@
     font-size: 12px;
   }
   .row + .row { border-top: 1px dashed var(--border); }
-  .row .label {
-    color: var(--fg-mute);
-    font-size: 11px;
-  }
+  .row .label { color: var(--fg-mute); font-size: 11px; }
   .row .v { color: var(--fg); font-variant-numeric: tabular-nums; }
   .row .v.ok { color: var(--ok); }
   .row .v.warn { color: var(--warn); }
   .row .v.err { color: var(--err); }
   .row .v.dim { color: var(--dim); }
+  /* ---------- Load block ---------- */
+  .load-block {
+    padding: 12px;
+  }
+  .load-now {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .load-now .num {
+    font-size: 22px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+  }
+  .load-now .num.ok   { color: var(--ok); }
+  .load-now .num.warn { color: var(--warn); }
+  .load-now .num.err  { color: var(--err); }
+  .load-now .label-and-cap {
+    display: flex; flex-direction: column; align-items: flex-end;
+    color: var(--dim);
+    font-size: 11px;
+  }
+  .load-now .label-and-cap .top {
+    color: var(--fg-mute);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-size: 10px;
+  }
+  .load-bar {
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.06);
+    overflow: hidden;
+    position: relative;
+  }
+  .load-bar > span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--ok), var(--warn) 70%, var(--err));
+    transition: width 0.6s ease-out;
+  }
+  .load-bar .marker {
+    position: absolute;
+    top: -2px; bottom: -2px;
+    width: 1px;
+    background: rgba(255,255,255,0.18);
+  }
+  /* sparkline */
+  .spark-row {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 10px;
+    color: var(--dim);
+    font-size: 10px;
+  }
+  .spark-row .legend {
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    flex-shrink: 0;
+  }
+  .spark {
+    flex: 1;
+    height: 36px;
+    width: 100%;
+    display: block;
+  }
+  .spark .area  { fill: rgba(106,169,255,0.14); }
+  .spark .line  { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
+  .spark .grid  { stroke: rgba(255,255,255,0.05); stroke-width: 1; }
+  .spark .axis  { fill: var(--dim); font-size: 9px; }
+  /* ---------- Items ---------- */
   .item {
     padding: 10px 12px;
     border-radius: 8px;
@@ -170,11 +243,7 @@
   }
   .item + .item { margin-top: 6px; }
   .item .head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    flex-wrap: wrap;
-    overflow: hidden;
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
   }
   .item .name {
     color: var(--fg);
@@ -204,10 +273,8 @@
     transition: width 1s linear;
   }
   .badge {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    padding: 0 6px;
+    display: inline-flex; align-items: center;
+    height: 18px; padding: 0 6px;
     border-radius: 4px;
     font-size: 10px;
     font-weight: 600;
@@ -220,27 +287,18 @@
   .badge.copy  { background: rgba(34,211,238,0.12); color: var(--copy); }
   .badge.muted { background: rgba(255,255,255,0.05); color: var(--fg-mute); }
   .empty {
-    color: var(--dim);
-    font-size: 11px;
-    font-style: italic;
-    padding: 10px 12px;
-    text-align: center;
-    border: 1px dashed var(--border);
-    border-radius: 8px;
-    margin-top: 8px;
+    color: var(--dim); font-size: 11px; font-style: italic;
+    padding: 10px 12px; text-align: center;
+    border: 1px dashed var(--border); border-radius: 8px; margin-top: 8px;
   }
   footer {
     margin-top: 18px;
     padding-top: 12px;
     border-top: 1px solid var(--border);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 10px;
-    color: var(--dim);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 10px; color: var(--dim);
   }
   footer.error { color: var(--err); }
-  /* compact tweaks for narrow iframes */
   @media (max-width: 520px) {
     .stats-grid { grid-template-columns: repeat(2, 1fr); }
     .stat .value { font-size: 20px; }
@@ -251,11 +309,8 @@
 
 <header>
   <div class="brand">
-    <div class="brand-mark">H</div>
-    <div>
-      <div class="title">HLS Encoder</div>
-      <div class="subtitle">Pipeline di codifica adattiva</div>
-    </div>
+    <div class="title">HLS Encoder</div>
+    <div class="subtitle">Pipeline di codifica adattiva</div>
   </div>
   <div class="status-pill" id="status-pill">
     <span class="pulse idle" id="pulse"></span>
@@ -263,24 +318,43 @@
   </div>
 </header>
 
+<!-- Inline icon definitions reused via <use>. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-queue" viewBox="0 0 24 24">
+      <path d="M3 6h13"/><path d="M3 12h13"/><path d="M3 18h13"/>
+      <circle cx="20" cy="6" r="1.5"/><circle cx="20" cy="12" r="1.5"/><circle cx="20" cy="18" r="1.5"/>
+    </symbol>
+    <symbol id="i-cog" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3h0a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8v0a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>
+    </symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M12 8v4"/><path d="M12 16h.01"/>
+    </symbol>
+  </defs>
+</svg>
+
 <div class="stats-grid">
   <div class="stat card">
-    <span class="icon">⏳</span>
+    <span class="icon-corner"><svg class="icon"><use href="#i-queue"/></svg></span>
     <div class="label">Coda</div>
     <div class="value" id="pending">—</div>
   </div>
   <div class="stat card">
-    <span class="icon">⚙</span>
+    <span class="icon-corner"><svg class="icon"><use href="#i-cog"/></svg></span>
     <div class="label">Worker</div>
     <div class="value" id="workers">—</div>
   </div>
   <div class="stat card">
-    <span class="icon">✓</span>
+    <span class="icon-corner"><svg class="icon"><use href="#i-check"/></svg></span>
     <div class="label">Completati</div>
     <div class="value ok" id="done">0</div>
   </div>
   <div class="stat card">
-    <span class="icon">!</span>
+    <span class="icon-corner"><svg class="icon"><use href="#i-alert"/></svg></span>
     <div class="label">Falliti</div>
     <div class="value err" id="failed">0</div>
   </div>
@@ -289,9 +363,27 @@
 <h2>In elaborazione <span class="count" id="active-count">0</span></h2>
 <div id="active-list"></div>
 
+<h2>Carico CPU</h2>
+<div class="card load-block">
+  <div class="load-now">
+    <span class="num" id="load1-num">—</span>
+    <span class="label-and-cap">
+      <span class="top">load 1m</span>
+      <span id="load-cap">/ — core</span>
+    </span>
+  </div>
+  <div class="load-bar"><span id="load-bar-fill" style="width:0%"></span></div>
+  <div class="spark-row">
+    <span class="legend">5 min</span>
+    <svg class="spark" id="spark" viewBox="0 0 200 36" preserveAspectRatio="none">
+      <path id="spark-area" class="area" d=""/>
+      <path id="spark-line" class="line" d=""/>
+    </svg>
+  </div>
+</div>
+
 <h2>Sistema</h2>
 <div class="panel card">
-  <div class="row"><span class="label">Carico 1m</span><span class="v" id="load1">—</span></div>
   <div class="row"><span class="label">Carico 5m</span><span class="v" id="load5">—</span></div>
   <div class="row"><span class="label">Carico 15m</span><span class="v" id="load15">—</span></div>
   <div class="row"><span class="label">Cache libera</span><span class="v" id="cache">—</span></div>
@@ -305,10 +397,19 @@
 
 <footer id="footer">
   <span id="footer-text">mai aggiornato</span>
-  <span id="age" class="">—</span>
+  <span id="age">—</span>
 </footer>
 
 <script>
+// Approximate logical-CPU count from the host. The encoder doesn't expose
+// it directly; the load average gauge scales against this constant. The
+// host is a 4c/8t Xeon E3-1275v6 — see HLS_ABR_DESIGN.md.
+const HOST_CPUS = 8;
+// How many load-1m samples to keep client-side for the sparkline. With a
+// 5s tick this covers ~5 minutes of recent history.
+const SPARK_LEN = 60;
+const sparkData = [];
+
 const fmt2 = (n) => typeof n === "number" ? n.toFixed(2) : "—";
 const fmtTime = (sec) => {
   if (sec >= 3600) {
@@ -330,20 +431,71 @@ const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => (
   {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
 ));
 const modeLabel = (m) => m === "copy1080" ? "copia 1080p" : "codifica";
-const loadCls = (n, low, high) =>
+const loadCls = (n) =>
   typeof n !== "number" || n < 0 ? "dim" :
-  n < low ? "ok" : n < high ? "warn" : "err";
+  n < HOST_CPUS * 0.5 ? "ok" :
+  n < HOST_CPUS ? "warn" : "err";
 
-// Parse the latest "speed=X.XXx" out of an ffmpeg progress line.
 const parseSpeed = (line) => {
   const m = String(line || "").match(/speed=\s*([\d.]+)x/);
   return m ? parseFloat(m[1]) : null;
 };
-// Parse "time=HH:MM:SS.MS" out of an ffmpeg progress line, returns seconds.
 const parseTime = (line) => {
   const m = String(line || "").match(/time=(\d+):(\d+):([\d.]+)/);
   return m ? (+m[1] * 3600 + +m[2] * 60 + parseFloat(m[3])) : null;
 };
+
+function renderLoad(load1, load5, load15) {
+  const num = document.getElementById("load1-num");
+  num.textContent = fmt2(load1);
+  num.className = "num " + loadCls(load1);
+
+  document.getElementById("load-cap").textContent = `/ ${HOST_CPUS} core`;
+
+  const cap = HOST_CPUS * 1.25; // headroom on the bar so red shows clearly
+  const pct = typeof load1 === "number"
+    ? Math.max(0, Math.min(100, (load1 / cap) * 100))
+    : 0;
+  document.getElementById("load-bar-fill").style.width = pct + "%";
+
+  document.getElementById("load5").textContent = fmt2(load5);
+  document.getElementById("load5").className = "v " + loadCls(load5);
+  document.getElementById("load15").textContent = fmt2(load15);
+  document.getElementById("load15").className = "v " + loadCls(load15);
+
+  // Sparkline
+  if (typeof load1 === "number" && load1 >= 0) {
+    sparkData.push(load1);
+    if (sparkData.length > SPARK_LEN) sparkData.shift();
+  }
+  renderSparkline();
+}
+
+function renderSparkline() {
+  if (sparkData.length < 2) {
+    document.getElementById("spark-line").setAttribute("d", "");
+    document.getElementById("spark-area").setAttribute("d", "");
+    return;
+  }
+  const W = 200, H = 36, pad = 1;
+  const max = Math.max(HOST_CPUS, ...sparkData) * 1.1;
+  const dx = (W - pad * 2) / (SPARK_LEN - 1);
+  // Right-align: newest sample at right edge.
+  const offsetIndex = SPARK_LEN - sparkData.length;
+  const points = sparkData.map((v, i) => {
+    const x = pad + (offsetIndex + i) * dx;
+    const y = H - pad - (v / max) * (H - pad * 2);
+    return [x, y];
+  });
+  const line = points.map((p, i) =>
+    (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1)
+  ).join(" ");
+  const first = points[0], last = points[points.length - 1];
+  const area = `M${first[0].toFixed(1)},${H - pad} ` + line.slice(1) +
+               ` L${last[0].toFixed(1)},${H - pad} Z`;
+  document.getElementById("spark-line").setAttribute("d", line);
+  document.getElementById("spark-area").setAttribute("d", area);
+}
 
 function renderActive(active) {
   const el = document.getElementById("active-list");
@@ -431,15 +583,7 @@ async function tick() {
     document.getElementById("done").textContent = s.jobs_by_status?.done ?? 0;
     document.getElementById("failed").textContent = s.jobs_by_status?.failed ?? 0;
 
-    const l1 = s.load_avg?.["1m"], l5 = s.load_avg?.["5m"], l15 = s.load_avg?.["15m"];
-    const setLoad = (id, v) => {
-      const el = document.getElementById(id);
-      el.textContent = fmt2(v);
-      el.className = "v " + loadCls(v, 4, 8);
-    };
-    setLoad("load1", l1);
-    setLoad("load5", l5);
-    setLoad("load15", l15);
+    renderLoad(s.load_avg?.["1m"], s.load_avg?.["5m"], s.load_avg?.["15m"]);
 
     const cacheGB = s.cache_free_gb;
     const cacheEl = document.getElementById("cache");
