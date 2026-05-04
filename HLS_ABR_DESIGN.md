@@ -1,247 +1,262 @@
-# HLS Adaptive Bitrate streaming — design
+# HLS adaptive-bitrate streaming — design
 
-**Goal**: replace Jellyfin's live transcode-on-playback with pre-encoded HLS
-ladders so clients get true ABR (auto quality switching) with zero CPU at
-playback time.
+**Goal**: replace Jellyfin's live transcode-on-playback with pre-encoded
+HLS ladders so clients get true ABR (auto quality switching) with zero
+CPU at playback time.
 
-## Decision summary (2026-05-02)
+This document captures the *why* behind the encoder. The *how to use it*
+lives in [`hls-encoder/README.md`](hls-encoder/README.md); the *how to
+deploy* lives in the top-level [`README.md`](README.md).
+
+## Decisions taken (2026-05-02 / 2026-05-04)
 
 | Question | Decision |
 | --- | --- |
-| Audio | **Multi-rendition HLS** — one AAC stereo rendition per source audio track, exposed in master playlist via `EXT-X-MEDIA TYPE=AUDIO` |
-| Subtitles | **SRT sidecar** — Jellyfin native sidecar attachment, not HLS WebVTT renditions |
-| Storage strategy | **Delete source after HLS** — Sonarr/Radarr profiles set with `Upgrades Allowed = OFF`, source `.mkv` removed once master.m3u8 is verified |
-| Bazarr | **Disabled (automatic)** — replaced by Jellyfin Open Subtitles plugin (on-demand via player CC menu) |
-| Tdarr | **Removed** — was designed for single-file output, doesn't fit HLS workflow |
-| CDN auth | **Public** — anyone with the URL can fetch segments (standard HLS approach) |
+| Audio | **Multi-rendition HLS** — one AAC stereo rendition per source audio track, exposed in master playlist via `EXT-X-MEDIA TYPE=AUDIO`. The first track is `default:YES`. |
+| Subtitles | **SRT sidecar** — Jellyfin native sidecar attachment, not HLS WebVTT renditions. Bazarr automatic stays off; the Jellyfin Open Subtitles plugin handles on-demand searches via the player CC menu. |
+| Storage strategy | **Delete source after HLS** — Sonarr/Radarr profiles set with `Upgrades Allowed = OFF`, source `.mkv` removed once `master.m3u8` exists and each variant playlist has ≥1 segment. |
+| Tdarr | **Removed** — single-input-single-output model doesn't fit HLS (master + N variants + many segments). The encoder fully replaces it. |
+| CDN auth | **Public** — anyone with the URL can fetch segments. Standard HLS approach; fine for legally-obtained or public-domain personal libraries. |
+| Bundle visibility | The HLS directory is named `.{stem}.hls` (leading dot) so Jellyfin's library scanner skips it. Caddy still serves it under the public CDN URL — only the encoded `.strm` is what Jellyfin matches as a movie/episode. |
 
 ## Storage layout
 
-Single tree, single root. Encoder works in-place.
+Single tree, single root. Encoder works in-place:
 
 ```
 /mnt/storagebox/data/media/
   tv/Show Name (Year)/
-    S01E01 - Title.strm                    ← Jellyfin reads this; URL to master.m3u8
-    S01E01 - Title.hls/
-      master.m3u8                          ← variant + audio renditions
-      v1080/playlist.m3u8 + seg_*.ts       ← 5 Mbps H.264 high@4.0
-      v720/playlist.m3u8  + seg_*.ts       ← 2.5 Mbps H.264 main@4.0
-      v480/playlist.m3u8  + seg_*.ts       ← 1 Mbps H.264 main@3.1
-      a0/playlist.m3u8    + seg_*.ts       ← AAC stereo, language=ita
-      a1/playlist.m3u8    + seg_*.ts       ← AAC stereo, language=eng (if present)
-      … one a<N> per source audio track
+    S01E01 - Title.strm                   ← Jellyfin reads this; URL to master.m3u8
+    .S01E01 - Title.hls/                  ← hidden from Jellyfin scanner
+      master.m3u8                         ← variant + audio renditions
+      v1080/playlist.m3u8 + seg_*.ts      ← H.264 high@4.0, 5 Mbps
+      v720/playlist.m3u8  + seg_*.ts      ← H.264 main@4.0, 2.5 Mbps
+      v480/playlist.m3u8  + seg_*.ts      ← H.264 main@3.1, 1 Mbps
+      audio_ita_0/playlist.m3u8 + seg_*.ts  ← AAC stereo, italian (default)
+      audio_eng_1/playlist.m3u8 + seg_*.ts  ← AAC stereo, english
+      …                                   ← one per source audio track
 ```
 
-Source `.mkv` is **deleted** by encoder after `master.m3u8` exists and passes
-a basic sanity check (file count + non-empty top-level playlists).
+Source `.mkv` is deleted by the encoder after sanity check. `.srt` sidecar
+files (when present, e.g. from Bazarr or manual) live alongside the
+`.strm` and Jellyfin attaches them as separate subtitle tracks during
+playback.
 
 ## Bitrate ladder
 
-| Variant | Resolution | Codec | Bitrate (target) | Profile | Use case |
-| --- | --- | --- | --- | --- | --- |
-| 1080p | 1920×1080 | H.264 high@4.0 | 5 Mbps | medium preset, CRF-cap | Wired, fast wifi |
-| 720p | 1280×720 | H.264 main@4.0 | 2.5 Mbps | medium preset | Mobile wifi, slower wired |
-| 480p | 854×480 | H.264 main@3.1 | 1 Mbps | fast preset | LTE/cellular, weak wifi |
+| Variant | Resolution | Codec | Target bitrate | Profile / preset |
+| --- | --- | --- | --- | --- |
+| 1080p | 1920×1080 | H.264 high@4.0 | 5 Mbps (max 5.5) | preset `fast` |
+| 720p | 1280×720 | H.264 main@4.0 | 2.5 Mbps (max 2.75) | preset `fast` |
+| 480p | 854×480 | H.264 main@3.1 | 1 Mbps (max 1.1) | preset `fast` |
 
-Audio renditions (one per source track):
-- AAC LC stereo, 128 kbps, 48 kHz
-- Language tag from source stream metadata (ita/eng/etc.)
-- First track marked `default:YES`
+Audio: AAC LC stereo 128 kbps 48 kHz, downmixed from each source track.
 
-Segment duration: 6s. Keyframe interval: 48 frames (2s @ 24 fps). Both video
-and audio aligned for ABR seamless switching.
+Segment duration 6 s. Keyframe interval 48 frames (2 s @ 24 fps). Both
+video and audio aligned for seamless ABR variant switching.
 
-## Components to add
+### Fast path: 1080p stream-copy
 
-### 1. `hls-encoder` container (NEW)
+If the source is already H.264 ≤1080p with a bitrate at or below
+`COPY_1080P_MAX_BITRATE` (default 5.5 Mbps), the encoder skips re-encoding
+the 1080p variant and bitstream-copies it from input. Detection lives in
+`can_copy_1080p()` in `encoder.py` and considers:
 
-Custom Python service, ~200-300 LOC.
+- `codec_name == "h264"` (8-bit only — high10/high12 profiles excluded)
+- `width ≤ 1920` AND `height ≤ 1080`
+- `bit_rate ≤ COPY_1080P_MAX_BITRATE` if known, otherwise allow
+
+In this mode the FFmpeg filter graph splits the source into 2 video
+outputs (720p + 480p) instead of 3, and the 1080p output is `-c:v copy`.
+Saves ~40-60% of CPU per job on compatible sources.
+
+## Components
+
+### `hls-encoder` container
+
+Custom Python service, ~600 LOC. See `hls-encoder/encoder.py`.
 
 **Responsibilities**:
-- inotify-watch `/mnt/storagebox/data/media/{tv,movies}` for `.mkv` / `.mp4` / `.m4v` / `.ts` arrivals
-- For each new file:
-  1. `ffprobe` to inventory video (always 1) + audio (variable N) tracks
-  2. Build dynamic FFmpeg single-pass command: 3 video variants split-and-scale + N audio renditions, output to `/var/lib/hls-cache/<id>/`
-  3. Run FFmpeg; on success verify `master.m3u8` exists + each variant playlist has ≥1 segment
-  4. Atomic move `/var/lib/hls-cache/<id>/` → `<source_dir>/<basename>.hls/`
-  5. Write `<basename>.strm` containing `https://hls.<DOMAIN>/<rel_path>/<basename>.hls/master.m3u8`
-  6. Delete source file
-  7. POST to Sonarr/Radarr API to set `monitored=false` for that episode/movie
-- SQLite state file at `/config/state.db` for: in-progress, completed, failed (with retry count)
-- HTTP `/health` endpoint for Homarr/Caddy health checks
+- Watch `/data/media/{tv,movies}` via watchdog `PollingObserver` (CIFS
+  doesn't deliver inotify events, polling is the only reliable option).
+- For each new file: ffprobe → build dynamic FFmpeg single-pass command
+  (3 video variants + N audio renditions, or 2 + N if copy_1080p mode) →
+  encode to `/cache/<uuid>/` → atomic move to
+  `<source_dir>/.<basename>.hls/` → write `.strm` → delete source →
+  PUT `monitored=false` on Sonarr/Radarr API.
+- SQLite state DB (`/config/state.db`, WAL mode) for dedup, retry, and
+  observability. `claim_job()` is atomic against multi-worker races;
+  stale `in_progress` rows from a crashed previous run are reset to
+  `failed` on startup so they get retried.
+- SIGTERM handler that terminates in-flight ffmpeg subprocesses and
+  drains workers; container restart is clean, no orphan ffmpeg.
+- Periodic `status.json` snapshot at `/config/status.json` for the
+  dashboard / Homarr widget.
+- Hourly DB retention sweep (drops `done` rows older than
+  `DB_RETENTION_DAYS`).
 
-**Image base**: `python:3.12-slim` + `ffmpeg` + `inotify-tools`
+**Image base**: `python:3.12-slim` + `ffmpeg` + `tini`.
+
 **Volumes**:
 - `/mnt/storagebox/data:/data` (RW)
-- `/var/lib/hls-cache:/cache` (local NVMe, RW)
-- `./config/hls-encoder:/config` (RW)
-**Env**:
-- `SONARR_URL`, `SONARR_API_KEY`
-- `RADARR_URL`, `RADARR_API_KEY`
-- `HLS_CDN_BASE=https://hls.<DOMAIN>`
-- `WORKERS=2` (parallel ffmpeg processes)
+- `/var/lib/hls-cache:/cache` (local NVMe RAID 1, RW — encoding scratch)
+- `./config/hls-encoder:/config` (RW — state.db, status.json, dashboard
+  index.html)
 
-**Resource limits**: `cpus: 4.0`, `mem_limit: 12g` (replaces tdarr's allotment).
+**Env reference**: see `hls-encoder/README.md`.
 
-### 2. Caddy CDN block
+**Resource limits**: `cpus: 8.0`, `mem_limit: 12g`. The host has 4c/8t,
+so we let the container reach the full set of logical CPUs and rely on
+`nice -n 10` (applied to ffmpeg subprocesses) to yield politely. Earlier
+config had `cpus: 4.0` and saturated at ~50% of host throughput — see
+"Performance" below.
 
-Add to `caddy/Caddyfile`:
+### Caddy CDN
+
+`hls.<DOMAIN>` — read-only file_server over `/srv/hls`, mounted from
+`/mnt/storagebox/data/media`:
+
 ```caddy
-hls.<DOMAIN> {
+hls.{$DOMAIN} {
     header {
         Cache-Control "public, max-age=86400, immutable"
         Access-Control-Allow-Origin "*"
     }
     encode gzip
-    file_server {
-        root /srv/hls
-        precompressed gzip
-    }
+    file_server { root /srv/hls }
 }
 ```
 
-`docker-compose.yml` Caddy volumes get one more line:
-```yaml
-- /mnt/storagebox/data/media:/srv/hls:ro
-```
+`encoder-status.<DOMAIN>` — same `file_server` pattern over
+`/srv/encoder-status`, mounted from `./config/hls-encoder`. Serves
+`index.html` (live dashboard) and `status.json`.
 
-### 3. DNS
+### Sonarr / Radarr
 
-New record:
-```
-A    hls    <NEW_IP>    Automatic
-```
+- Quality profiles set with `upgradeAllowed = false` (one-shot download
+  policy). Without this, Sonarr would re-download a "better" release
+  after the encoder deletes the source — the new download lands as a
+  fresh `.mkv`, the encoder picks it up again, infinite loop.
+- The encoder calls `PUT /api/v3/episode/monitor` (Sonarr) or
+  `PUT /api/v3/movie/{id}` (Radarr) with `monitored=false` after a
+  successful encode. Keeps the UI clean; without it, the show/movie
+  appears as "missing" in the *arr UI even though Jellyfin is serving it.
 
-### 4. Sonarr / Radarr changes
+### Bazarr
 
-**Quality profiles** (all 4 each, via API):
-- Set `upgradeAllowed=false` (one-shot download policy)
-
-**Custom Connect Script** (one per app, via API):
-- Trigger: `OnDownload`, `OnUpgrade` (latter shouldn't fire after we disable upgrades, but defensive)
-- Script body: simply touches a sentinel file `/data/incoming/<id>.trigger`
-  → encoder's watcher picks up either via inotify on this OR direct on .mkv path
-- After encoder completes successfully, encoder hits `PUT /api/v3/episode` with `monitored=false`
-
-### 5. Bazarr
-
-- Stop the container, OR
-- Just disable enabled providers in `config/bazarr/config/config.yaml` (already done — `tvsubtitles` + `yifysubtitles` only, OS disabled)
-- Long-term: remove from compose, but for now leave idle
-
-### 6. Tdarr
-
-Remove from compose. Delete:
-- `config/tdarr/`
-- `/var/lib/tdarr-cache/` on `server01`
-
-Cache directory `/var/lib/tdarr-cache` repurposed as `/var/lib/hls-cache` for the encoder.
+Disabled in automatic mode — providers list reduced to
+`tvsubtitles + yifysubtitles` and effectively idle. The Jellyfin Open
+Subtitles plugin handles on-demand subtitle searches through the player
+CC menu, which gives better results without burning the OS API quota
+on automatic crawls.
 
 ## FFmpeg command template
 
+Full encode (3 video variants + N audio):
+
 ```
-ffmpeg -i SOURCE \
-  -filter_complex "[0:v]split=3[v1080][v720tmp][v480tmp]; \
+ffmpeg -hide_banner -loglevel warning -stats -y \
+  -threads ${THREADS} \
+  -i SOURCE \
+  -filter_complex "[0:v:0]split=3[v1080][v720tmp][v480tmp]; \
                    [v720tmp]scale=-2:720[v720]; \
                    [v480tmp]scale=-2:480[v480]" \
   -map "[v1080]" -c:v:0 libx264 -profile:v:0 high -level:v:0 4.0 \
-                 -preset medium -b:v:0 5000k -maxrate:v:0 5500k -bufsize:v:0 10000k \
-                 -g 48 -keyint_min 48 -sc_threshold 0 \
+                 -preset:v:0 fast -b:v:0 5000k -maxrate:v:0 5500k -bufsize:v:0 10000k \
+                 -g:v:0 48 -keyint_min:v:0 48 -sc_threshold:v:0 0 \
   -map "[v720]"  -c:v:1 libx264 -profile:v:1 main -level:v:1 4.0 \
-                 -preset medium -b:v:1 2500k -maxrate:v:1 2750k -bufsize:v:1 5000k \
-                 -g 48 -keyint_min 48 -sc_threshold 0 \
+                 -preset:v:1 fast -b:v:1 2500k -maxrate:v:1 2750k -bufsize:v:1 5000k \
+                 -g:v:1 48 -keyint_min:v:1 48 -sc_threshold:v:1 0 \
   -map "[v480]"  -c:v:2 libx264 -profile:v:2 main -level:v:2 3.1 \
-                 -preset fast   -b:v:2 1000k -maxrate:v:2 1100k -bufsize:v:2 2000k \
-                 -g 48 -keyint_min 48 -sc_threshold 0 \
+                 -preset:v:2 fast -b:v:2 1000k -maxrate:v:2 1100k -bufsize:v:2 2000k \
+                 -g:v:2 48 -keyint_min:v:2 48 -sc_threshold:v:2 0 \
   \
-  -map a:0 -c:a:0 aac -b:a:0 128k -ac:0 2 \
-  -map a:1? -c:a:1 aac -b:a:1 128k -ac:1 2 \
-  ...                                          ← N audio outputs, dynamic from ffprobe \
+  -map 0:<a0_idx> -c:a:0 aac -b:a:0 128k -ac:0 2 -ar:0 48000 \
+  -map 0:<a1_idx> -c:a:1 aac -b:a:1 128k -ac:1 2 -ar:1 48000 \
+  …                                                ← one mapping per source audio track \
   \
   -f hls \
   -hls_time 6 \
+  -hls_list_size 0 \
   -hls_playlist_type vod \
   -hls_segment_type mpegts \
   -hls_segment_filename "%v/seg_%05d.ts" \
   -master_pl_name master.m3u8 \
-  -var_stream_map "v:0,agroup:audio v:1,agroup:audio v:2,agroup:audio \
-                   a:0,agroup:audio,name:audio_0,language:ita,default:YES \
-                   a:1,agroup:audio,name:audio_1,language:eng" \
+  -var_stream_map "v:0,agroup:audio,name:v1080 \
+                   v:1,agroup:audio,name:v720 \
+                   v:2,agroup:audio,name:v480 \
+                   a:0,agroup:audio,name:audio_ita_0,language:ita,default:YES \
+                   a:1,agroup:audio,name:audio_eng_1,language:eng" \
   %v/playlist.m3u8
 ```
 
+Copy-1080p variant (when `can_copy_1080p()` is True): the filter graph
+becomes `split=2` (only `[v720]` and `[v480]`), the 1080p variant is
+`-map 0:v:0 -c:v:0 copy`, the rest is unchanged.
+
 The `-var_stream_map` is built dynamically from ffprobe output so the
-number of audio entries matches reality.
+number of audio entries matches reality. With `name:` set, FFmpeg uses
+the name as the directory token replacing `%v` in segment/playlist paths.
 
-## Performance estimate
+## Performance
 
-On Xeon E3-1275v6 (4c/8t @ 4 GHz boost):
+Measured on `server01` (Xeon E3-1275v6, 4c/8t @ 3.8-4.2 GHz boost) with
+a synthetic 60 s 1080p source + 2 audio tracks, defaults
+`WORKERS=2 THREADS=4 cpus:8.0`:
 
-- Single-pass 3-bitrate H.264 encode: ~1.0× realtime per file
-- 30-min 1080p episode → ~30 min encoding
-- 2 parallel workers configured → 2 episodes in 30 min wall-clock
-- Bottleneck: CPU (FFmpeg is well-parallelized but 3-stream split at medium preset is heavy)
+| Mode | Wall time for 60 s source | Speed | 90-min movie ETA |
+| --- | --- | --- | --- |
+| Full encode (3 variants) | ~24 s | ~2.5× realtime | ~36 min |
+| copy_1080p (2 variants) | ~12 s | ~4.9× realtime | ~18 min |
 
-For typical "1-2 new episodes/day" steady state: <2h CPU-wall per day, fine.
+Earlier config with `cpus: 4.0` capped the container at 4 CPU-seconds/sec
+on a host with 8 logical CPUs. ffmpeg with 3 video encoders + filters
+spawns ~12-15 threads asking for CPU, and the cgroup quota throttled at
+0.5-0.65× realtime. Lifting to 8.0 + relying on `nice -n 10` for politeness
+gave the ~4× speedup.
+
+For the typical "1-2 new episodes/day" steady state these numbers mean
+the encoder is essentially always idle.
 
 ## Storage cost
 
-Per 1080p H.264 source file:
+Per 1080p H.264 source file with the current ladder:
 - Source: 1× (deleted after encode)
-- HLS bundle: ~1.5× of source size (5 Mbps + 2.5 + 1 = 8.5 Mbps total; vs ~5 Mbps single-bitrate source)
+- HLS bundle: ~1.5× of source size (5 + 2.5 + 1 = 8.5 Mbps total vs
+  ~5 Mbps single-bitrate source)
 
-Net storage = 1.5× source, with -1× source deleted = **1.5× of source size, vs 1× today**.
-
-For BX11 1 TB: ~660 GB of effective content max (~150 movies @ 4 GB each, or ~500 episodes @ 1.3 GB each).
+Net storage = 1.5× source, with 1× source deleted = **~1.5× of source
+size** vs ~1× without the pipeline. For BX11 (1 TB): ~660 GB of
+effective content max — about 150 movies @ 4 GB each, or ~500 episodes
+@ 1.3 GB each.
 
 ## Trade-offs accepted
 
-- **No automatic upgrades**: if a better release comes out, Sonarr won't replace.
-  Manual workflow: delete from Sonarr/Radarr UI + re-search.
-- **No automatic subs**: Bazarr off. User picks subs via Jellyfin player CC → Search Subtitles (Open Subtitles plugin already configured).
-- **Public HLS CDN**: anyone with URL can download segments. Not a concern for non-pirated personal library, but worth noting.
-- **CIFS-served HLS**: Caddy reads segments over SMB from Storage Box. Each segment request = one CIFS RPC. For 1-3 concurrent viewers should be fine; >5 may show latency. Mitigation: move HLS bundles to local NVMe (480 GB available, ~320 GB content cap) if needed.
-
-## Implementation phases
-
-**Phase 1** — config-only changes (low risk, reversible):
-- Sonarr/Radarr profiles → `upgradeAllowed=false` via API
-- Bazarr automatic disabled (already partially done)
-- Sonarr/Radarr Custom Connect Script for trigger sentinel
-- Time: ~30 min
-
-**Phase 2** — encoder development:
-- Write `hls-encoder/` Python service + Dockerfile
-- Local test on a sample file
-- Time: ~3 h
-
-**Phase 3** — infra integration:
-- New DNS A record for `hls.<DOMAIN>`
-- Caddy block + Storage Box mount in caddy service
-- Add encoder service to compose
-- Remove Tdarr service
-- Time: ~30 min
-
-**Phase 4** — end-to-end test:
-- Drop a sample `.mkv` into `/data/media/movies/`, watch encoder process it
-- Open in Jellyfin web → verify playback + ABR switching (artificial bandwidth throttle in DevTools)
-- Test in Jellyfin mobile app
-- Time: ~1 h
-
-Total: ~5 h focused work. Easily splittable across 2-3 sessions.
+- **No automatic upgrades**: if a better release comes out, Sonarr won't
+  replace. Manual workflow is to delete from the *arr UI + re-search.
+- **No automatic subs by default**: Bazarr off. User picks subs via
+  Jellyfin player CC → Search Subtitles (Open Subtitles plugin).
+- **Public HLS CDN**: anyone with the URL can download segments. Not a
+  concern for non-pirated personal library, but worth noting.
+- **CIFS-served HLS**: Caddy reads segments over SMB from the Storage Box.
+  Each segment request = one CIFS RPC. For 1-3 concurrent viewers this
+  is fine; >5 may show first-segment latency. Mitigation: move HLS bundles
+  to local NVMe (480 GB available, ~320 GB content cap) if/when needed.
+- **Source deletion is irreversible without re-download.** If you ever
+  want to re-encode from scratch with a different ladder, you have to
+  delete the `.hls/` bundle + the `.strm` and re-import via
+  Sonarr/Radarr. The encoder doesn't keep an archive of source files.
 
 ## Rollback
 
-If HLS pipeline misbehaves:
-1. Remove `hls-encoder` service from compose
-2. Re-enable Tdarr (revert compose change)
-3. Re-enable upgrades on Sonarr/Radarr profiles
-4. New downloads land in `/data/media/` as plain `.mkv` again
-5. Existing HLS bundles can be left in place (Jellyfin will keep playing them
-   from `.strm`) or manually cleaned
+If the HLS pipeline misbehaves and you want plain `.mkv` playback again:
 
-Source files are gone after encode in the new flow, so we **cannot** revert
-already-encoded content to plain `.mkv` without re-downloading. Mitigation:
-soak-window of N days where encoder retains source in
-`/var/lib/hls-cache/archive/` before deletion, configurable.
+1. Remove `hls-encoder` service from `docker-compose.yml`.
+2. Re-enable upgrades on Sonarr/Radarr profiles.
+3. Drop the `hls.<DOMAIN>` and `encoder-status.<DOMAIN>` blocks from
+   `caddy/Caddyfile`.
+4. New downloads land in `/data/media/` as plain `.mkv`, Jellyfin
+   library scan picks them up directly. Already-encoded content keeps
+   working from its `.strm` files.
+5. To recover plain `.mkv` for already-encoded content: re-import via
+   Sonarr/Radarr (Search → re-download).

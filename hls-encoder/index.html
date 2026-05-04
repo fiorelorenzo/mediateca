@@ -5,24 +5,27 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>HLS Encoder</title>
 <style>
+  /* Palette aligned with Homarr 1.x (Mantine dark + indigo primary).
+     Mantine dark scale: #C1C2C5 .0 → #101113 .9.
+     Homarr's default primaryColor is indigo (#4C6EF5 .6). */
   :root {
     color-scheme: dark;
-    --bg: #0f1115;
-    --bg-elev: #161922;
-    --panel: #1c2030;
-    --panel-2: #232839;
-    --border: rgba(255,255,255,0.06);
+    --bg: #1A1B1E;            /* mantine dark.7 — page bg */
+    --bg-elev: #141517;       /* mantine dark.8 — slightly recessed */
+    --panel: #25262B;         /* mantine dark.6 — card bg */
+    --panel-2: #2C2E33;       /* mantine dark.5 — card top in gradient */
+    --border: rgba(255,255,255,0.08);
     --border-strong: rgba(255,255,255,0.12);
-    --fg: #e6e9ef;
-    --fg-mute: #aab1c0;
-    --dim: #6c7387;
-    --accent: #6aa9ff;
-    --accent-glow: rgba(106,169,255,0.18);
-    --ok: #4ade80;
-    --warn: #f7c94b;
-    --err: #f87171;
-    --copy: #22d3ee;
-    --shadow: 0 1px 0 rgba(255,255,255,0.04) inset, 0 8px 24px rgba(0,0,0,0.25);
+    --fg: #C1C2C5;            /* mantine dark.0 */
+    --fg-mute: #909296;       /* mantine dark.2 */
+    --dim: #5C5F66;           /* mantine dark.3 */
+    --accent: #4C6EF5;        /* mantine indigo.6 — Homarr primary */
+    --accent-glow: rgba(76,110,245,0.22);
+    --ok: #40C057;            /* mantine green.6 */
+    --warn: #FAB005;          /* mantine yellow.6 */
+    --err: #FA5252;           /* mantine red.6 */
+    --copy: #22B8CF;          /* mantine cyan.5 */
+    --shadow: 0 1px 0 rgba(255,255,255,0.03) inset, 0 8px 24px rgba(0,0,0,0.35);
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -30,8 +33,8 @@
     margin: 0;
     padding: 16px;
     background:
-      radial-gradient(1200px 600px at 100% -10%, rgba(106,169,255,0.06), transparent 60%),
-      radial-gradient(1000px 500px at -10% 110%, rgba(34,211,238,0.05), transparent 60%),
+      radial-gradient(1200px 600px at 100% -10%, rgba(76,110,245,0.07), transparent 60%),
+      radial-gradient(1000px 500px at -10% 110%, rgba(34,184,207,0.05), transparent 60%),
       var(--bg);
     color: var(--fg);
     font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
@@ -87,15 +90,15 @@
     width: 8px; height: 8px;
     border-radius: 50%;
     background: var(--ok);
-    box-shadow: 0 0 0 0 rgba(74,222,128,0.7);
+    box-shadow: 0 0 0 0 rgba(64,192,87,0.6);
     animation: pulse 1.8s infinite;
   }
   .pulse.idle { background: var(--dim); animation: none; }
   .pulse.err { background: var(--err); animation: pulse-err 1s infinite; }
   @keyframes pulse {
-    0%   { box-shadow: 0 0 0 0 rgba(74,222,128,0.6); }
-    70%  { box-shadow: 0 0 0 8px rgba(74,222,128,0); }
-    100% { box-shadow: 0 0 0 0 rgba(74,222,128,0); }
+    0%   { box-shadow: 0 0 0 0 rgba(64,192,87,0.5); }
+    70%  { box-shadow: 0 0 0 8px rgba(64,192,87,0); }
+    100% { box-shadow: 0 0 0 0 rgba(64,192,87,0); }
   }
   @keyframes pulse-err {
     0%, 100% { opacity: 1; }
@@ -229,7 +232,7 @@
     width: 100%;
     display: block;
   }
-  .spark .area  { fill: rgba(106,169,255,0.14); }
+  .spark .area  { fill: rgba(76,110,245,0.16); }
   .spark .line  { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; }
   .spark .grid  { stroke: rgba(255,255,255,0.05); stroke-width: 1; }
   .spark .axis  { fill: var(--dim); font-size: 9px; }
@@ -282,9 +285,9 @@
     text-transform: uppercase;
     flex-shrink: 0;
   }
-  .badge.ok    { background: rgba(74,222,128,0.12); color: var(--ok); }
-  .badge.err   { background: rgba(248,113,113,0.12); color: var(--err); }
-  .badge.copy  { background: rgba(34,211,238,0.12); color: var(--copy); }
+  .badge.ok    { background: rgba(64,192,87,0.14);  color: var(--ok); }
+  .badge.err   { background: rgba(250,82,82,0.14);  color: var(--err); }
+  .badge.copy  { background: rgba(34,184,207,0.14); color: var(--copy); }
   .badge.muted { background: rgba(255,255,255,0.05); color: var(--fg-mute); }
   .empty {
     color: var(--dim); font-size: 11px; font-style: italic;
