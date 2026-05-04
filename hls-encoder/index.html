@@ -9,12 +9,14 @@
     color-scheme: dark;
     --bg: #1a1b1e;
     --panel: #25262b;
+    --panel-2: #2c2e33;
     --border: #373a40;
     --fg: #c1c2c5;
     --dim: #909296;
     --ok: #51cf66;
     --warn: #ffd43b;
     --err: #ff6b6b;
+    --accent: #4dabf7;
   }
   body {
     margin: 0;
@@ -32,6 +34,13 @@
     display: flex;
     align-items: center;
     justify-content: space-between;
+  }
+  h2 {
+    font-size: 11px;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 14px 0 6px;
   }
   .age { font-size: 11px; color: var(--dim); font-weight: normal; }
   .grid {
@@ -57,16 +66,53 @@
   }
   .row .label { font-size: 11px; text-transform: none; letter-spacing: 0; }
   .footer {
-    margin-top: 10px;
+    margin-top: 12px;
     font-size: 10px;
     color: var(--dim);
     text-align: center;
   }
   .err-row { color: var(--err); }
+  .active, .history-item {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 6px;
+    font-size: 12px;
+  }
+  .active .name, .history-item .name {
+    color: var(--accent);
+    font-weight: 500;
+    overflow-wrap: anywhere;
+  }
+  .active .progress {
+    color: var(--dim);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 10px;
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+  }
+  .history-item .meta {
+    color: var(--dim);
+    font-size: 11px;
+    margin-top: 2px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-size: 10px;
+    margin-right: 4px;
+  }
+  .badge.ok { background: rgba(81,207,102,.15); color: var(--ok); }
+  .badge.err { background: rgba(255,107,107,.15); color: var(--err); }
+  .badge.copy { background: rgba(77,171,247,.15); color: var(--accent); }
+  .empty { color: var(--dim); font-size: 11px; font-style: italic; padding: 4px 0; }
 </style>
 </head>
 <body>
 <h1>HLS Encoder<span class="age" id="age">…</span></h1>
+
 <div class="grid">
   <div class="stat">
     <div class="label">Coda</div>
@@ -85,21 +131,85 @@
     <div class="value err" id="failed">0</div>
   </div>
 </div>
-<div class="stat" style="margin-top:8px">
-  <div class="label">Load average</div>
-  <div class="row"><span class="label">1m</span><span id="load1">—</span></div>
-  <div class="row"><span class="label">5m</span><span id="load5">—</span></div>
-  <div class="row"><span class="label">15m</span><span id="load15">—</span></div>
-</div>
-<div class="stat" style="margin-top:8px">
-  <div class="label">Config</div>
+
+<h2>In encoding</h2>
+<div id="active-list"><div class="empty">nessun job in volo</div></div>
+
+<h2>Sistema</h2>
+<div class="stat">
+  <div class="row"><span class="label">Load 1m</span><span id="load1">—</span></div>
+  <div class="row"><span class="label">Load 5m</span><span id="load5">—</span></div>
+  <div class="row"><span class="label">Load 15m</span><span id="load15">—</span></div>
+  <div class="row"><span class="label">Cache libera</span><span id="cache">—</span></div>
   <div class="row"><span class="label">Threads/job</span><span id="threads">—</span></div>
   <div class="row"><span class="label">Nice</span><span id="nice">—</span></div>
   <div class="row"><span class="label">Load gate</span><span id="gate">—</span></div>
 </div>
+
+<h2>Storico recente</h2>
+<div id="history-list"><div class="empty">nessun job recente</div></div>
+
 <div class="footer" id="footer">last poll never</div>
 <script>
 const fmt = (n) => typeof n === "number" ? n.toFixed(2) : "—";
+const fmtMs = (sec) => sec >= 60
+  ? Math.floor(sec/60) + "m " + Math.round(sec%60) + "s"
+  : Math.round(sec) + "s";
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    {"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]
+  ));
+}
+
+function renderActive(active) {
+  const el = document.getElementById("active-list");
+  const entries = Object.entries(active || {});
+  if (entries.length === 0) {
+    el.innerHTML = '<div class="empty">nessun job in volo</div>';
+    return;
+  }
+  const now = Math.floor(Date.now() / 1000);
+  el.innerHTML = entries.map(([, info]) => {
+    const elapsed = now - (info.started || now);
+    const modeBadge = info.mode === "copy1080"
+      ? '<span class="badge copy">copy1080</span>'
+      : '<span class="badge">encode</span>';
+    return `<div class="active">
+      <div class="name">${modeBadge}${escapeHtml(info.rel || "?")}</div>
+      <div class="progress">+${fmtMs(elapsed)} ${escapeHtml(info.progress || "")}</div>
+    </div>`;
+  }).join("");
+}
+
+function renderHistory(recent) {
+  const el = document.getElementById("history-list");
+  const items = (recent || []).slice(0, 8);
+  if (items.length === 0) {
+    el.innerHTML = '<div class="empty">nessun job recente</div>';
+    return;
+  }
+  el.innerHTML = items.map(j => {
+    const ok = j.result === "ok";
+    const badge = ok
+      ? '<span class="badge ok">ok</span>'
+      : '<span class="badge err">fail</span>';
+    const modeBadge = j.mode === "copy1080"
+      ? '<span class="badge copy">copy</span>'
+      : '';
+    let meta = "";
+    if (ok && typeof j.duration === "number" && typeof j.encode_seconds === "number") {
+      meta = `${fmtMs(j.duration)} → ${fmtMs(j.encode_seconds)} (${(j.speed||0).toFixed(2)}×)`;
+    } else if (!ok && j.error) {
+      meta = j.error;
+    }
+    return `<div class="history-item">
+      <div class="name">${badge}${modeBadge}${escapeHtml(j.rel || "?")}</div>
+      <div class="meta">${escapeHtml(meta)}</div>
+    </div>`;
+  }).join("");
+}
+
 async function tick() {
   try {
     const r = await fetch("/status.json", { cache: "no-store" });
@@ -114,14 +224,19 @@ async function tick() {
     document.getElementById("load1").textContent = fmt(s.load_avg?.["1m"]);
     document.getElementById("load5").textContent = fmt(s.load_avg?.["5m"]);
     document.getElementById("load15").textContent = fmt(s.load_avg?.["15m"]);
+    document.getElementById("cache").textContent =
+      typeof s.cache_free_gb === "number" ? s.cache_free_gb.toFixed(1) + " GB" : "—";
     document.getElementById("threads").textContent = s.threads_per_job ?? "—";
     document.getElementById("nice").textContent = s.nice ?? "—";
     document.getElementById("gate").textContent =
       s.load_gate > 0
         ? (s.load_gate_blocking ? "BLOCKING" : "OK > " + s.load_gate)
         : "off";
+    renderActive(s.active_jobs);
+    renderHistory(s.recent_jobs);
     document.getElementById("footer").textContent =
       "polled " + new Date().toLocaleTimeString();
+    document.getElementById("footer").classList.remove("err-row");
   } catch (e) {
     document.getElementById("footer").textContent = "error: " + e.message;
     document.getElementById("footer").classList.add("err-row");

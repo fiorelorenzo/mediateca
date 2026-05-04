@@ -35,7 +35,26 @@ See `../HLS_ABR_DESIGN.md` for the full design and rationale.
 | `RETRY_LIMIT` | `3` | Retries before giving up |
 | `SETTLE_SECONDS` | `30` | How long file size must be stable before encoding |
 | `POLL_INTERVAL` | `30` | watchdog filesystem poll interval (CIFS doesn't deliver inotify) |
+| `MIN_CACHE_FREE_GB` | `10` | Workers pause when `/cache` free space drops below this. |
+| `DB_RETENTION_DAYS` | `30` | Delete `status='done'` rows older than this. `0` = keep forever. |
+| `COPY_1080P_MAX_BITRATE` | `5500000` | If source is H.264 ≤1080p with bitrate at or below this, the 1080p HLS variant is bitstream-copied instead of re-encoded. ~40% CPU savings on compatible files. |
+| `HISTORY_LIMIT` | `20` | Number of recent jobs surfaced in `status.json`. |
 | `LOG_LEVEL` | `INFO` | Standard Python log levels |
+
+## State machine + recovery
+
+State.db is SQLite in WAL mode, safe across multiple worker threads. Each
+job moves through `in_progress → done | failed`. A `failed` job is retried
+on the next watcher hit until `attempts ≥ RETRY_LIMIT`.
+
+If the encoder crashes mid-encode, the `in_progress` row is rewritten to
+`failed` (with `last_error="stale in_progress"`) on the next startup, and
+the file is requeued for retry. The cache directory used by the dead job
+is cleaned up by the startup orphan sweep.
+
+`SIGTERM` triggers graceful shutdown: in-flight ffmpeg processes get
+`SIGTERM` themselves, workers stop accepting new jobs, and the main loop
+joins workers up to a 10s deadline. Container restarts are clean.
 
 ## Tuning rule of thumb
 
