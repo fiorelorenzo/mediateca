@@ -150,12 +150,15 @@ settings:
             limit: 25
 
 # Push notifications — enable only the ones useful to a small stack.
+# Field names are camelCase (the YAML deserializer is configured with
+# CamelCaseNamingConvention) even though the underlying C# class uses
+# PascalCase.
 notifications:
-  SessionStarted:
-    Enabled: false
-  PlaybackStarted:
-    Enabled: false
-  UserLockedOut:
-    Enabled: true
-  ItemAdded:
-    Enabled: true
+  sessionStarted:
+    enabled: false
+  playbackStarted:
+    enabled: false
+  userLockedOut:
+    enabled: true
+  itemAdded:
+    enabled: true
