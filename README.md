@@ -717,43 +717,24 @@ After Jellyfin restarts, configure at
 `https://media.<DOMAIN>/web/index.html#/dashboard/plugins/configurationpage?name=Streamyfin`.
 Two tabs matter:
 
-- **Application**: form-driven settings. Set the **Seerr server URL**
-  to `https://streaming.<DOMAIN>` and the default audio + subtitle
-  language to `ita` (or whichever ISO-639-2 code matches your library).
-  Lock any setting you want to enforce across all users.
-- **YAML Editor**: paste a custom home-screen layout, e.g.
+**Don't use the Application form tab.** Its fields ship with placeholder
+strings ("Enter library id(s)", "Enter optimized server url", etc.); if
+you click Save without manually clearing every one, those literals end
+up persisted in the plugin XML and the mobile app interprets them as
+real values (e.g. hides every library because `hiddenLibraries` contains
+the placeholder string). Instead, use the **YAML Editor** tab and paste
+the bundled `config/streamyfin/plugin-config.yml` from this repo —
+already curated for an Italian-defaulting stack with explicit empty /
+typed values everywhere, no placeholders.
 
-  ```yaml
-  seerrUrl: https://streaming.<DOMAIN>
-  defaultAudioLanguage:
-    value: ita
-  defaultSubtitleLanguage:
-    value: ita
-  forwardSkipTime:
-    value: 30
-  rewindSkipTime:
-    value: 15
-  home:
-    sections:
-      - title: "Continue Watching"
-        orientation: vertical
-        items:
-          filters: [IsResumable]
-          includeItemTypes: [Episode, Movie]
-          limit: 25
-      - title: "Live TV"
-        orientation: horizontal
-        items:
-          mediaTypes: [TvChannel]
-          limit: 25
-      - title: "Latest Movies"
-        orientation: horizontal
-        items:
-          sortBy: [DateCreated]
-          sortOrder: [Descending]
-          includeItemTypes: [Movie]
-          limit: 25
-  ```
+```sh
+# Open it locally, replace <DOMAIN> with your real domain, then paste:
+cat config/streamyfin/plugin-config.yml | sed 's|<DOMAIN>|example.com|g'
+```
+
+Save. The five home sections appear in Italian (Continua a guardare,
+Prossimi episodi, Aggiunti di recente, Film, Serie TV). Some will be
+empty until viewing history accumulates — expected.
 
 **On the device** — install Streamyfin from the
 [App Store](https://apps.apple.com/app/streamyfin/id6593660679),
@@ -1163,7 +1144,9 @@ of the above. Total for the reference setup: ~€63/mo.
 ├── config/
 │   ├── headscale/
 │   │   └── config.yaml.template      # rendered into headscale-rendered volume by headscale-init
-│   └── jellyfin-custom.css           # apply via Dashboard → General → Custom CSS
+│   ├── jellyfin-custom.css           # apply via Dashboard → General → Custom CSS
+│   └── streamyfin/
+│       └── plugin-config.yml         # paste into plugin's YAML Editor tab
 ├── hls-encoder/
 │   ├── Dockerfile                    # python:3.12-slim + ffmpeg + tini
 │   ├── encoder.py                    # watcher, HLS encode, .strm, monitor=false
