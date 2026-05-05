@@ -82,9 +82,11 @@ settings:
       showTitles: true
       showStats: true
 
-  # Seerr (the new fork; both keys are written so older app builds that
-  # still read jellyseerrServerUrl pick it up too)
-  seerrServerUrl:
+  # Seerr server URL. The plugin v0.66 schema still calls this field
+  # `jellyseerrServerUrl` (legacy name from before the Seerr/Jellyseerr
+  # rename); newer plugin builds on main rename it to `seerrServerUrl`.
+  # Streamyfin app v0.51 reads `jellyseerrServerUrl`, so this matches.
+  jellyseerrServerUrl:
     locked: false
     value: https://streaming.<DOMAIN>
 
