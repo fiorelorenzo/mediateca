@@ -14,6 +14,7 @@ connection.
 | Indexer aggregation | [Prowlarr](https://prowlarr.com) |
 | Subtitles | [Bazarr](https://bazarr.media) |
 | Live TV middleware (M3U / EPG / HDHomeRun emulator for Jellyfin) | [Dispatcharr](https://github.com/Dispatcharr/Dispatcharr) |
+| Mobile / TV unified client (streaming + Live TV + requests) | [Streamyfin](https://github.com/streamyfin/streamyfin) (iOS / Android / tvOS / Android TV) + [server-side plugin](https://github.com/streamyfin/jellyfin-plugin-streamyfin) |
 | BitTorrent client | [qBittorrent](https://www.qbittorrent.org) (forced through ProtonVPN) |
 | Reverse proxy + automatic HTTPS | [Caddy](https://caddyserver.com) |
 | Admin dashboard | [Homarr 1.x](https://homarr.dev) |
@@ -685,7 +686,88 @@ inherits Seerr's hashed Tailwind classes and matches the rest of
 the menu pixel-perfect across Seerr version bumps. Cosmetically
 indistinguishable from a native Seerr feature.
 
-### 5 — Grey-market providers (deferred)
+### 5 — Mobile / TV app (Streamyfin)
+
+[Streamyfin](https://github.com/streamyfin/streamyfin) is a Jellyfin
+client (iOS / Android / Apple TV / Android TV) that **bundles native
+Seerr integration**: same app for streaming, Live TV (via the HDHomeRun
+tuner Dispatcharr exposes), and request-by-tap. Since Seerr is already
+fronted by Jellyfin SSO in this stack, login is automatic — the user
+opens Streamyfin, signs in once with their Jellyfin credentials, and
+everything else works.
+
+**On the server** — install the companion plugin (already done in this
+repo's deployment) so settings can be pushed centrally to all clients.
+
+```sh
+# One-shot install. Repeat with new release URL when bumping versions.
+ssh <USERNAME>@<HOST-IP> '\''
+ver=0.66.0.0
+url=https://github.com/streamyfin/jellyfin-plugin-streamyfin/releases/download/$ver/streamyfin-$ver.zip
+curl -sL "$url" -o /tmp/streamyfin.zip
+target=/opt/servarr/config/jellyfin/data/plugins/Streamyfin_$ver
+sudo mkdir -p "$target"
+python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" /tmp/streamyfin.zip "$target"
+sudo chown -R 1000:1000 "$target"
+docker compose -f /opt/servarr/docker-compose.yml restart jellyfin
+'\''
+```
+
+After Jellyfin restarts, configure at
+`https://media.<DOMAIN>/web/index.html#/dashboard/plugins/configurationpage?name=Streamyfin`.
+Two tabs matter:
+
+- **Application**: form-driven settings. Set the **Seerr server URL**
+  to `https://streaming.<DOMAIN>` and the default audio + subtitle
+  language to `ita` (or whichever ISO-639-2 code matches your library).
+  Lock any setting you want to enforce across all users.
+- **YAML Editor**: paste a custom home-screen layout, e.g.
+
+  ```yaml
+  seerrUrl: https://streaming.<DOMAIN>
+  defaultAudioLanguage:
+    value: ita
+  defaultSubtitleLanguage:
+    value: ita
+  forwardSkipTime:
+    value: 30
+  rewindSkipTime:
+    value: 15
+  home:
+    sections:
+      - title: "Continue Watching"
+        orientation: vertical
+        items:
+          filters: [IsResumable]
+          includeItemTypes: [Episode, Movie]
+          limit: 25
+      - title: "Live TV"
+        orientation: horizontal
+        items:
+          mediaTypes: [TvChannel]
+          limit: 25
+      - title: "Latest Movies"
+        orientation: horizontal
+        items:
+          sortBy: [DateCreated]
+          sortOrder: [Descending]
+          includeItemTypes: [Movie]
+          limit: 25
+  ```
+
+**On the device** — install Streamyfin from the
+[App Store](https://apps.apple.com/app/streamyfin/id6593660679),
+[Play Store](https://play.google.com/store/apps/details?id=com.fredrikburmester.streamyfin),
+or [GitHub releases](https://github.com/streamyfin/streamyfin/releases/latest)
+(also available via Obtainium for Android). Server URL: `https://media.<DOMAIN>`.
+Login with the user's Jellyfin credentials. Seerr SSO + Live TV + library
+streaming all flow through this single app.
+
+End-users no longer need to bounce between Seerr (browser) and a Jellyfin
+client. The `seerr-inject` sidebar link in the Seerr web UI
+remains for desktop users who prefer the browser.
+
+### 6 — Grey-market providers (deferred)
 
 Paid IPTV resellers exist that bundle Sky / DAZN / Netflix / pay-TV
 into a single M3U for €10-15/month. They're **illegal** in most
