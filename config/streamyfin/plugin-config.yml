@@ -1,0 +1,159 @@
+# Streamyfin plugin config — paste into Dashboard → Plugins → Streamyfin → YAML Editor.
+# Replace <DOMAIN> with your domain before applying.
+# Pushed via POST /streamyfin/config/yaml as admin.
+# Strategy: set only what's intentional, leave nothing as the plugin form's
+# placeholder default ("Enter X" strings broke previous attempts).
+
+settings:
+  # Player skip times (seconds)
+  forwardSkipTime:
+    locked: false
+    value: 30
+  rewindSkipTime:
+    locked: false
+    value: 15
+
+  # Bitrate cap is not enforced — clients pick best available
+  defaultBitrate:
+    locked: false
+    value: null
+
+  maxAutoPlayEpisodeCount:
+    locked: false
+    value: 3
+
+  # Audio / subtitle remember-last-selection.
+  # NOTE: defaultAudioLanguage / defaultSubtitleLanguage are NOT plugin
+  # settings — those properties are commented out in plugin v0.66's
+  # Settings.cs (CultureDto serialization issue upstream). Set the user's
+  # preferred audio + subtitle language per-user in Jellyfin itself:
+  # Dashboard → Users → <user> → Display preferences.
+  rememberAudioSelections:
+    locked: false
+    value: true
+  rememberSubtitleSelections:
+    locked: false
+    value: true
+  subtitleMode:
+    locked: false
+    value: Default
+  subtitleSize:
+    locked: false
+    value: 100
+
+  # Orientation
+  autoRotate:
+    locked: false
+    value: true
+  defaultVideoOrientation:
+    locked: false
+    value: DEFAULT
+
+  # UX touches
+  safeAreaInControlsEnabled:
+    locked: false
+    value: true
+  showCustomMenuLinks:
+    locked: false
+    value: false
+  disableHapticFeedback:
+    locked: false
+    value: false
+  enableHorizontalSwipeSkip:
+    locked: false
+    value: true
+  enableLeftSideBrightnessSwipe:
+    locked: false
+    value: true
+  enableRightSideVolumeSwipe:
+    locked: false
+    value: true
+
+  # Library — show nothing as hidden, use detailed cards
+  hiddenLibraries:
+    locked: false
+    value: []
+  libraryOptions:
+    locked: false
+    value:
+      display: row
+      cardStyle: detailed
+      imageStyle: poster
+      showTitles: true
+      showStats: true
+
+  # Seerr (the new fork; both keys are written so older app builds that
+  # still read jellyseerrServerUrl pick it up too)
+  seerrServerUrl:
+    locked: false
+    value: https://streaming.<DOMAIN>
+
+  # Search backend — Jellyfin native (no Marlin running)
+  searchEngine:
+    locked: false
+    value: Jellyfin
+  marlinServerUrl:
+    locked: false
+    value: ""
+
+  # Streamystats — disabled (no recs/promoted lists)
+  streamyStatsServerUrl:
+    locked: false
+    value: ""
+  streamyStatsMovieRecommendations:
+    locked: false
+    value: false
+  streamyStatsSeriesRecommendations:
+    locked: false
+    value: false
+  streamyStatsPromotedWatchlists:
+    locked: false
+    value: false
+
+  # Home — explicit sections (overrides app default with curated list)
+  home:
+    locked: false
+    value:
+      sections:
+        - title: Continua a guardare
+          orientation: vertical
+          items:
+            filters: [IsResumable]
+            includeItemTypes: [Episode, Movie]
+            limit: 25
+        - title: Prossimi episodi
+          orientation: horizontal
+          nextUp:
+            limit: 25
+        - title: Aggiunti di recente
+          orientation: vertical
+          items:
+            sortBy: [DateCreated]
+            sortOrder: [Descending]
+            includeItemTypes: [Series, Movie]
+            limit: 25
+        - title: Film
+          orientation: horizontal
+          items:
+            sortBy: [SortName]
+            sortOrder: [Ascending]
+            includeItemTypes: [Movie]
+            limit: 25
+        - title: Serie TV
+          orientation: horizontal
+          items:
+            sortBy: [SortName]
+            sortOrder: [Ascending]
+            includeItemTypes: [Series]
+            limit: 25
+
+# Push notifications — enable only the ones useful to a small stack.
+notifications:
+  SessionStarted:
+    Enabled: false
+  PlaybackStarted:
+    Enabled: false
+  UserLockedOut:
+    Enabled: true
+  ItemAdded:
+    Enabled: true

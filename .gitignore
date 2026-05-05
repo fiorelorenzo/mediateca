@@ -13,6 +13,8 @@ caddy/config/
 config/headscale/*
 !config/headscale/config.yaml
 !config/jellyfin-custom.css
+!config/streamyfin/
+!config/streamyfin/plugin-config.yml
 
 # Tooling
 .claude/
