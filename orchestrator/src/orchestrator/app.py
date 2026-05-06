@@ -19,6 +19,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(s.log_level)
     with Session(get_engine()) as session:
         seed_settings(session, s.policy_seed)
+    from orchestrator.workers.reconcile import reconcile
+    reconcile()
     try:
         await push_custom_formats(s.sonarr_url, s.sonarr_api_key)
         await push_custom_formats(s.radarr_url, s.radarr_api_key)
