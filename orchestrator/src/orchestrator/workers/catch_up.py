@@ -10,6 +10,7 @@ from sqlmodel import Session, select
 
 from orchestrator.config import get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
+from orchestrator.core.event_bus import publish
 from orchestrator.db.models import History, Item, ItemSource, ItemStatus
 from orchestrator.db.session import get_engine
 from orchestrator.logging_setup import get_logger
@@ -43,6 +44,7 @@ async def tick() -> None:
                 session.add(item)
                 session.add(History(item_id=item.id, event="SEARCH_TRIGGERED"))  # type: ignore[arg-type]
                 session.commit()
+                publish("item.search_triggered", {"item_id": item.id})
                 log.info("catch_up.searched", item_id=item.id, retry=item.retry_count)
             except Exception as exc:  # noqa: BLE001
                 log.exception("catch_up.failed", item_id=item.id)
