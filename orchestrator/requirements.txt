@@ -5,7 +5,7 @@ alembic==1.18.4
 pydantic==2.13.3
 pydantic-settings==2.14.0
 httpx==0.28.1
-apscheduler==4.0.0a6
+apscheduler==3.11.2
 structlog==25.5.0
 PyYAML==6.0.3
 bcrypt==5.0.0
