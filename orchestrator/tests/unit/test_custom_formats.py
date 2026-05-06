@@ -1,7 +1,6 @@
 # orchestrator/tests/unit/test_custom_formats.py
 import json
 from pathlib import Path
-from unittest.mock import patch
 
 import httpx
 import respx
@@ -13,9 +12,7 @@ from orchestrator.core.custom_formats import push_custom_formats
 async def test_push_creates_missing_format(tmp_path: Path, monkeypatch) -> None:
     cf_dir = tmp_path / "cf"
     cf_dir.mkdir()
-    (cf_dir / "x.json").write_text(json.dumps(
-        {"name": "TestFormat", "specifications": []}
-    ))
+    (cf_dir / "x.json").write_text(json.dumps({"name": "TestFormat", "specifications": []}))
     monkeypatch.setattr("orchestrator.core.custom_formats.STACK_MANAGED_PATH", cf_dir)
 
     respx.get("http://sonarr:8989/api/v3/customformat").mock(

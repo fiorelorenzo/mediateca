@@ -5,8 +5,8 @@ from unittest.mock import patch
 
 from sqlmodel import Session, select
 
-from orchestrator.core.probe import MediaInfo, AudioTrack
-from orchestrator.db.models import Item, ItemSource, ItemStatus, WebhookInbox
+from orchestrator.core.probe import AudioTrack, MediaInfo
+from orchestrator.db.models import Item, ItemSource, WebhookInbox
 from orchestrator.db.session import get_engine, init_schema
 from orchestrator.workers.webhook_inbox import process_inbox
 
@@ -19,15 +19,15 @@ def setup_module() -> None:
 
 def test_sonarr_payload_creates_item() -> None:
     with Session(get_engine()) as s:
-        s.add(WebhookInbox(
-            source=ItemSource.SONARR,
-            payload=json.loads((FIX / "sonarr_on_import.json").read_text()),
-        ))
+        s.add(
+            WebhookInbox(
+                source=ItemSource.SONARR,
+                payload=json.loads((FIX / "sonarr_on_import.json").read_text()),
+            )
+        )
         s.commit()
 
-    fake = MediaInfo(
-        audio_tracks=[AudioTrack(1, "aac", 6, "ita"), AudioTrack(2, "aac", 6, "eng")]
-    )
+    fake = MediaInfo(audio_tracks=[AudioTrack(1, "aac", 6, "ita"), AudioTrack(2, "aac", 6, "eng")])
     with patch("orchestrator.workers.webhook_inbox.ffprobe", return_value=fake):
         with Session(get_engine()) as s:
             n = process_inbox(s)

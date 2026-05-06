@@ -12,7 +12,8 @@ router = APIRouter(tags=["events"], dependencies=[require_admin_token])
 
 @router.get("/events")
 async def events() -> EventSourceResponse:
-    async def gen() -> AsyncIterator[dict]:
+    async def gen() -> AsyncIterator[dict[str, str]]:
         async for msg in subscribe():
             yield {"data": msg}
+
     return EventSourceResponse(gen())

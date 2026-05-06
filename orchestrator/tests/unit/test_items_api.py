@@ -15,9 +15,16 @@ def setup_module() -> None:
 
 def _seed_item() -> int:
     with Session(get_engine()) as s:
-        i = Item(source=ItemSource.SONARR, source_id=999, title="X",
-                 status=ItemStatus.INCOMPLETE, audio_present=["ita"])
-        s.add(i); s.commit(); s.refresh(i)
+        i = Item(
+            source=ItemSource.SONARR,
+            source_id=999,
+            title="X",
+            status=ItemStatus.INCOMPLETE,
+            audio_present=["ita"],
+        )
+        s.add(i)
+        s.commit()
+        s.refresh(i)
         return i.id  # type: ignore[return-value]
 
 
@@ -40,8 +47,11 @@ def test_accept_as_is_transition() -> None:
 def test_override_policy() -> None:
     iid = _seed_item()
     c = TestClient(app)
-    r = c.post(f"/api/items/{iid}/override-policy",
-               headers=H, json={"required_audio_langs": ["jpn", "eng"]})
+    r = c.post(
+        f"/api/items/{iid}/override-policy",
+        headers=H,
+        json={"required_audio_langs": ["jpn", "eng"]},
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["audio_required"] == ["jpn", "eng"]

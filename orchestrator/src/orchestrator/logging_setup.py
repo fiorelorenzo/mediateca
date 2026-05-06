@@ -13,12 +13,10 @@ def configure(level: str = "INFO") -> None:
             structlog.processors.dict_tracebacks,
             structlog.processors.JSONRenderer(),
         ],
-        wrapper_class=structlog.make_filtering_bound_logger(
-            getattr(logging, level)
-        ),
+        wrapper_class=structlog.make_filtering_bound_logger(getattr(logging, level)),
         cache_logger_on_first_use=True,
     )
 
 
 def get_logger(name: str) -> structlog.stdlib.BoundLogger:
-    return structlog.get_logger(name)
+    return structlog.get_logger(name)  # type: ignore[no-any-return]

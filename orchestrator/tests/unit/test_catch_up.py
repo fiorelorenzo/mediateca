@@ -21,11 +21,16 @@ def test_tick_searches_overdue_items() -> None:
         return_value=httpx.Response(201, json={"id": 1})
     )
     with Session(get_engine()) as s:
-        s.add(Item(
-            source=ItemSource.SONARR, source_id=42, title="X",
-            status=ItemStatus.INCOMPLETE, audio_present=["ita"],
-            next_retry_at=datetime.utcnow() - timedelta(hours=1),
-        ))
+        s.add(
+            Item(
+                source=ItemSource.SONARR,
+                source_id=42,
+                title="X",
+                status=ItemStatus.INCOMPLETE,
+                audio_present=["ita"],
+                next_retry_at=datetime.utcnow() - timedelta(hours=1),
+            )
+        )
         s.commit()
     asyncio.run(tick())
     assert route.called

@@ -8,7 +8,7 @@ import respx
 from sqlmodel import Session, select
 
 from orchestrator.core.probe import AudioTrack, MediaInfo
-from orchestrator.db.models import Item, ItemStatus, ItemSource, WebhookInbox
+from orchestrator.db.models import Item, ItemSource, ItemStatus, WebhookInbox
 from orchestrator.db.session import get_engine, init_schema
 from orchestrator.workers.webhook_inbox import process_inbox
 
@@ -18,7 +18,9 @@ FIX = Path(__file__).parents[1] / "fixtures"
 def setup_module() -> None:
     init_schema()
     from sqlmodel import Session
+
     from orchestrator.core.policy_seed import seed_settings
+
     with Session(get_engine()) as s:
         seed_settings(s, None)
 
@@ -34,10 +36,14 @@ def test_italian_only_release_marked_incomplete_but_promoted(tmp_path: Path, mon
     payload["movieFile"]["path"] = str(src)
 
     respx.get("http://radarr:7878/api/v3/movie/12").mock(
-        return_value=httpx.Response(200, json={
-            "id": 12, "title": "Dune",
-            "originalLanguage": {"id": 1, "name": "English"},
-        })
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": 12,
+                "title": "Dune",
+                "originalLanguage": {"id": 1, "name": "English"},
+            },
+        )
     )
 
     with Session(get_engine()) as s:
@@ -52,6 +58,8 @@ def test_italian_only_release_marked_incomplete_but_promoted(tmp_path: Path, mon
     with Session(get_engine()) as s:
         items = s.exec(select(Item)).all()
     incomplete = [i for i in items if i.source == ItemSource.RADARR]
-    assert any(i.status == ItemStatus.INCOMPLETE and "missing" in (i.status_reason or "")
-               for i in incomplete)
+    assert any(
+        i.status == ItemStatus.INCOMPLETE and "missing" in (i.status_reason or "")
+        for i in incomplete
+    )
     assert any(i.library_path is not None for i in incomplete)

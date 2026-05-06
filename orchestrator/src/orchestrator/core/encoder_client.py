@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any, cast
+
 import httpx
 
 
@@ -15,13 +17,13 @@ class HlsEncoderClient:
         async with await self._client() as c:
             r = await c.post("/jobs", json={"source_path": source_path})
             r.raise_for_status()
-            return r.json()["job_id"]
+            return cast(str, r.json()["job_id"])
 
-    async def get_job_status(self, job_id: str) -> dict:
+    async def get_job_status(self, job_id: str) -> dict[str, Any]:
         async with await self._client() as c:
             r = await c.get(f"/jobs/{job_id}")
             r.raise_for_status()
-            return r.json()
+            return cast(dict[str, Any], r.json())
 
     async def healthz(self) -> bool:
         try:

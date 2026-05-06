@@ -1,4 +1,4 @@
-from orchestrator.core.iso639 import normalize, name_to_code
+from orchestrator.core.iso639 import name_to_code, normalize
 
 
 def test_normalize_already_iso6392() -> None:
@@ -22,5 +22,6 @@ def test_name_to_code_unknown_returns_none() -> None:
 
 def test_normalize_unknown_raises() -> None:
     import pytest
+
     with pytest.raises(ValueError):
         normalize("xxxxx")

@@ -4,13 +4,14 @@ from __future__ import annotations
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from sqlmodel import Session, select
 
 from orchestrator.config import get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.event_bus import publish
-from orchestrator.core.merger import merge_audio, promote, replace_atomically
+from orchestrator.core.merger import promote
 from orchestrator.core.policy import PolicyEngine
 from orchestrator.core.state import validate_transition
 from orchestrator.db.models import (
@@ -36,7 +37,7 @@ def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Pa
     parts = source_file.parts
     if "staging" in parts:
         idx = parts.index("staging")
-        rel = Path(*parts[idx + 1:])
+        rel = Path(*parts[idx + 1 :])
     else:
         rel = Path(source_file.name)
     return media_root / rel
@@ -51,11 +52,14 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
     # Original language lookup
     if item.source == ItemSource.SONARR:
         client = SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
-        original = await client.get_series_original_language(item.series_id or 0) \
-            if item.series_id else None
+        original = (
+            await client.get_series_original_language(item.series_id or 0)
+            if item.series_id
+            else None
+        )
     else:
-        client = RadarrClient(settings.radarr_url, settings.radarr_api_key)  # type: ignore[assignment]
-        original = await client.get_movie_original_language(item.source_id)
+        radarr = RadarrClient(settings.radarr_url, settings.radarr_api_key)
+        original = await radarr.get_movie_original_language(item.source_id)
 
     engine = PolicyEngine(default_required=runtime.get("required_audio_langs", []))  # type: ignore[arg-type]
     verdict = engine.evaluate(
@@ -63,9 +67,13 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
         original_lang=original,
         override_required=item.audio_required,
     )
-    log.info("policy.evaluated",
-             item_id=item.id, verdict_complete=verdict.complete,
-             missing=verdict.missing, required=verdict.resolved_required)
+    log.info(
+        "policy.evaluated",
+        item_id=item.id,
+        verdict_complete=verdict.complete,
+        missing=verdict.missing,
+        required=verdict.resolved_required,
+    )
 
     if verdict.complete:
         await _promote_or_encode(session, item, source_file, runtime)
@@ -74,7 +82,7 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
 
 
 async def _promote_or_encode(
-    session: Session, item: Item, source_file: Path, runtime: dict
+    session: Session, item: Item, source_file: Path, runtime: dict[str, Any]
 ) -> None:
     settings = get_settings()
     target = _resolve_library_path(item, source_file, settings.media_root)
@@ -84,29 +92,40 @@ async def _promote_or_encode(
         validate_transition(item.status, ItemStatus.PROMOTING)
         item.status = ItemStatus.PROMOTING
     session.add(item)
-    session.add(History(item_id=item.id, event="PROMOTED",  # type: ignore[arg-type]
-                        detail={"library_path": str(target)}))
+    session.add(
+        History(
+            item_id=item.id,
+            event="PROMOTED",
+            detail={"library_path": str(target)},
+        )
+    )
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
 
     if runtime.get("hls_enabled"):
         validate_transition(item.status, ItemStatus.ENCODING)
         item.status = ItemStatus.ENCODING
-        session.add(item); session.commit()
+        session.add(item)
+        session.commit()
         from orchestrator.workers.job_runner import enqueue_encode
+
         await enqueue_encode(item, session)
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
     else:
         validate_transition(item.status, ItemStatus.PROMOTED)
         item.status = ItemStatus.PROMOTED
-        session.add(item); session.commit()
+        session.add(item)
+        session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
         await _unmonitor_in_arr(item)
 
 
 async def _mark_incomplete_and_promote(
-    session: Session, item: Item, source_file: Path, missing: list[str],
-    runtime: dict,
+    session: Session,
+    item: Item,
+    source_file: Path,
+    missing: list[str],
+    runtime: dict[str, Any],
 ) -> None:
     """User-facing availability has priority over completeness — promote
     immediately so the user can watch what we have, while leaving the
@@ -123,8 +142,13 @@ async def _mark_incomplete_and_promote(
         hours=int(runtime.get("retry_interval_hours", 24))
     )
     session.add(item)
-    session.add(History(item_id=item.id, event="INCOMPLETE",  # type: ignore[arg-type]
-                        detail={"missing": missing, "library_path": str(target)}))
+    session.add(
+        History(
+            item_id=item.id,
+            event="INCOMPLETE",
+            detail={"missing": missing, "library_path": str(target)},
+        )
+    )
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
 

@@ -28,7 +28,7 @@ def list_items(
     if status is not None:
         stmt = stmt.where(Item.status == status)
     if q:
-        stmt = stmt.where(Item.title.contains(q))  # type: ignore[union-attr]
+        stmt = stmt.where(Item.title.contains(q))  # type: ignore[attr-defined]
     total = len(session.exec(stmt).all())
     rows = session.exec(stmt.offset(offset).limit(limit)).all()
     return {"total": total, "items": [r.model_dump() for r in rows]}
@@ -40,7 +40,7 @@ def get_item(item_id: int, session: Session = Depends(get_session)) -> dict[str,
     if item is None:
         raise HTTPException(404, "item not found")
     history = session.exec(
-        select(History).where(History.item_id == item_id).order_by(History.created_at.desc())  # type: ignore[arg-type]
+        select(History).where(History.item_id == item_id).order_by(History.created_at.desc())  # type: ignore[attr-defined]
     ).all()
     return {"item": item.model_dump(), "history": [h.model_dump() for h in history]}
 
@@ -49,7 +49,9 @@ class OverridePayload(BaseModel):
     required_audio_langs: list[str] | None = None  # None resets to global policy
 
 
-def _record(session: Session, item_id: int, event: str, detail: dict | None = None) -> None:
+def _record(
+    session: Session, item_id: int, event: str, detail: dict[str, Any] | None = None
+) -> None:
     session.add(History(item_id=item_id, event=event, detail=detail))
 
 
@@ -61,25 +63,28 @@ def accept_as_is(item_id: int, session: Session = Depends(get_session)) -> dict[
     validate_transition(item.status, ItemStatus.FROZEN_AS_IS)
     item.status = ItemStatus.FROZEN_AS_IS
     item.updated_at = datetime.utcnow()
-    session.add(item); _record(session, item_id, "FROZEN_AS_IS")
+    session.add(item)
+    _record(session, item_id, "FROZEN_AS_IS")
     session.commit()
     session.refresh(item)
     return item.model_dump()
 
 
 @router.post("/{item_id}/override-policy")
-def override_policy(item_id: int, payload: OverridePayload,
-                    session: Session = Depends(get_session)) -> dict[str, Any]:
+def override_policy(
+    item_id: int, payload: OverridePayload, session: Session = Depends(get_session)
+) -> dict[str, Any]:
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(404)
     item.audio_required = payload.required_audio_langs
-    if item.status not in (ItemStatus.POLICY_OVERRIDDEN, ItemStatus.PROMOTED, ItemStatus.INCOMPLETE):
+    allowed = (ItemStatus.POLICY_OVERRIDDEN, ItemStatus.PROMOTED, ItemStatus.INCOMPLETE)
+    if item.status not in allowed:
         validate_transition(item.status, ItemStatus.POLICY_OVERRIDDEN)
     item.status = ItemStatus.POLICY_OVERRIDDEN
     item.updated_at = datetime.utcnow()
-    session.add(item); _record(session, item_id, "POLICY_OVERRIDDEN",
-                               {"required": payload.required_audio_langs})
+    session.add(item)
+    _record(session, item_id, "POLICY_OVERRIDDEN", {"required": payload.required_audio_langs})
     session.commit()
     session.refresh(item)
     return item.model_dump()
@@ -93,7 +98,8 @@ def search_now(item_id: int, session: Session = Depends(get_session)) -> dict[st
         raise HTTPException(404)
     item.next_retry_at = datetime.utcnow()
     item.updated_at = datetime.utcnow()
-    session.add(item); _record(session, item_id, "SEARCH_NOW_REQUESTED")
+    session.add(item)
+    _record(session, item_id, "SEARCH_NOW_REQUESTED")
     session.commit()
     session.refresh(item)
     return item.model_dump()

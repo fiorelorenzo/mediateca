@@ -8,7 +8,7 @@ from orchestrator.config import get_settings
 _engine: Any = None
 
 
-def get_engine() -> Any:  # type: ignore[no-untyped-def]
+def get_engine() -> Any:
     global _engine
     if _engine is None:
         settings = get_settings()

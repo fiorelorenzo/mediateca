@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import StrEnum
+from typing import Any
 
 from sqlalchemy import JSON, Column
 from sqlmodel import Field, SQLModel
@@ -71,7 +72,7 @@ class History(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     item_id: int = Field(foreign_key="items.id")
     event: str
-    detail: dict | None = Field(default=None, sa_column=Column(JSON))
+    detail: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
 
@@ -81,7 +82,7 @@ class Job(SQLModel, table=True):
     item_id: int = Field(foreign_key="items.id")
     kind: JobKind
     status: JobStatus = JobStatus.QUEUED
-    payload: dict | None = Field(default=None, sa_column=Column(JSON))
+    payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     started_at: datetime | None = None
     ended_at: datetime | None = None
     error: str | None = None
@@ -91,7 +92,7 @@ class WebhookInbox(SQLModel, table=True):
     __tablename__ = "webhook_inbox"
     id: int | None = Field(default=None, primary_key=True)
     source: ItemSource
-    payload: dict = Field(sa_column=Column(JSON))
+    payload: dict[str, Any] = Field(sa_column=Column(JSON))
     received_at: datetime = Field(default_factory=datetime.utcnow)
     processed_at: datetime | None = None
     attempts: int = 0
@@ -104,7 +105,7 @@ class CustomFormat(SQLModel, table=True):
     name: str
     sonarr_id: int | None = None
     radarr_id: int | None = None
-    spec: dict = Field(sa_column=Column(JSON))
+    spec: dict[str, Any] = Field(sa_column=Column(JSON))
     score: int
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None

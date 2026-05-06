@@ -29,11 +29,14 @@ def build_mkvmerge_command(
     subs/chapters) and pulls in only the audio tracks from `addition`."""
     return [
         "mkvmerge",
-        "-o", str(output),
+        "-o",
+        str(output),
         # existing: keep all
         str(existing),
         # addition: audio only (drop video and subs to avoid duplicates)
-        "--no-video", "--no-subtitles", "--no-chapters",
+        "--no-video",
+        "--no-subtitles",
+        "--no-chapters",
         str(addition),
     ]
 
@@ -52,8 +55,10 @@ def merge_audio(
     job_dir.mkdir(parents=True, exist_ok=True)
     out = job_dir / existing.name
     cmd = build_mkvmerge_command(
-        existing=existing, addition=addition,
-        addition_audio_langs=addition_audio_langs, output=out,
+        existing=existing,
+        addition=addition,
+        addition_audio_langs=addition_audio_langs,
+        output=out,
     )
     log.info("merge.start", cmd=cmd)
     result = subprocess.run(cmd, capture_output=True, text=True)

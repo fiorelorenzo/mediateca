@@ -1,7 +1,7 @@
 # orchestrator/tests/unit/test_policy.py
 import pytest
 
-from orchestrator.core.policy import PolicyEngine, PolicyVerdict
+from orchestrator.core.policy import PolicyEngine
 
 
 def test_all_languages_present() -> None:

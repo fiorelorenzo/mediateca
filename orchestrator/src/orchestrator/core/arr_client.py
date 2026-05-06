@@ -1,6 +1,8 @@
 # orchestrator/src/orchestrator/core/arr_client.py
 from __future__ import annotations
 
+from typing import Any, cast
+
 import httpx
 
 
@@ -11,9 +13,7 @@ class _ArrClient:
         self._timeout = timeout
 
     async def _client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            base_url=self._base, headers=self._headers, timeout=self._timeout
-        )
+        return httpx.AsyncClient(base_url=self._base, headers=self._headers, timeout=self._timeout)
 
 
 class SonarrClient(_ArrClient):
@@ -24,11 +24,11 @@ class SonarrClient(_ArrClient):
             data = r.json()
             return (data.get("originalLanguage") or {}).get("name")
 
-    async def get_episode_file(self, episode_file_id: int) -> dict:
+    async def get_episode_file(self, episode_file_id: int) -> dict[str, Any]:
         async with await self._client() as c:
             r = await c.get(f"/api/v3/episodefile/{episode_file_id}")
             r.raise_for_status()
-            return r.json()
+            return cast(dict[str, Any], r.json())
 
     async def delete_episode_file(self, episode_file_id: int) -> None:
         async with await self._client() as c:
@@ -52,11 +52,11 @@ class RadarrClient(_ArrClient):
             data = r.json()
             return (data.get("originalLanguage") or {}).get("name")
 
-    async def get_movie_file(self, movie_file_id: int) -> dict:
+    async def get_movie_file(self, movie_file_id: int) -> dict[str, Any]:
         async with await self._client() as c:
             r = await c.get(f"/api/v3/moviefile/{movie_file_id}")
             r.raise_for_status()
-            return r.json()
+            return cast(dict[str, Any], r.json())
 
     async def delete_movie_file(self, movie_file_id: int) -> None:
         async with await self._client() as c:

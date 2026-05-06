@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import json
 import subprocess
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from orchestrator.core.iso639 import name_to_code
 
@@ -37,7 +38,7 @@ class MediaInfo:
         return out
 
 
-def classify_from_ffprobe(raw: dict) -> MediaInfo:
+def classify_from_ffprobe(raw: dict[str, Any]) -> MediaInfo:
     audio: list[AudioTrack] = []
     video_height: int | None = None
     video_codec: str | None = None
@@ -74,9 +75,17 @@ def classify_from_ffprobe(raw: dict) -> MediaInfo:
 def ffprobe(path: Path) -> MediaInfo:
     result = subprocess.run(
         [
-            "ffprobe", "-v", "quiet", "-print_format", "json",
-            "-show_format", "-show_streams", str(path),
+            "ffprobe",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_format",
+            "-show_streams",
+            str(path),
         ],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return classify_from_ffprobe(json.loads(result.stdout))

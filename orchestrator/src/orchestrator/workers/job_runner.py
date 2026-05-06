@@ -17,9 +17,15 @@ log = get_logger(__name__)
 
 
 async def enqueue_encode(item: Item, session: Session) -> int:
-    job = Job(item_id=item.id, kind=JobKind.ENCODE, status=JobStatus.QUEUED,  # type: ignore[arg-type]
-              payload={"library_path": item.library_path})
-    session.add(job); session.commit(); session.refresh(job)
+    job = Job(
+        item_id=item.id,
+        kind=JobKind.ENCODE,
+        status=JobStatus.QUEUED,
+        payload={"library_path": item.library_path},
+    )
+    session.add(job)
+    session.commit()
+    session.refresh(job)
     return job.id  # type: ignore[return-value]
 
 
@@ -35,12 +41,14 @@ async def run_encode_jobs() -> None:
             if item is None or item.library_path is None:
                 job.status = JobStatus.FAILED
                 job.error = "item or library_path missing"
-                session.add(job); session.commit()
+                session.add(job)
+                session.commit()
                 continue
             try:
                 job.status = JobStatus.RUNNING
                 job.started_at = datetime.utcnow()
-                session.add(job); session.commit()
+                session.add(job)
+                session.commit()
                 external_id = await client.submit_job(item.library_path)
                 while True:
                     await asyncio.sleep(10)
@@ -49,12 +57,12 @@ async def run_encode_jobs() -> None:
                         item.status = ItemStatus.PROMOTED
                         item.updated_at = datetime.utcnow()
                         session.add(item)
-                        session.add(History(item_id=item.id, event="ENCODED"))  # type: ignore[arg-type]
-                        publish("item.status_changed",
-                                {"item_id": item.id, "status": item.status})
+                        session.add(History(item_id=item.id, event="ENCODED"))
+                        publish("item.status_changed", {"item_id": item.id, "status": item.status})
                         job.status = JobStatus.DONE
                         job.ended_at = datetime.utcnow()
-                        session.add(job); session.commit()
+                        session.add(job)
+                        session.commit()
                         break
                     if status["status"] == "failed":
                         raise RuntimeError(status.get("error", "encoder failure"))
@@ -63,6 +71,8 @@ async def run_encode_jobs() -> None:
                 job.status = JobStatus.FAILED
                 job.error = str(exc)
                 job.ended_at = datetime.utcnow()
-                item.status = ItemStatus.FAILED  # type: ignore[union-attr]
-                item.status_reason = f"encode failed: {exc}"  # type: ignore[union-attr]
-                session.add(job); session.add(item); session.commit()
+                item.status = ItemStatus.FAILED
+                item.status_reason = f"encode failed: {exc}"
+                session.add(job)
+                session.add(item)
+                session.commit()

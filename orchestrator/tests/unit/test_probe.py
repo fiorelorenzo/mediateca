@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 from orchestrator.core.probe import (
-    AudioTrack,
     MediaInfo,
     classify_from_ffprobe,
 )

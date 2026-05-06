@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from sqlmodel import Session, select
 
@@ -19,7 +20,7 @@ from orchestrator.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-def _extract_sonarr(payload: dict) -> dict | None:
+def _extract_sonarr(payload: dict[str, Any]) -> dict[str, Any] | None:
     series = payload.get("series") or {}
     episodes = payload.get("episodes") or []
     episode_file = payload.get("episodeFile") or {}
@@ -35,7 +36,7 @@ def _extract_sonarr(payload: dict) -> dict | None:
     }
 
 
-def _extract_radarr(payload: dict) -> dict | None:
+def _extract_radarr(payload: dict[str, Any]) -> dict[str, Any] | None:
     movie = payload.get("movie") or {}
     movie_file = payload.get("movieFile") or {}
     if not movie or not movie_file.get("path"):
@@ -89,16 +90,22 @@ def _process_one(session: Session, row: WebhookInbox) -> None:
     item.audio_present = info.audio_languages
     item.updated_at = datetime.utcnow()
     session.add(item)
-    session.add(History(
-        item_id=item.id,  # type: ignore[arg-type]
-        event="ANALYZED",
-        detail={"audio_languages": info.audio_languages, "path": extracted["path"]},
-    ))
+    session.add(
+        History(
+            item_id=item.id,
+            event="ANALYZED",
+            detail={"audio_languages": info.audio_languages, "path": extracted["path"]},
+        )
+    )
 
+    import asyncio
+
+    from orchestrator.core.pipeline import process_item  # local import to avoid cycle
+
+    asyncio.run(process_item(session, item, Path(extracted["path"])))
     row.processed_at = datetime.utcnow()
     session.add(row)
     session.commit()
-    log.info("inbox.processed", item_id=item.id, audio=info.audio_languages)
 
 
 def process_inbox(session: Session, limit: int = 50) -> int:

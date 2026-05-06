@@ -1,6 +1,8 @@
 # orchestrator/src/orchestrator/api/webhooks.py
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 
@@ -15,7 +17,7 @@ log = get_logger(__name__)
 
 @router.post("/sonarr", dependencies=[require_webhook_token])
 async def sonarr_webhook(
-    payload: dict,
+    payload: dict[str, Any],
     session: Session = Depends(get_session),
 ) -> dict[str, str]:
     if payload.get("eventType") not in ("Download", "Rename"):
@@ -28,7 +30,7 @@ async def sonarr_webhook(
 
 @router.post("/radarr", dependencies=[require_webhook_token])
 async def radarr_webhook(
-    payload: dict,
+    payload: dict[str, Any],
     session: Session = Depends(get_session),
 ) -> dict[str, str]:
     if payload.get("eventType") not in ("Download", "Rename"):

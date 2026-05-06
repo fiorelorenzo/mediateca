@@ -1,7 +1,6 @@
 # orchestrator/src/orchestrator/workers/catch_up.py
 from __future__ import annotations
 
-import asyncio
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -42,21 +41,24 @@ async def tick() -> None:
                 runtime_hours = 24  # falls back to default if settings missing
                 item.next_retry_at = now + timedelta(hours=runtime_hours)
                 session.add(item)
-                session.add(History(item_id=item.id, event="SEARCH_TRIGGERED"))  # type: ignore[arg-type]
+                session.add(History(item_id=item.id, event="SEARCH_TRIGGERED"))
                 session.commit()
                 publish("item.search_triggered", {"item_id": item.id})
                 log.info("catch_up.searched", item_id=item.id, retry=item.retry_count)
             except Exception as exc:  # noqa: BLE001
                 log.exception("catch_up.failed", item_id=item.id)
                 item.status_reason = f"search failed: {exc}"
-                session.add(item); session.commit()
+                session.add(item)
+                session.commit()
 
 
 def start_scheduler() -> AsyncIOScheduler:
     from orchestrator.workers.job_runner import run_encode_jobs
+
     scheduler = AsyncIOScheduler()
     scheduler.add_job(tick, IntervalTrigger(minutes=15), id="catch_up_tick", replace_existing=True)
-    scheduler.add_job(run_encode_jobs, IntervalTrigger(minutes=1),
-                      id="encode_jobs_tick", replace_existing=True)
+    scheduler.add_job(
+        run_encode_jobs, IntervalTrigger(minutes=1), id="encode_jobs_tick", replace_existing=True
+    )
     scheduler.start()
     return scheduler

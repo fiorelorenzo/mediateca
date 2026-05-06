@@ -1,11 +1,14 @@
 # orchestrator/src/orchestrator/app.py
-from contextlib import asynccontextmanager
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from sqlmodel import Session
 
-from orchestrator.api import events as events_api, health, items, metrics, recyclarr, services as svcs, settings as settings_api, webhooks
+from orchestrator.api import events as events_api
+from orchestrator.api import health, items, metrics, recyclarr, webhooks
+from orchestrator.api import services as svcs
+from orchestrator.api import settings as settings_api
 from orchestrator.config import get_settings
 from orchestrator.core.custom_formats import push_custom_formats
 from orchestrator.core.policy_seed import seed_settings
@@ -20,6 +23,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     with Session(get_engine()) as session:
         seed_settings(session, s.policy_seed)
     from orchestrator.workers.reconcile import reconcile
+
     reconcile()
     try:
         await push_custom_formats(s.sonarr_url, s.sonarr_api_key)
@@ -28,6 +32,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # Don't block boot on *arr being temporarily unreachable
         pass
     from orchestrator.workers.catch_up import start_scheduler
+
     scheduler = start_scheduler()
     try:
         yield

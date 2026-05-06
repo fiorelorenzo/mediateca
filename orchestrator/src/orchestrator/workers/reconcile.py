@@ -18,9 +18,7 @@ def reconcile() -> None:
     media = Path(s.media_root)
     with Session(get_engine()) as session:
         # 1. Items in PROMOTED whose library_path no longer exists → mark FAILED
-        rows = session.exec(
-            select(Item).where(Item.status == ItemStatus.PROMOTED)
-        ).all()
+        rows = session.exec(select(Item).where(Item.status == ItemStatus.PROMOTED)).all()
         for it in rows:
             if it.library_path and not Path(it.library_path).exists():
                 it.status = ItemStatus.FAILED
@@ -28,15 +26,19 @@ def reconcile() -> None:
                 session.add(it)
         # 2. Files in media/ not tracked → mark as LEGACY
         if media.exists():
-            tracked = {it.library_path for it in session.exec(select(Item)).all() if it.library_path}
+            tracked = {
+                it.library_path for it in session.exec(select(Item)).all() if it.library_path
+            }
             for f in media.rglob("*.mkv"):
                 if str(f) not in tracked and not f.name.startswith("."):
-                    session.add(Item(
-                        source=ItemSource.SONARR,  # placeholder — LEGACY items aren't owned
-                        source_id=0,
-                        title=f.stem,
-                        library_path=str(f),
-                        status=ItemStatus.LEGACY,
-                    ))
+                    session.add(
+                        Item(
+                            source=ItemSource.SONARR,  # placeholder — LEGACY items aren't owned
+                            source_id=0,
+                            title=f.stem,
+                            library_path=str(f),
+                            status=ItemStatus.LEGACY,
+                        )
+                    )
         session.commit()
     log.info("reconcile.done")

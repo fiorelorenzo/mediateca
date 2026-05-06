@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import os
 import shutil
-from pathlib import Path
 
 from fastapi import APIRouter
 
 from orchestrator.api.auth import require_admin_token
 from orchestrator.core.docker_client import client as docker_client
 
-router = APIRouter(prefix="/api/metrics", tags=["metrics"],
-                   dependencies=[require_admin_token])
+router = APIRouter(prefix="/api/metrics", tags=["metrics"], dependencies=[require_admin_token])
 
 
 def _read_loadavg() -> tuple[float, float, float]:
@@ -29,7 +27,7 @@ def _read_meminfo() -> dict[str, int]:
 
 
 @router.get("/system")
-def system() -> dict:
+def system() -> dict[str, object]:
     load = _read_loadavg()
     mem = _read_meminfo()
     disk = shutil.disk_usage("/data")
@@ -46,7 +44,7 @@ def system() -> dict:
 
 
 @router.get("/containers")
-def containers() -> list[dict]:
+def containers() -> list[dict[str, object]]:
     out = []
     for c in docker_client().containers.list(all=True):
         try:
@@ -55,11 +53,13 @@ def containers() -> list[dict]:
             mem = stats.get("memory_stats", {}).get("usage", 0)
         except Exception:  # noqa: BLE001
             cpu, mem = 0, 0
-        out.append({
-            "name": c.name,
-            "status": c.status,
-            "image": c.image.tags[0] if c.image.tags else c.image.id,
-            "cpu": cpu,
-            "mem": mem,
-        })
+        out.append(
+            {
+                "name": c.name,
+                "status": c.status,
+                "image": c.image.tags[0] if c.image.tags else c.image.id,
+                "cpu": cpu,
+                "mem": mem,
+            }
+        )
     return out
