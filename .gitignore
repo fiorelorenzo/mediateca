@@ -53,6 +53,11 @@ node_modules/
 .turbo/
 *.tsbuildinfo
 
+# Playwright artifacts
+admin-app/test-results/
+admin-app/playwright-report/
+admin-app/.playwright/
+
 # Editor / OS
 .DS_Store
 *.bak
