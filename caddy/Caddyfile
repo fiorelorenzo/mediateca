@@ -91,3 +91,7 @@ hls.{$DOMAIN} {
         root /srv/hls
     }
 }
+
+admin.{$DOMAIN} {
+    reverse_proxy admin-app:3000
+}
