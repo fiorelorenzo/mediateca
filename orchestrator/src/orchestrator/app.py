@@ -32,13 +32,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # noqa: BLE001
         # Don't block boot on *arr being temporarily unreachable
         pass
-    from orchestrator.workers.catch_up import start_scheduler
+    from orchestrator.workers.catch_up import scheduler_lifespan
 
-    scheduler = start_scheduler()
-    try:
+    async with scheduler_lifespan():
         yield
-    finally:
-        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="Mediateca Orchestrator", lifespan=lifespan)

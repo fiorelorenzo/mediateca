@@ -1,9 +1,11 @@
 # orchestrator/src/orchestrator/workers/catch_up.py
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler import AsyncScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from sqlmodel import Session, select
 
@@ -52,13 +54,19 @@ async def tick() -> None:
                 session.commit()
 
 
-def start_scheduler() -> AsyncIOScheduler:
+@asynccontextmanager
+async def scheduler_lifespan() -> AsyncIterator[None]:
     from orchestrator.workers.job_runner import run_encode_jobs
 
-    scheduler = AsyncIOScheduler()
-    scheduler.add_job(tick, IntervalTrigger(minutes=15), id="catch_up_tick", replace_existing=True)
-    scheduler.add_job(
-        run_encode_jobs, IntervalTrigger(minutes=1), id="encode_jobs_tick", replace_existing=True
-    )
-    scheduler.start()
-    return scheduler
+    async with AsyncScheduler() as scheduler:
+        await scheduler.add_schedule(
+            tick, IntervalTrigger(minutes=15), id="catch_up_tick"
+        )
+        await scheduler.add_schedule(
+            run_encode_jobs, IntervalTrigger(minutes=1), id="encode_jobs_tick"
+        )
+        await scheduler.start_in_background()
+        try:
+            yield
+        finally:
+            await scheduler.stop()
