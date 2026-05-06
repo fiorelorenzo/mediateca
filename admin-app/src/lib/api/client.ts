@@ -29,3 +29,23 @@ export const api = {
   services: () => call<ServiceEntry[]>("/api/services"),
   recyclarrSync: () => call<{ status: string }>("/api/recyclarr/sync", { method: "POST" }),
 };
+
+export interface CustomFormat {
+  id: number;
+  name: string;
+  sonarr_id: number | null;
+  radarr_id: number | null;
+  spec: Record<string, unknown>;
+  score: number;
+  created_at: string;
+  updated_at: string | null;
+}
+
+export const cfApi = {
+  list: () => call<CustomFormat[]>("/api/custom-formats"),
+  create: (cf: Pick<CustomFormat, "name" | "spec" | "score">) =>
+    call<CustomFormat>("/api/custom-formats", { method: "POST", body: JSON.stringify(cf) }),
+  update: (id: number, cf: Partial<CustomFormat>) =>
+    call<CustomFormat>(`/api/custom-formats/${id}`, { method: "PUT", body: JSON.stringify(cf) }),
+  remove: (id: number) => call<unknown>(`/api/custom-formats/${id}`, { method: "DELETE" }),
+};
