@@ -1,0 +1,20 @@
+{
+  "name": "Dual Audio (ITA + Original)",
+  "includeCustomFormatWhenRenaming": false,
+  "specifications": [
+    {
+      "name": "Italian",
+      "implementation": "LanguageSpecification",
+      "negate": false,
+      "required": true,
+      "fields": [{"name": "value", "value": 7}]
+    },
+    {
+      "name": "Multi/Dual marker",
+      "implementation": "ReleaseTitleSpecification",
+      "negate": false,
+      "required": true,
+      "fields": [{"name": "value", "value": "(?i)(multi|dual.?audio|\\[ita.?(eng|en|fre|fr|spa|es|deu|de|jpn|jp|kor|ko)\\]|ita[._-](eng|en))"}]
+    }
+  ]
+}

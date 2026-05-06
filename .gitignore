@@ -20,6 +20,9 @@ config/headscale/*
 !config/recyclarr/
 !config/recyclarr/recyclarr.yml
 !config/recyclarr/.gitignore
+!config/recyclarr/custom-formats/
+!config/recyclarr/custom-formats/*.json
+!config/recyclarr/custom-formats/README.md
 
 # Tooling
 .claude/
