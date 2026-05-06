@@ -204,6 +204,7 @@ services:
     volumes:
       - ${MEDIA_DIR}:/data
       - ./config/orchestrator:/config
+      - ./config/recyclarr/custom-formats:/config/custom-formats:ro
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
