@@ -394,3 +394,34 @@ services:
       - ${ENCODER_CACHE_DIR}:/cache
     networks:
       - servarr
+
+  recyclarr:
+    image: ghcr.io/recyclarr/recyclarr:latest
+    container_name: recyclarr
+    restart: "no"
+    user: "${PUID}:${PGID}"
+    environment:
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ./config/recyclarr:/config
+    networks:
+      - servarr
+    command: ["sync"]
+    labels:
+      ofelia.enabled: "true"
+      ofelia.job-run.recyclarr-sync.schedule: "0 4 * * 0"
+      ofelia.job-run.recyclarr-sync.container: "recyclarr"
+
+  ofelia:
+    image: mcuadros/ofelia:latest
+    container_name: ofelia
+    restart: unless-stopped
+    command: daemon --docker
+    depends_on:
+      - recyclarr
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - servarr

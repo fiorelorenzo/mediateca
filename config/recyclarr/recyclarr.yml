@@ -1,0 +1,56 @@
+# config/recyclarr/recyclarr.yml
+# Manages TRaSH-Guides custom formats and the Multi-Audio Preferred quality
+# profile. Stack-managed custom formats (Italian dual-audio patterns) live
+# in custom-formats/*.json and are NOT touched by Recyclarr — the
+# orchestrator pushes them via the *arr REST APIs.
+
+sonarr:
+  main:
+    base_url: http://sonarr:8989
+    api_key: !env_var SONARR_API_KEY
+
+    quality_definition:
+      type: series
+
+    custom_formats:
+      # TRaSH IDs are placeholders here; the implementer fills them by
+      # consulting https://trash-guides.info during this task.
+      - trash_ids: []
+        quality_profiles:
+          - name: Multi-Audio Preferred
+
+    quality_profiles:
+      - name: Multi-Audio Preferred
+        upgrade:
+          allowed: true
+          until_quality: WEBDL-1080p
+          until_score: 10000
+        min_format_score: 0
+        quality_sort: top
+        qualities:
+          - name: WEBDL-1080p
+          - name: HDTV-1080p
+          - name: WEBDL-720p
+
+radarr:
+  main:
+    base_url: http://radarr:7878
+    api_key: !env_var RADARR_API_KEY
+
+    quality_definition:
+      type: movie
+
+    custom_formats:
+      - trash_ids: []
+        quality_profiles:
+          - name: Multi-Audio Preferred
+
+    quality_profiles:
+      - name: Multi-Audio Preferred
+        upgrade:
+          allowed: true
+          until_quality: Bluray-1080p
+          until_score: 10000
+        qualities:
+          - name: Bluray-1080p
+          - name: WEBDL-1080p

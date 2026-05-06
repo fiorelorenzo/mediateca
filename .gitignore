@@ -17,6 +17,9 @@ config/headscale/*
 !config/streamyfin/plugin-config.yml
 !config/orchestrator/
 !config/orchestrator/policy.yml
+!config/recyclarr/
+!config/recyclarr/recyclarr.yml
+!config/recyclarr/.gitignore
 
 # Tooling
 .claude/
