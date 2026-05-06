@@ -6,6 +6,7 @@ export default defineConfig({
     environment: "node",
     globals: true,
     coverage: { provider: "v8" },
+    include: ["tests/unit/**/*.test.ts"],
   },
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
 });

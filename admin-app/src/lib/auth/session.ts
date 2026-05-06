@@ -1,7 +1,6 @@
 // HMAC-SHA256 signed JSON web-token-like cookie (no algorithm header — we
-// hardcode HS256). 30-day default TTL.
-
-import crypto from "node:crypto";
+// hardcode HS256). Uses the Web Crypto API so it works in both Edge and Node
+// runtimes.
 
 export interface SessionPayload {
   sub: string;
@@ -10,22 +9,42 @@ export interface SessionPayload {
 
 const DEFAULT_TTL_SECONDS = Infinity;
 
-function b64url(buf: Buffer): string {
-  return buf.toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+function b64url(buf: ArrayBuffer): string {
+  return btoa(String.fromCharCode(...new Uint8Array(buf)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
-function unb64url(s: string): Buffer {
+function b64urlEncode(s: string): string {
+  return b64url(new TextEncoder().encode(s).buffer);
+}
+
+function unb64url(s: string): Uint8Array {
   const pad = "=".repeat((4 - (s.length % 4)) % 4);
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/") + pad, "base64");
+  const b64 = s.replace(/-/g, "+").replace(/_/g, "/") + pad;
+  return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 }
 
-function hmac(secret: string, data: string): string {
-  return b64url(crypto.createHmac("sha256", secret).update(data).digest());
+async function importKey(secret: string): Promise<CryptoKey> {
+  return crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+}
+
+async function hmac(secret: string, data: string): Promise<string> {
+  const key = await importKey(secret);
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(data));
+  return b64url(sig);
 }
 
 export async function signSession(payload: SessionPayload, secret: string): Promise<string> {
-  const body = b64url(Buffer.from(JSON.stringify(payload)));
-  const sig = hmac(secret, body);
+  const body = b64urlEncode(JSON.stringify(payload));
+  const sig = await hmac(secret, body);
   return `${body}.${sig}`;
 }
 
@@ -36,11 +55,11 @@ export async function verifySession(
 ): Promise<SessionPayload | null> {
   const [body, sig] = token.split(".");
   if (!body || !sig) return null;
-  const expected = hmac(secret, body);
-  if (!crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return null;
+  const expected = await hmac(secret, body);
+  if (sig !== expected) return null;
   let payload: SessionPayload;
   try {
-    payload = JSON.parse(unb64url(body).toString("utf8"));
+    payload = JSON.parse(new TextDecoder().decode(unb64url(body)));
   } catch {
     return null;
   }
