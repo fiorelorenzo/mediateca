@@ -1,6 +1,7 @@
 # orchestrator/src/orchestrator/core/custom_formats.py
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -19,12 +20,16 @@ async def push_custom_formats(arr_url: str, api_key: str) -> None:
     """Idempotent: create or update each JSON-defined custom format on the
     *arr instance and ensure its score is set on the Multi-Audio Preferred
     profile."""
+
+    def _load_cf_files() -> list[dict[str, object]]:
+        return [json.loads(p.read_text()) for p in STACK_MANAGED_PATH.glob("*.json")]
+
     headers = {"X-Api-Key": api_key, "Accept": "application/json"}
     async with httpx.AsyncClient(base_url=arr_url, headers=headers, timeout=30) as c:
         existing = (await c.get("/api/v3/customformat")).json()
         existing_by_name = {cf["name"]: cf for cf in existing}
-        for path in STACK_MANAGED_PATH.glob("*.json"):
-            cf = json.loads(path.read_text())
+        cf_files = await asyncio.to_thread(_load_cf_files)
+        for cf in cf_files:
             current = existing_by_name.get(cf["name"])
             if current is None:
                 resp = await c.post("/api/v3/customformat", json=cf)
@@ -47,12 +52,14 @@ async def push_custom_formats(arr_url: str, api_key: str) -> None:
         formats_in_profile = {item["format"]: item for item in target["formatItems"]}
         changed = False
         for cf_name, score in SCORES.items():
-            cf = cfs_by_name.get(cf_name)
-            if cf is None:
+            matched_cf = cfs_by_name.get(cf_name)
+            if matched_cf is None:
                 continue
-            entry = formats_in_profile.get(cf["id"])
+            entry = formats_in_profile.get(matched_cf["id"])
             if entry is None:
-                target["formatItems"].append({"format": cf["id"], "name": cf_name, "score": score})
+                target["formatItems"].append(
+                    {"format": matched_cf["id"], "name": cf_name, "score": score}
+                )
                 changed = True
             elif entry.get("score") != score:
                 entry["score"] = score

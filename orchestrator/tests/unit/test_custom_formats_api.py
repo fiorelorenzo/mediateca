@@ -3,6 +3,7 @@
 
 push_custom_formats is monkeypatched so we never hit live *arr instances.
 """
+
 from __future__ import annotations
 
 import pytest
