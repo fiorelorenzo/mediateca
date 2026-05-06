@@ -1,17 +1,17 @@
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ffmpeg \
-        ca-certificates \
-        tini \
+      ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir \
-        watchdog==5.0.3 \
-        requests==2.32.3
-
 WORKDIR /app
-COPY encoder.py /app/encoder.py
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["python", "-u", "/app/encoder.py"]
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY encoder.py server.py /app/
+
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000"]

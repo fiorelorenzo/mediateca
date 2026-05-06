@@ -362,29 +362,17 @@ services:
       - servarr
 
   # =========================================
-  # hls-encoder — custom Python service that watches /data/media for
-  # new video files dropped in by Sonarr/Radarr, encodes a 3-variant
-  # H.264 ABR ladder + per-track AAC audio renditions as HLS, writes
-  # a .strm pointing to the public CDN URL, and deletes the source.
-  # See HLS_ABR_DESIGN.md for design + ./hls-encoder/ for the code.
-  #
-  # Resource sizing: cpus / mem_limit / WORKERS / THREADS below are
-  # tuned for a 4c/8t host (e.g. Xeon E3-1275v6, Ryzen 5 5600). On
-  # smaller boxes drop ENCODER_CPUS/ENCODER_MEM/WORKERS/THREADS in .env.
-  # Rule of thumb: WORKERS × THREADS ≈ vCPU count. See the encoder
-  # README "Tuning rule of thumb" section for details.
-  # =========================================
+  # hls-encoder — consumer-only REST service. The orchestrator calls
+  # POST /jobs to start an encode; this service runs the FFmpeg ladder
+  # and writes the HLS bundle + .strm. It does NOT watch the filesystem,
+  # manage state, or talk to Sonarr/Radarr — those concerns belong to the
+  # orchestrator. See ./hls-encoder/ for implementation details.
   hls-encoder:
-    build:
-      context: ./hls-encoder
+    build: ./hls-encoder
     image: hls-encoder:local
     container_name: hls-encoder
     restart: unless-stopped
-    # We let the encoder reach all logical CPUs because `nice -n 10`
-    # (applied to ffmpeg below) makes it yield to higher-priority work —
-    # Jellyfin live transcode (rare), Caddy bursts, etc. cgroup CPU
-    # throttling at exactly the host CPU count gives full throughput
-    # when idle and graceful degradation when busy.
+    profiles: ["hls"]
     cpus: ${ENCODER_CPUS:-8.0}
     mem_limit: ${ENCODER_MEM:-12g}
     environment:
@@ -392,37 +380,17 @@ services:
       - DOMAIN=${DOMAIN}
       - DATA_ROOT=/data
       - CACHE_ROOT=/cache
-      - STATE_DB=/config/state.db
-      # HLS_CDN_BASE auto-derives to https://hls.${DOMAIN} when DOMAIN
-      # is set; uncomment to override.
-      # - HLS_CDN_BASE=https://hls.${DOMAIN}
-      - SONARR_URL=http://sonarr:8989
-      - SONARR_API_KEY=${SONARR_API_KEY}
-      - RADARR_URL=http://radarr:7878
-      - RADARR_API_KEY=${RADARR_API_KEY}
-      # CPU tuning — see hls-encoder/README.md "Tuning rule of thumb".
-      # WORKERS × THREADS should ≈ vCPU count. Single-file workload uses
-      # half the budget; batch (Sonarr/Radarr finishing several downloads
-      # concurrently) saturates it.
       - WORKERS=${ENCODER_WORKERS:-2}
       - THREADS=${ENCODER_THREADS:-4}
       - NICE_LEVEL=${ENCODER_NICE:-10}
       - MAX_LOAD_AVG_1M=${ENCODER_MAX_LOAD_AVG_1M:-0}
-      # Encoding ladder (kbps targets). maxrate auto = 1.1×, bufsize 2×.
       - BITRATE_1080P_KBPS=${BITRATE_1080P_KBPS:-5000}
       - BITRATE_720P_KBPS=${BITRATE_720P_KBPS:-2500}
       - BITRATE_480P_KBPS=${BITRATE_480P_KBPS:-1000}
       - LIBX264_PRESET=${LIBX264_PRESET:-fast}
-      # Default audio rendition language (ISO-639-2). Empty = first track.
-      - DEFAULT_AUDIO_LANG=${DEFAULT_AUDIO_LANG:-}
       - LOG_LEVEL=INFO
     volumes:
       - ${MEDIA_DIR}:/data
-      # Encode scratch — should be FAST local storage (NVMe ideal). If
-      # MEDIA_DIR is on a network mount, writing intermediate HLS segments
-      # there directly would tank libx264 throughput. The encoder builds
-      # the bundle here and atomically moves it to /data at the end.
       - ${ENCODER_CACHE_DIR}:/cache
-      - ./config/hls-encoder:/config
     networks:
       - servarr
