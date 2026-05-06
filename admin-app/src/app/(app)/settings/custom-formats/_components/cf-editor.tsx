@@ -38,7 +38,7 @@ export function CFEditor() {
               setName("");
             }}
           >
-            <div className="flex-1 min-w-48 space-y-1">
+            <div className="min-w-48 flex-1 space-y-1">
               <Label htmlFor="cfname">Name</Label>
               <Input id="cfname" value={name} onChange={(e) => setName(e.target.value)} />
             </div>
@@ -69,11 +69,7 @@ export function CFEditor() {
                 <CardTitle className="text-base">{cf.name}</CardTitle>
                 <p className="text-sm text-muted-foreground">score {cf.score}</p>
               </div>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={() => remove.mutate(cf.id)}
-              >
+              <Button variant="destructive" size="sm" onClick={() => remove.mutate(cf.id)}>
                 Delete
               </Button>
             </CardHeader>

@@ -21,10 +21,7 @@ export async function login(formData: FormData): Promise<void> {
   if (!(await verifyPassword(parsed.data.password, hash))) {
     redirect("/login?error=invalid");
   }
-  const token = await signSession(
-    { sub: "admin", iat: Math.floor(Date.now() / 1000) },
-    secret,
-  );
+  const token = await signSession({ sub: "admin", iat: Math.floor(Date.now() / 1000) }, secret);
   (await cookies()).set(SESSION_COOKIE, token, {
     httpOnly: true,
     sameSite: "lax",

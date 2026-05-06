@@ -3,7 +3,11 @@ import type { Item, Settings, SystemMetrics, ContainerStat, ServiceEntry } from 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/proxy${path}`, {
     ...init,
-    headers: { Accept: "application/json", "Content-Type": "application/json", ...(init?.headers ?? {}) },
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      ...(init?.headers ?? {}),
+    },
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as T;
@@ -11,7 +15,9 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   listItems: (params: { status?: string; q?: string; offset?: number; limit?: number } = {}) => {
-    const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v != null) as [string, string][]);
+    const qs = new URLSearchParams(
+      Object.entries(params).filter(([, v]) => v != null) as [string, string][],
+    );
     return call<{ total: number; items: Item[] }>(`/api/items?${qs}`);
   },
   getItem: (id: number) => call<{ item: Item; history: unknown[] }>(`/api/items/${id}`),
@@ -23,7 +29,8 @@ export const api = {
       body: JSON.stringify({ required_audio_langs: langs }),
     }),
   getSettings: () => call<Settings>("/api/settings"),
-  putSettings: (s: Partial<Settings>) => call<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(s) }),
+  putSettings: (s: Partial<Settings>) =>
+    call<Settings>("/api/settings", { method: "PUT", body: JSON.stringify(s) }),
   systemMetrics: () => call<SystemMetrics>("/api/metrics/system"),
   containers: () => call<ContainerStat[]>("/api/metrics/containers"),
   services: () => call<ServiceEntry[]>("/api/services"),

@@ -29,21 +29,14 @@ export function RequestsList() {
       {data.results.map((r) => (
         <Card key={r.id}>
           <CardHeader>
-            <CardTitle className="text-base">
-              {r.media.title ?? `#${r.media.tmdbId}`}
-            </CardTitle>
+            <CardTitle className="text-base">{r.media.title ?? `#${r.media.tmdbId}`}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-2 text-sm">
             <div className="text-muted-foreground">
-              {r.type} · by{" "}
-              {r.requestedBy?.displayName ?? r.requestedBy?.username ?? "anon"}
+              {r.type} · by {r.requestedBy?.displayName ?? r.requestedBy?.username ?? "anon"}
             </div>
             <div className="flex gap-2 pt-2">
-              <Button
-                size="sm"
-                onClick={() => approve.mutate(r.id)}
-                disabled={approve.isPending}
-              >
+              <Button size="sm" onClick={() => approve.mutate(r.id)} disabled={approve.isPending}>
                 Approve
               </Button>
               <Button

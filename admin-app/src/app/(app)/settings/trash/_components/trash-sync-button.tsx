@@ -10,14 +10,8 @@ export function TrashSyncButton() {
       <Button onClick={() => m.mutate()} disabled={m.isPending}>
         {m.isPending ? "Starting…" : "Sync now"}
       </Button>
-      {m.isSuccess && (
-        <span className="text-sm text-emerald-600">Sync started.</span>
-      )}
-      {m.isError && (
-        <span className="text-sm text-destructive">
-          {(m.error as Error).message}
-        </span>
-      )}
+      {m.isSuccess && <span className="text-sm text-emerald-600">Sync started.</span>}
+      {m.isError && <span className="text-sm text-destructive">{(m.error as Error).message}</span>}
     </div>
   );
 }

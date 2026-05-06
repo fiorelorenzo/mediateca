@@ -14,9 +14,13 @@ export function useOrchestratorEvents(onEvent: (ev: OrchestratorEvent) => void) 
       try {
         const parsed = JSON.parse(msg.data);
         cb.current(parsed);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     };
-    es.onerror = () => { /* let browser auto-reconnect */ };
+    es.onerror = () => {
+      /* let browser auto-reconnect */
+    };
     return () => es.close();
   }, []);
 }

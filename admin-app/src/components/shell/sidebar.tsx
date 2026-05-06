@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Library, Server, Layers, Download, Settings, Inbox, Wrench, Home } from "lucide-react";
+import { Library, Server, Layers, Download, Settings, Inbox, Home } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 
 const items = [
@@ -26,11 +26,14 @@ export function Sidebar() {
           const Icon = it.icon;
           const active = path === it.href || (it.href !== "/" && path.startsWith(it.href));
           return (
-            <Link key={it.href} href={it.href}
+            <Link
+              key={it.href}
+              href={it.href}
               className={cn(
                 "flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent",
-                active && "bg-accent font-medium"
-              )}>
+                active && "bg-accent font-medium",
+              )}
+            >
               <Icon className="size-4" />
               {it.label}
             </Link>

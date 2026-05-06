@@ -1,7 +1,15 @@
 export type ItemStatus =
-  | "PENDING" | "ANALYZING" | "PROMOTING" | "INCOMPLETE" | "MERGING"
-  | "ENCODING" | "PROMOTED" | "FROZEN_AS_IS" | "POLICY_OVERRIDDEN"
-  | "FAILED" | "LEGACY";
+  | "PENDING"
+  | "ANALYZING"
+  | "PROMOTING"
+  | "INCOMPLETE"
+  | "MERGING"
+  | "ENCODING"
+  | "PROMOTED"
+  | "FROZEN_AS_IS"
+  | "POLICY_OVERRIDDEN"
+  | "FAILED"
+  | "LEGACY";
 
 export type ItemSource = "sonarr" | "radarr";
 
@@ -49,4 +57,9 @@ export interface ServiceEntry {
   key: string;
   name: string;
   subdomain: string;
+}
+
+export interface HistoryEvent {
+  event: string;
+  created_at: string;
 }

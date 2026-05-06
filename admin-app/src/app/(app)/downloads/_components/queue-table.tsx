@@ -1,7 +1,14 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { arrs } from "@/lib/api/arrs";
 
 function pct(total: number, left: number) {
@@ -10,7 +17,11 @@ function pct(total: number, left: number) {
 }
 
 export function QueueTable() {
-  const { data } = useQuery({ queryKey: ["arrs", "queue"], queryFn: () => arrs.unifiedQueue(), refetchInterval: 5_000 });
+  const { data } = useQuery({
+    queryKey: ["arrs", "queue"],
+    queryFn: () => arrs.unifiedQueue(),
+    refetchInterval: 5_000,
+  });
   if (!data) return null;
   if (data.length === 0) return <p className="text-muted-foreground">Queue empty.</p>;
   return (
@@ -28,9 +39,13 @@ export function QueueTable() {
           {data.map((q) => (
             <TableRow key={`${q.kind}-${q.id}`}>
               <TableCell>{q.title}</TableCell>
-              <TableCell><Badge variant="outline">{q.kind}</Badge></TableCell>
+              <TableCell>
+                <Badge variant="outline">{q.kind}</Badge>
+              </TableCell>
               <TableCell>{q.status}</TableCell>
-              <TableCell className="text-right text-muted-foreground">{pct(q.size, q.sizeleft)}%</TableCell>
+              <TableCell className="text-right text-muted-foreground">
+                {pct(q.size, q.sizeleft)}%
+              </TableCell>
             </TableRow>
           ))}
         </TableBody>

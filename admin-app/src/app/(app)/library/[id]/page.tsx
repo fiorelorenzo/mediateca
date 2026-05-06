@@ -20,7 +20,9 @@ export default async function ItemDetail(props: { params: Promise<{ id: string }
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2">
-        <Button asChild variant="ghost" size="sm"><Link href="/library">← Library</Link></Button>
+        <Button asChild variant="ghost" size="sm">
+          <Link href="/library">← Library</Link>
+        </Button>
       </div>
       <h1 className="text-3xl font-semibold tracking-tight">{item.title}</h1>
       <div className="text-sm text-muted-foreground">
@@ -29,23 +31,33 @@ export default async function ItemDetail(props: { params: Promise<{ id: string }
       </div>
 
       <Card>
-        <CardHeader><CardTitle>Audio</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>Audio</CardTitle>
+        </CardHeader>
         <CardContent>
           <AudioBadges present={item.audio_present} required={item.audio_required} />
         </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>Actions</CardTitle></CardHeader>
-        <CardContent><ItemActions item={item} /></CardContent>
+        <CardHeader>
+          <CardTitle>Actions</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ItemActions item={item} />
+        </CardContent>
       </Card>
 
       <Card>
-        <CardHeader><CardTitle>History</CardTitle></CardHeader>
+        <CardHeader>
+          <CardTitle>History</CardTitle>
+        </CardHeader>
         <CardContent>
-          {history.length === 0 ? <p className="text-muted-foreground">No events.</p> : (
+          {history.length === 0 ? (
+            <p className="text-muted-foreground">No events.</p>
+          ) : (
             <ul className="space-y-2 text-sm">
-              {history.map((h: any, i: number) => (
+              {history.map((h, i) => (
                 <li key={i} className="flex justify-between gap-4 border-b pb-2 last:border-0">
                   <span className="font-mono">{h.event}</span>
                   <span className="text-muted-foreground">{h.created_at}</span>
