@@ -170,6 +170,11 @@ echo "==> Stack working directory: $WORKDIR"
 mkdir -p "$WORKDIR"
 chown "$USERNAME:$USERNAME" "$WORKDIR"
 
+echo "==> Generate secrets"
+if [ -f "$WORKDIR/.env" ]; then
+  bash "$WORKDIR/scripts/generate-secrets.sh" "$WORKDIR/.env"
+fi
+
 # Pre-create the trash-guides library structure so Sonarr/Radarr can hardlink.
 # If a remote share was mounted, this happens inside it; otherwise on local disk.
 DATA_ROOT="${MEDIA_DIR:-${STORAGE_MOUNT_POINT}/data}"
