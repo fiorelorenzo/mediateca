@@ -17,7 +17,6 @@ connection.
 | Mobile / TV unified client (streaming + Live TV + requests) | [Streamyfin](https://github.com/streamyfin/streamyfin) (iOS / Android / tvOS / Android TV) + [server-side plugin](https://github.com/streamyfin/jellyfin-plugin-streamyfin) |
 | BitTorrent client | [qBittorrent](https://www.qbittorrent.org) (forced through ProtonVPN) |
 | Reverse proxy + automatic HTTPS | [Caddy](https://caddyserver.com) |
-| Admin dashboard | [Homarr 1.x](https://homarr.dev) |
 | Self-hosted Tailscale control plane | [Headscale](https://github.com/juanfont/headscale) |
 | HLS adaptive-bitrate encoder + status dashboard | this repo's `hls-encoder/` |
 
@@ -62,7 +61,6 @@ your `DOMAIN`:
 | --- | --- | --- |
 | **`streaming.<DOMAIN>`** | Seerr | **Public entry point**: catalog + request UI. Auth via Jellyfin SSO only (local login disabled). |
 | `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes `.strm` files pointing at the HLS CDN. |
-| `homarr.<DOMAIN>` | Homarr | Admin dashboard / launcher |
 | `sonarr.<DOMAIN>` | Sonarr | TV automation |
 | `radarr.<DOMAIN>` | Radarr | Movie automation |
 | `prowlarr.<DOMAIN>` | Prowlarr | Indexer manager |
@@ -86,7 +84,7 @@ disabled (`localLogin=false`), so the page exposes only the
 internet ─► host ─► Caddy (TLS) ─► docker network "servarr"
                        │
                        ├── jellyfin / sonarr / radarr / bazarr
-                       ├── seerr / homarr / prowlarr
+                       ├── seerr / prowlarr
                        ├── headscale (Tailscale control plane)
                        ├── hls-encoder (custom Python watcher)
                        └── gluetun (ProtonVPN, WireGuard)
@@ -323,7 +321,6 @@ your server's public IPv4. Use AAAA for v6 if you have it.
 | --- | --- | --- |
 | A | `streaming` | `<HOST-IP>` |
 | A | `media` | `<HOST-IP>` |
-| A | `homarr` | `<HOST-IP>` |
 | A | `sonarr` | `<HOST-IP>` |
 | A | `radarr` | `<HOST-IP>` |
 | A | `prowlarr` | `<HOST-IP>` |
@@ -520,17 +517,6 @@ auth surface identical to Jellyfin's. New users come in with the
 default `REQUEST` permission (bit 32) so they can submit requests
 straight away.
 
-### Homarr
-
-`https://homarr.<DOMAIN>` — first-run creates admin user.
-Manage → Integrations to register backend connections (URLs use
-container hostnames, e.g. `http://jellyfin:8096`). Manage → Apps to add
-tiles (URLs are public, e.g. `https://media.<DOMAIN>`). Boards → New
-board → Edit mode → add tiles + widgets.
-
-To embed the encoder dashboard, add an **Iframe** widget pointing at
-`https://encoder-status.<DOMAIN>/`.
-
 ### Jellyfin custom CSS (optional)
 
 Apply the contents of `config/jellyfin-custom.css` via Dashboard →
@@ -648,7 +634,7 @@ service:
 ```yaml
 - HTTP_PROXY=http://100.64.0.3:8888
 - HTTPS_PROXY=http://100.64.0.3:8888
-- NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,homarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
+- NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
 ```
 
 Replace `100.64.0.3` with your home node's tailnet IP. Then

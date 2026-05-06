@@ -275,22 +275,9 @@ services:
       # Mediaset). Leave unset for sources that work from datacenter IP.
       # - HTTP_PROXY=http://100.64.0.3:8888
       # - HTTPS_PROXY=http://100.64.0.3:8888
-      # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,homarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
+      # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
     volumes:
       - ./config/dispatcharr:/data
-    networks:
-      - servarr
-
-  homarr:
-    image: ghcr.io/homarr-labs/homarr:latest
-    container_name: homarr
-    restart: unless-stopped
-    environment:
-      - TZ=${TZ:-UTC}
-      - SECRET_ENCRYPTION_KEY=${HOMARR_SECRET_ENCRYPTION_KEY}
-    volumes:
-      - ./config/homarr/appdata:/appdata
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - servarr
 

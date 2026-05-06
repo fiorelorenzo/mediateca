@@ -8,7 +8,7 @@
 #
 # Auth: each app handles its own (Sonarr/Radarr/Prowlarr/Bazarr →
 # Settings → General → Authentication = "Forms"; qBittorrent has its own
-# WebUI auth; Jellyfin/Seerr/Homarr have native login).
+# WebUI auth; Jellyfin/Seerr have native login).
 
 {
     email {$ACME_EMAIL}
@@ -28,10 +28,6 @@ media.{$DOMAIN} {
 # docker-compose.yml + caddy/seerr-inject.conf.
 streaming.{$DOMAIN} {
     reverse_proxy seerr-inject:80
-}
-
-homarr.{$DOMAIN} {
-    reverse_proxy homarr:7575
 }
 
 sonarr.{$DOMAIN} {
@@ -68,7 +64,7 @@ tv.{$DOMAIN} {
 encoder-status.{$DOMAIN} {
     # Read-only snapshot of the hls-encoder queue state. Refreshed by
     # the encoder every STATUS_INTERVAL seconds (default 10s). Pollable
-    # by Homarr / cron / Prometheus blackbox.
+    # by cron / Prometheus blackbox.
     header {
         Cache-Control "no-store"
         Access-Control-Allow-Origin "*"
