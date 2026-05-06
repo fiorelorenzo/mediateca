@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from sqlmodel import Session
 
-from orchestrator.api import health, settings as settings_api
+from orchestrator.api import health, settings as settings_api, webhooks
 from orchestrator.config import get_settings
 from orchestrator.core.policy_seed import seed_settings
 from orchestrator.db.session import get_engine
@@ -24,3 +24,4 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(title="Mediateca Orchestrator", lifespan=lifespan)
 app.include_router(health.router)
 app.include_router(settings_api.router)
+app.include_router(webhooks.router)
