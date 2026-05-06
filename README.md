@@ -398,6 +398,28 @@ subdomain in the Caddyfile — you should see one
 `acme: timeout` or `connection refused`, DNS hasn't propagated or the
 firewall is blocking port 80.
 
+### Bootstrap Sonarr/Radarr
+
+After all containers are healthy, run the bootstrap script to wire
+Sonarr/Radarr to the orchestrator (root folders + webhook):
+
+```sh
+docker run --rm --network servarr_servarr \
+  --env-file .env \
+  -v "$PWD/scripts:/scripts:ro" \
+  python:3.12-slim \
+  sh -c "pip install httpx==0.27.2 -q && python /scripts/bootstrap-arr.py"
+```
+
+This one-shot script is idempotent (safe to re-run) and will:
+
+1. Set root folders to `/data/staging/tv` (Sonarr) and `/data/staging/movies` (Radarr).
+2. Configure webhook connections pointing to the orchestrator at `http://orchestrator:8000/webhook/{sonarr|radarr}`.
+
+Verify success by checking Sonarr/Radarr dashboards: Settings → Root
+Folders should list the staging paths, and Settings → Connect should show
+the "Orchestrator" webhook with the correct URL.
+
 ## Service configuration
 
 The order matters because integrations chain (Prowlarr → Sonarr/Radarr
