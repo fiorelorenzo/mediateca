@@ -5,7 +5,7 @@ from collections.abc import AsyncIterator
 from fastapi import FastAPI
 from sqlmodel import Session
 
-from orchestrator.api import events as events_api, health, items, settings as settings_api, webhooks
+from orchestrator.api import events as events_api, health, items, recyclarr, settings as settings_api, webhooks
 from orchestrator.config import get_settings
 from orchestrator.core.custom_formats import push_custom_formats
 from orchestrator.core.policy_seed import seed_settings
@@ -39,3 +39,4 @@ app.include_router(settings_api.router)
 app.include_router(webhooks.router)
 app.include_router(items.router)
 app.include_router(events_api.router)
+app.include_router(recyclarr.router)
