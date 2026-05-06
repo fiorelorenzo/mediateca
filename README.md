@@ -83,6 +83,45 @@ fail2ban. End-users only see Seerr → Jellyfin: Seerr's local login is
 disabled (`localLogin=false`), so the page exposes only the
 "Sign in with Jellyfin" button.
 
+### Admin app
+
+The admin app (`https://admin.<DOMAIN>`) is the operational UI for the
+entire stack. Single-admin auth via password (bcrypt hash in `.env`).
+
+**Password setup:**
+
+Generate a bcrypt hash of your password using either:
+
+```sh
+# Via Caddy:
+docker run --rm caddy:2-alpine caddy hash-password --plaintext '<new-pwd>' \
+  | sed 's|^|ADMIN_PASSWORD_HASH=|' >> .env
+
+# Via Python:
+python3 -c "import bcrypt; print(bcrypt.hashpw(b'<new-pwd>', bcrypt.gensalt()).decode())"
+```
+
+Place the resulting `ADMIN_PASSWORD_HASH=...` line in `.env`. Then start
+the stack:
+
+```sh
+docker compose up -d
+```
+
+**Pages:**
+
+| Page | Purpose |
+| --- | --- |
+| **Dashboard** | Overview counts per status, host metrics summary |
+| **Library** | Search/filter ingested items; accept-as-is, search-now, per-item audio language overrides |
+| **Requests** | Seerr pending requests (approve/decline) |
+| **Downloads** | Unified Sonarr + Radarr queue (download progress, ETA) |
+| **Server** | Host CPU / RAM / disk usage; container statuses |
+| **Services** | Deep-links to native service UIs (Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, qBit) |
+| **Settings** | Runtime config (audio languages, HLS toggle, retry intervals) |
+| **Settings → Custom Formats** | Stack-managed custom formats (CRUD) |
+| **Settings → TRaSH** | Read-only TRaSH custom format reference + sync trigger |
+
 ### Network topology
 
 ```
