@@ -53,7 +53,10 @@ async def tick() -> None:
 
 
 def start_scheduler() -> AsyncIOScheduler:
+    from orchestrator.workers.job_runner import run_encode_jobs
     scheduler = AsyncIOScheduler()
     scheduler.add_job(tick, IntervalTrigger(minutes=15), id="catch_up_tick", replace_existing=True)
+    scheduler.add_job(run_encode_jobs, IntervalTrigger(minutes=1),
+                      id="encode_jobs_tick", replace_existing=True)
     scheduler.start()
     return scheduler

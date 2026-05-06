@@ -90,10 +90,11 @@ async def _promote_or_encode(
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
 
     if runtime.get("hls_enabled"):
-        # Encoding is enqueued and handled by job_runner (next task)
         validate_transition(item.status, ItemStatus.ENCODING)
         item.status = ItemStatus.ENCODING
         session.add(item); session.commit()
+        from orchestrator.workers.job_runner import enqueue_encode
+        await enqueue_encode(item, session)
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
     else:
         validate_transition(item.status, ItemStatus.PROMOTED)
