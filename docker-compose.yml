@@ -168,6 +168,48 @@ services:
     networks:
       - servarr
 
+  orchestrator:
+    build:
+      context: ./orchestrator
+    image: orchestrator:local
+    container_name: orchestrator
+    restart: unless-stopped
+    environment:
+      - DATA_ROOT=/data
+      - STAGING_ROOT=/data/staging
+      - INCOMING_ROOT=/data/incoming
+      - MEDIA_ROOT=/data/media
+      - STATE_DB=/config/orchestrator.db
+      - POLICY_SEED=/config/policy.yml
+      - SONARR_URL=http://sonarr:8989
+      - SONARR_API_KEY=${SONARR_API_KEY}
+      - RADARR_URL=http://radarr:7878
+      - RADARR_API_KEY=${RADARR_API_KEY}
+      - HLS_ENCODER_URL=http://hls-encoder:8000
+      - ADMIN_API_TOKEN=${ADMIN_API_TOKEN}
+      - WEBHOOK_TOKEN=${WEBHOOK_TOKEN}
+      - SEERR_URL=http://seerr:5055
+      - SEERR_API_KEY=${SEERR_API_KEY:-}
+      - JELLYFIN_URL=http://jellyfin:8096
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY:-}
+      - PROWLARR_URL=http://prowlarr:9696
+      - PROWLARR_API_KEY=${PROWLARR_API_KEY:-}
+      - BAZARR_URL=http://bazarr:6767
+      - BAZARR_API_KEY=${BAZARR_API_KEY:-}
+      - QBIT_URL=http://gluetun:8080
+      - QBIT_USER=${QBIT_USER}
+      - QBIT_PASS=${QBIT_PASS}
+      - LOG_LEVEL=INFO
+      - TZ=${TZ:-UTC}
+    volumes:
+      - ${MEDIA_DIR}:/data
+      - ./config/orchestrator:/config
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - servarr
+
   # FlareSolverr is intentionally NOT in this compose. Running it on the
   # server (whether direct or behind Gluetun) means Cloudflare sees a
   # datacenter or VPN ASN and blocks it anyway. Instead it runs on a

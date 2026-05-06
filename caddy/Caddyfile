@@ -46,6 +46,10 @@ bazarr.{$DOMAIN} {
     reverse_proxy bazarr:6767
 }
 
+orchestrator.{$DOMAIN} {
+    reverse_proxy orchestrator:8000
+}
+
 qbit.{$DOMAIN} {
     reverse_proxy gluetun:8080
 }
