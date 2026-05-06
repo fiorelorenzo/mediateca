@@ -177,7 +177,9 @@ if [ "$STORAGE_DRIVER" = "none" ] && [ "$DATA_ROOT" = "${STORAGE_MOUNT_POINT}/da
     DATA_ROOT="/srv/servarr-data"
 fi
 mkdir -p "$DATA_ROOT/torrents/tv" "$DATA_ROOT/torrents/movies" \
-         "$DATA_ROOT/media/tv"    "$DATA_ROOT/media/movies"
+         "$DATA_ROOT/media/tv"    "$DATA_ROOT/media/movies" \
+         "$DATA_ROOT/staging/tv"  "$DATA_ROOT/staging/movies" \
+         "$DATA_ROOT/incoming"
 chown -R "$USERNAME:$USERNAME" "$DATA_ROOT" || true
 
 echo
