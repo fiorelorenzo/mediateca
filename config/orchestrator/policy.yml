@@ -1,0 +1,12 @@
+# Initial values for the orchestrator's runtime settings table.
+# Read ONCE on first boot to populate the DB. Subsequent edits to
+# this file are ignored — change settings via the admin app or
+# `PUT /api/settings`.
+
+required_audio_langs:
+  - ita
+  - "@original"
+
+retry_interval_hours: 24
+accept_as_is_after_attempts: 0   # 0 = never auto-freeze
+hls_enabled: false
