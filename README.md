@@ -10,6 +10,8 @@ connection.
 | --- | --- |
 | Catalog browse + request flow (the page family/friends use) | [Seerr](https://github.com/seerr-team/seerr) |
 | Streaming UI + library scanner | [Jellyfin](https://jellyfin.org) |
+| Ingestion orchestrator (staging → media, webhook API, HLS dispatch) | this repo's `orchestrator/` (FastAPI / SQLite) |
+| Admin app (planned — Plan B) | Next.js app; `admin.<DOMAIN>` reverse-proxies the container once deployed |
 | TV / movie automation | [Sonarr](https://sonarr.tv) / [Radarr](https://radarr.video) |
 | Indexer aggregation | [Prowlarr](https://prowlarr.com) |
 | Subtitles | [Bazarr](https://bazarr.media) |
@@ -18,7 +20,7 @@ connection.
 | BitTorrent client | [qBittorrent](https://www.qbittorrent.org) (forced through ProtonVPN) |
 | Reverse proxy + automatic HTTPS | [Caddy](https://caddyserver.com) |
 | Self-hosted Tailscale control plane | [Headscale](https://github.com/juanfont/headscale) |
-| HLS adaptive-bitrate encoder + status dashboard | this repo's `hls-encoder/` |
+| HLS adaptive-bitrate encoder (optional profile) | this repo's `hls-encoder/` |
 
 The headline feature is the **HLS pipeline**: every imported video is
 transcoded once into a 3-variant H.264 ladder (1080p / 720p / 480p) plus
@@ -39,6 +41,7 @@ required**, smooth playback even from mobile networks.
   - [4. Configure DNS](#4-configure-dns)
   - [5. Configure `.env`](#5-configure-env)
   - [6. Start the stack](#6-start-the-stack)
+- [HLS encoding mode](#hls-encoding-mode)
 - [Service configuration](#service-configuration)
 - [Live TV via Dispatcharr](#live-tv-via-dispatcharr)
 - [Indexer proxy on a home node](#indexer-proxy-on-a-home-node)
@@ -60,7 +63,9 @@ your `DOMAIN`:
 | URL | Service | Notes |
 | --- | --- | --- |
 | **`streaming.<DOMAIN>`** | Seerr | **Public entry point**: catalog + request UI. Auth via Jellyfin SSO only (local login disabled). |
-| `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes `.strm` files pointing at the HLS CDN. |
+| `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes library from `media/` (direct files or `.strm` CDN links). |
+| `orchestrator.<DOMAIN>` | Orchestrator | REST API (ingestion pipeline, settings, events). Requires `Authorization: Bearer $ADMIN_API_TOKEN`. |
+| `admin.<DOMAIN>` | Admin app (planned) | Next.js admin UI — **not yet deployed**. Subdomain reverse-proxies the container once Plan B ships; DNS record + Caddy route exist as stubs. |
 | `sonarr.<DOMAIN>` | Sonarr | TV automation |
 | `radarr.<DOMAIN>` | Radarr | Movie automation |
 | `prowlarr.<DOMAIN>` | Prowlarr | Indexer manager |
@@ -68,8 +73,8 @@ your `DOMAIN`:
 | `tv.<DOMAIN>` | Dispatcharr | IPTV middleware (HDHomeRun emulator for Jellyfin Live TV) |
 | `qbit.<DOMAIN>` | qBittorrent | Torrent client (egress via ProtonVPN) |
 | `headscale.<DOMAIN>` | Headscale | Self-hosted Tailscale coordination server |
-| `hls.<DOMAIN>` | static file server | Public read-only CDN for HLS segments + master playlists |
-| `encoder-status.<DOMAIN>` | static file server | Encoder live dashboard + `status.json` |
+| `hls.<DOMAIN>` | static file server | Public read-only CDN for HLS segments + master playlists (only active when HLS profile enabled) |
+| `encoder-status.<DOMAIN>` | static file server | Encoder live dashboard + `status.json` (only active when HLS profile enabled) |
 
 Authentication is each app's own (Forms login on *arr, native login on
 Jellyfin / qBit). Rationale: simpler than running a separate
@@ -83,10 +88,16 @@ disabled (`localLogin=false`), so the page exposes only the
 ```
 internet ─► host ─► Caddy (TLS) ─► docker network "servarr"
                        │
-                       ├── jellyfin / sonarr / radarr / bazarr
-                       ├── seerr / prowlarr
+                       ├── jellyfin
+                       ├── sonarr / radarr ──► orchestrator (FastAPI)
+                       │                            │
+                       │                    ┌───────┴────────┐
+                       │               staging/          hls-encoder
+                       │               (inbox)         (optional profile)
+                       │                    │
+                       │               media/ ──► jellyfin library
+                       ├── seerr / prowlarr / bazarr
                        ├── headscale (Tailscale control plane)
-                       ├── hls-encoder (custom Python watcher)
                        └── gluetun (ProtonVPN, WireGuard)
                               │ shared netns
                               ├── qbittorrent
@@ -114,33 +125,87 @@ machine at home joins the same tailnet and runs `tinyproxy` and/or
 queries exit with a residential IP — bypassing both datacenter and
 commercial-VPN ASN blocklists. Torrent traffic itself stays on ProtonVPN.
 
-### HLS pipeline
+### Filesystem layout
 
-When Sonarr / Radarr finish an import (file lands in `$MEDIA_DIR/media/`),
-the `hls-encoder` service:
+```
+$MEDIA_DIR/
+├── torrents/
+│   ├── tv/          qBittorrent download target (category: tv-sonarr)
+│   └── movies/      qBittorrent download target (category: movies-radarr)
+├── staging/
+│   ├── tv/          Sonarr root folder; orchestrator watches here
+│   └── movies/      Radarr root folder; orchestrator watches here
+├── incoming/        Temporary landing zone used by the orchestrator
+│   │                during multi-source merges (mkvmerge scratch)
+│   └── …
+└── media/
+    ├── tv/          Promoted library files (Jellyfin root)
+    └── movies/      Promoted library files (Jellyfin root)
+```
 
-1. ffprobes the source to inventory video + audio streams.
-2. Builds a single FFmpeg command that produces a 3-variant H.264 ladder
-   (1080p / 720p / 480p) plus one AAC-stereo audio rendition per source
-   audio track. Output is written to local NVMe cache (`$ENCODER_CACHE_DIR`).
-3. If the source is already H.264 ≤1080p ≤5.5 Mbps, the 1080p variant is
-   bitstream-copied (no re-encode), saving ~40-60 % of CPU per job.
-4. On success, atomically moves the bundle to a hidden directory next to
-   the source: `<title>/.<basename>.hls/`. Jellyfin's library scanner skips
-   the dotted directory.
-5. Writes `<title>/<basename>.strm` containing the public CDN URL
-   (`https://hls.<DOMAIN>/<rel>/.<basename>.hls/master.m3u8`).
-6. Deletes the source `.mkv` and tells Sonarr / Radarr to stop monitoring
-   the item.
+`torrents/` and `staging/` **must be on the same filesystem** so
+Sonarr / Radarr can hardlink instead of copying. `incoming/` can live
+anywhere writable by the orchestrator container. `media/` is where
+Jellyfin scans — files land here after the orchestrator's policy engine
+approves promotion.
 
-Jellyfin reads the `.strm`, the master playlist exposes the variant
-ladder, and the player (HLS.js for browser, native AVPlayer for iOS, etc.)
-does adaptive bitrate switching client-side. **Zero live transcoding**
-on the server.
+### Ingestion pipeline
 
-Live status: `https://encoder-status.<DOMAIN>/` shows the queue, in-flight
-jobs (with progress bar from ffmpeg's `time=` line), recent history, CPU
-load average + sparkline. Raw JSON at `/status.json` for scripting.
+When Sonarr / Radarr fire the `OnImport` webhook, the orchestrator:
+
+1. Receives the webhook, records an `Item` row, and probes audio streams
+   with `ffprobe`.
+2. Runs the **policy engine**: checks whether required audio languages are
+   already present. If not, queues a merge job (`mkvmerge`) to combine
+   tracks from a secondary source.
+3. Once policy is satisfied, promotes the file from `staging/` to `media/`
+   (hardlink or atomic move).
+4. Optionally dispatches to `hls-encoder` if the HLS profile is active
+   (see [HLS encoding mode](#hls-encoding-mode) below).
+5. Tells Sonarr / Radarr to set `monitored=false` for the item.
+
+### HLS encoding mode
+
+The HLS encoder is **off by default**. Two modes:
+
+**Direct (default):** The `hls-encoder` container is not started
+(`COMPOSE_PROFILES` does not include `hls`). Files land in `media/` as
+standard MKV/MP4. Jellyfin transcodes on-the-fly as it always has.
+This is the simplest setup and works without a GPU or fast CPU.
+
+**HLS pipeline:** Bring up the encoder profile and toggle it at runtime:
+
+```sh
+# Start the stack with the HLS encoder profile:
+COMPOSE_PROFILES=hls docker compose up -d
+
+# Then enable HLS dispatch via the orchestrator settings API:
+curl -X PUT https://orchestrator.<DOMAIN>/api/settings \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"hls_enabled": true}'
+```
+
+When HLS is active, the encoder produces a 3-variant H.264 ladder
+(1080p / 720p / 480p) plus one AAC-stereo audio rendition per language
+track. Output is written to local NVMe cache (`$ENCODER_CACHE_DIR`),
+then atomically moved to a hidden bundle next to the source:
+`<title>/.<basename>.hls/`. A `.strm` sidecar pointing at the public
+CDN URL (`https://hls.<DOMAIN>/…/master.m3u8`) replaces the source
+file in Jellyfin's library. **Zero live transcoding** on the server.
+
+Live status: `https://encoder-status.<DOMAIN>/` shows the queue,
+in-flight jobs (with progress from ffmpeg's `time=` line), recent
+history, CPU load average + sparkline. Raw JSON at `/status.json`.
+
+To disable HLS dispatch at runtime without restarting the stack:
+
+```sh
+curl -X PUT https://orchestrator.<DOMAIN>/api/settings \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"hls_enabled": false}'
+```
 
 See [`HLS_ABR_DESIGN.md`](HLS_ABR_DESIGN.md) for the full design rationale
 and [`hls-encoder/README.md`](hls-encoder/README.md) for env / tuning
@@ -163,10 +228,17 @@ reference.
 ### Storage
 
 - A directory exposed inside containers as `/data` (the `MEDIA_DIR` env
-  var). Layout: `$MEDIA_DIR/torrents/{tv,movies}` for downloads,
-  `$MEDIA_DIR/media/{tv,movies}` for the finished library. Both subtrees
-  **must live on the same filesystem** so Sonarr / Radarr can hardlink
-  imports instead of copying.
+  var). Layout:
+  - `$MEDIA_DIR/torrents/{tv,movies}` — qBittorrent download targets.
+  - `$MEDIA_DIR/staging/{tv,movies}` — Sonarr/Radarr root folders; the
+    orchestrator watches here and runs its policy engine.
+  - `$MEDIA_DIR/incoming/` — scratch space used by the orchestrator for
+    in-progress merges (mkvmerge temporary output).
+  - `$MEDIA_DIR/media/{tv,movies}` — promoted library files; Jellyfin
+    scans these paths.
+
+  `torrents/`, `staging/`, and `media/` **must live on the same
+  filesystem** so Sonarr / Radarr can hardlink imports instead of copying.
 - A second directory `ENCODER_CACHE_DIR` for HLS scratch. Should be on
   **fast local storage** (NVMe ideal) — never network-mounted. ~100 GB
   is plenty unless you encode 4K+ regularly.
@@ -217,6 +289,21 @@ cp .env.template .env && vim .env    # fill in DOMAIN, ProtonVPN, etc.
 # 4. Start.
 docker compose up -d
 docker compose logs -f caddy         # watch certs being obtained
+
+# 5. Wait for Sonarr and Radarr to be healthy, then wire them to the orchestrator.
+docker run --rm --network servarr_servarr \
+  --env-file .env \
+  -v "$PWD/scripts:/scripts:ro" \
+  python:3.12-slim \
+  sh -c "pip install httpx==0.27.2 -q && python /scripts/bootstrap-arr.py"
+
+# 6. (Optional) Enable HLS encoding.
+#    First start the encoder profile, then toggle dispatch via the API.
+COMPOSE_PROFILES=hls docker compose up -d
+curl -X PUT https://orchestrator.<DOMAIN>/api/settings \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"hls_enabled": true}'
 ```
 
 Then walk through [Service configuration](#service-configuration) once.
@@ -301,7 +388,8 @@ If you're running locally without `setup-server.sh`, just create the
 layout manually:
 
 ```sh
-sudo mkdir -p /srv/servarr-data/{torrents,media}/{tv,movies}
+sudo mkdir -p /srv/servarr-data/{torrents,staging,incoming,media}/{tv,movies}
+sudo mkdir -p /srv/servarr-data/incoming
 sudo chown -R 1000:1000 /srv/servarr-data    # or whatever PUID/PGID you'll use
 ```
 
@@ -321,6 +409,8 @@ your server's public IPv4. Use AAAA for v6 if you have it.
 | --- | --- | --- |
 | A | `streaming` | `<HOST-IP>` |
 | A | `media` | `<HOST-IP>` |
+| A | `orchestrator` | `<HOST-IP>` |
+| A | `admin` | `<HOST-IP>` |
 | A | `sonarr` | `<HOST-IP>` |
 | A | `radarr` | `<HOST-IP>` |
 | A | `prowlarr` | `<HOST-IP>` |
@@ -464,10 +554,13 @@ Add download client `qbittorrent` (host: `gluetun`, port: `8080`, your
 qBit credentials, category: `tv-sonarr` for Sonarr / `movies-radarr`
 for Radarr).
 
-Add root folder: `/data/media/tv` for Sonarr, `/data/media/movies` for
-Radarr. Note the API key in Settings → General → Security and put it in
-`.env` (`SONARR_API_KEY`, `RADARR_API_KEY`) — `hls-encoder` calls these
-to flip `monitored=false` post-encode.
+Root folders are set automatically by `bootstrap-arr.py` (see
+[Bootstrap Sonarr/Radarr](#bootstrap-sonarrradarr)): `/data/staging/tv`
+for Sonarr, `/data/staging/movies` for Radarr. The orchestrator's webhook
+connection is also wired by the bootstrap script. Note the API key in
+Settings → General → Security and put it in `.env` (`SONARR_API_KEY`,
+`RADARR_API_KEY`) — the orchestrator uses these to flip `monitored=false`
+after promotion.
 
 **Quality profiles** — for each profile you intend to use:
 - Cap quality at **1080p** (uncheck 2160p tiers; cutoff = Bluray-1080p
@@ -1156,10 +1249,21 @@ of the above. Total for the reference setup: ~€63/mo.
 │       └── plugin-config.yml         # paste into plugin's YAML Editor tab
 ├── hls-encoder/
 │   ├── Dockerfile                    # python:3.12-slim + ffmpeg + tini
-│   ├── encoder.py                    # watcher, HLS encode, .strm, monitor=false
+│   ├── encoder.py                    # passive consumer: polls media/, encodes, writes .strm
 │   ├── README.md                     # env reference + tuning notes
 │   └── index.html                    # live dashboard served at encoder-status.<DOMAIN>
+├── orchestrator/
+│   ├── Dockerfile                    # python:3.12-slim + mkvtoolnix + ffprobe
+│   ├── pyproject.toml
+│   ├── src/orchestrator/
+│   │   ├── app.py                    # FastAPI application factory
+│   │   ├── config.py                 # settings loaded from env
+│   │   ├── api/                      # REST endpoints (webhooks, items, settings, events, …)
+│   │   ├── core/                     # policy engine, probe, merger, arr_client, …
+│   │   └── workers/                  # APScheduler jobs (inbox, catch-up, reconcile)
+│   └── tests/
 └── scripts/
+    ├── bootstrap-arr.py              # idempotent: sets Sonarr/Radarr root folders + webhook
     ├── qb-port-update.sh             # VPN NAT-PMP → qBit port sidecar
     └── provision-dispatcharr.py      # idempotent IPTV bootstrap (M3U/EPG/channels/dedupe)
 ```
