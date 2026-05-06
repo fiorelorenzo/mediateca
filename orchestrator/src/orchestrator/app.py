@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from sqlmodel import Session
 
+from orchestrator.api import custom_formats as custom_formats_api
 from orchestrator.api import events as events_api
 from orchestrator.api import health, items, metrics, recyclarr, webhooks
 from orchestrator.api import services as svcs
@@ -49,3 +50,4 @@ app.include_router(events_api.router)
 app.include_router(recyclarr.router)
 app.include_router(metrics.router)
 app.include_router(svcs.router)
+app.include_router(custom_formats_api.router)
