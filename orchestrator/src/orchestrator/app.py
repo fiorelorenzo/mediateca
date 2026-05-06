@@ -18,7 +18,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     configure_logging(s.log_level)
     with Session(get_engine()) as session:
         seed_settings(session, s.policy_seed)
-    yield
+    from orchestrator.workers.catch_up import start_scheduler
+    scheduler = start_scheduler()
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
 
 
 app = FastAPI(title="Mediateca Orchestrator", lifespan=lifespan)
