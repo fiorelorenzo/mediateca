@@ -1,6 +1,6 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,22 +9,16 @@ import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api/client";
 import type { Settings } from "@/lib/api/types";
 
-export function SettingsForm() {
+interface FormProps {
+  initial: Settings;
+}
+
+function SettingsFormInner({ initial }: FormProps) {
   const qc = useQueryClient();
-  const { data } = useQuery({ queryKey: ["settings"], queryFn: () => api.getSettings() });
-
-  const [langs, setLangs] = useState("");
-  const [retry, setRetry] = useState(24);
-  const [hls, setHls] = useState(false);
-  const [acceptAfter, setAcceptAfter] = useState(0);
-
-  useEffect(() => {
-    if (!data) return;
-    setLangs(data.required_audio_langs.join(","));
-    setRetry(data.retry_interval_hours);
-    setHls(data.hls_enabled);
-    setAcceptAfter(data.accept_as_is_after_attempts);
-  }, [data]);
+  const [langs, setLangs] = useState(initial.required_audio_langs.join(","));
+  const [retry, setRetry] = useState(initial.retry_interval_hours);
+  const [hls, setHls] = useState(initial.hls_enabled);
+  const [acceptAfter, setAcceptAfter] = useState(initial.accept_as_is_after_attempts);
 
   const save = useMutation({
     mutationFn: (s: Partial<Settings>) => api.putSettings(s),
@@ -98,4 +92,12 @@ export function SettingsForm() {
       {save.isSuccess && <span className="ml-3 text-sm text-emerald-600">Saved.</span>}
     </form>
   );
+}
+
+export function SettingsForm() {
+  const { data } = useQuery({ queryKey: ["settings"], queryFn: () => api.getSettings() });
+
+  if (!data) return null;
+
+  return <SettingsFormInner key={data.required_audio_langs.join(",")} initial={data} />;
 }

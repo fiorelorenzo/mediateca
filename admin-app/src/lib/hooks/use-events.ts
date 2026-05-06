@@ -7,7 +7,9 @@ export type OrchestratorEvent =
 
 export function useOrchestratorEvents(onEvent: (ev: OrchestratorEvent) => void) {
   const cb = useRef(onEvent);
-  cb.current = onEvent;
+  useEffect(() => {
+    cb.current = onEvent;
+  });
   useEffect(() => {
     const es = new EventSource("/api/events");
     es.onmessage = (msg) => {
