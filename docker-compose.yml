@@ -51,7 +51,7 @@ services:
       # at hls.${DOMAIN}. Encoder writes here; Caddy only reads.
       - ${MEDIA_DIR}/media:/srv/hls:ro
       # hls-encoder status snapshot exposed at encoder-status.${DOMAIN}
-      # (read-only) for Homarr / external monitoring.
+      # (read-only) for external monitoring.
       - ./config/hls-encoder:/srv/encoder-status:ro
     environment:
       - DOMAIN=${DOMAIN}

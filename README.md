@@ -72,7 +72,7 @@ your `DOMAIN`:
 | `encoder-status.<DOMAIN>` | static file server | Encoder live dashboard + `status.json` |
 
 Authentication is each app's own (Forms login on *arr, native login on
-Jellyfin / Homarr / qBit). Rationale: simpler than running a separate
+Jellyfin / qBit). Rationale: simpler than running a separate
 SSO layer, good enough for a personal stack with strong passwords and
 fail2ban. End-users only see Seerr → Jellyfin: Seerr's local login is
 disabled (`localLogin=false`), so the page exposes only the
@@ -356,7 +356,6 @@ each section. The minimum to start:
 | `ENCODER_CACHE_DIR` | yes | Host path for HLS scratch (fast local). |
 | `PUID` / `PGID` | yes | UID/GID owning files in `$MEDIA_DIR`. |
 | `TZ` | yes | IANA timezone, e.g. `Europe/London`. |
-| `HOMARR_SECRET_ENCRYPTION_KEY` | yes | `openssl rand -hex 32`. |
 | `WIREGUARD_PRIVATE_KEY` | yes | From your VPN provider's WireGuard config. |
 | `WIREGUARD_ADDRESSES` | yes | Same source, e.g. `10.2.0.2/32`. |
 | `VPN_SERVER_COUNTRIES` | yes | P2P-friendly: `Switzerland`, `Netherlands`, `Iceland`, `Sweden`. |
@@ -402,7 +401,7 @@ firewall is blocking port 80.
 ## Service configuration
 
 The order matters because integrations chain (Prowlarr → Sonarr/Radarr
-→ Bazarr → Seerr → Homarr).
+→ Bazarr → Seerr).
 
 ### Jellyfin
 
