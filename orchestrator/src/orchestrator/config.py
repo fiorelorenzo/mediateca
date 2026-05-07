@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     qbit_url: str = "http://gluetun:8080"
     qbit_user: str | None = None
     qbit_pass: str | None = None
+    dispatcharr_url: str = "http://dispatcharr:9191"
+    headscale_url: str = "http://headscale:8080"
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

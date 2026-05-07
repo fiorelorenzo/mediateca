@@ -1,7 +1,7 @@
 // admin-app/src/app/(app)/logs/_components/log-row.tsx
 "use client";
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, ChevronRight, Copy } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -84,10 +84,18 @@ export function LogRow({ line, index, style, expanded, onToggleExpand, measureRe
         tabIndex={0}
         aria-expanded={expanded}
         className={
-          "group hover:bg-accent/40 relative grid cursor-pointer grid-cols-[6px_72px_140px_56px_1fr_28px] items-start gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5 select-text " +
+          "group hover:bg-accent/40 relative grid cursor-pointer grid-cols-[18px_6px_72px_140px_56px_1fr_28px] items-start gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5 select-text " +
           (expanded ? "bg-accent/30" : "")
         }
       >
+        {/* Expand/collapse chevron */}
+        <ChevronRight
+          aria-hidden
+          className={
+            "text-muted-foreground/60 group-hover:text-muted-foreground mt-0.5 size-3.5 shrink-0 transition-transform duration-150 " +
+            (expanded ? "rotate-90" : "")
+          }
+        />
         {/* Color stripe per container */}
         <span aria-hidden className={`block h-full w-[3px] rounded-sm ${cs.dot} opacity-70`} />
 
