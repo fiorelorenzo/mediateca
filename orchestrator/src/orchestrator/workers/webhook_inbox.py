@@ -35,6 +35,8 @@ def _extract_sonarr(payload: dict[str, Any]) -> dict[str, Any] | None:
         "series_id": series.get("id"),
         "title": title,
         "path": episode_file["path"],
+        # See _extract_radarr — same CIFS-hardlink fallback applies here.
+        "source_path": episode_file.get("sourcePath"),
         "scene_name": scene_name,
     }
 
@@ -51,6 +53,11 @@ def _extract_radarr(payload: dict[str, Any]) -> dict[str, Any] | None:
         "series_id": None,
         "title": movie.get("title", ""),
         "path": movie_file["path"],
+        # Original download path under /data/incoming/. Used as ffprobe fallback
+        # when the imported path lives on storage that misbehaves on hardlinks
+        # (CIFS to Hetzner Storage Box returns EINVAL on the second name even
+        # though stat reports both as the same inode).
+        "source_path": movie_file.get("sourcePath"),
         "scene_name": scene_name,
     }
 
@@ -92,13 +99,28 @@ def _process_one(session: Session, row: WebhookInbox) -> None:
         session.commit()
         item = existing
 
-    info = ffprobe(Path(extracted["path"]))
+    primary_path = extracted["path"]
+    fallback_path: str | None = extracted.get("source_path")
+    try:
+        info = ffprobe(Path(primary_path))
+        probed_path = primary_path
+    except Exception as exc:
+        if not fallback_path or fallback_path == primary_path:
+            raise
+        log.warning(
+            "ffprobe.fallback",
+            primary=primary_path,
+            fallback=fallback_path,
+            error=str(exc),
+        )
+        info = ffprobe(Path(fallback_path))
+        probed_path = fallback_path
     item.audio_present = info.audio_languages
     item.updated_at = datetime.utcnow()
     session.add(item)
     analyzed_detail: dict[str, Any] = {
         "audio_languages": info.audio_languages,
-        "path": extracted["path"],
+        "path": probed_path,
     }
     if extracted.get("scene_name"):
         analyzed_detail["scene_name"] = extracted["scene_name"]
@@ -114,7 +136,7 @@ def _process_one(session: Session, row: WebhookInbox) -> None:
 
     from orchestrator.core.pipeline import process_item  # local import to avoid cycle
 
-    asyncio.run(process_item(session, item, Path(extracted["path"])))
+    asyncio.run(process_item(session, item, Path(probed_path)))
     row.processed_at = datetime.utcnow()
     session.add(row)
     session.commit()
