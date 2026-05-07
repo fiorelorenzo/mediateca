@@ -1,5 +1,7 @@
 // admin-app/src/app/(app)/logs/_components/log-row.tsx
 "use client";
+import { useEffect, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
 import {
   Tooltip,
   TooltipContent,
@@ -27,56 +29,124 @@ const LEVEL_PILL: Record<NonNullable<LogLine["level"]>, string> = {
   ERROR: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
 };
 
-export function LogRow({ line, style }: { line: LogLine; style?: React.CSSProperties }) {
+interface Props {
+  line: LogLine;
+  index: number;
+  style?: React.CSSProperties;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  measureRef?: (node: HTMLDivElement | null) => void;
+}
+
+export function LogRow({ line, index, style, expanded, onToggleExpand, measureRef }: Props) {
   const date = new Date(line.ts);
   const rel = useRelativeTime(date);
   const cs = containerStyles(line.container);
   const levelTextClass = line.level ? LEVEL_STYLES[line.level] : "";
   const levelPill = line.level ? LEVEL_PILL[line.level] : "";
 
+  const [copied, setCopied] = useState(false);
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    };
+  }, []);
+
+  function copy(e: React.MouseEvent) {
+    e.stopPropagation();
+    navigator.clipboard
+      .writeText(`${line.ts}  ${line.container}  ${line.line}`)
+      .then(() => {
+        setCopied(true);
+        if (copyTimer.current) clearTimeout(copyTimer.current);
+        copyTimer.current = setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {
+        /* clipboard denied — silent */
+      });
+  }
+
   return (
-    <div
-      style={style}
-      className="hover:bg-accent/40 group relative grid grid-cols-[6px_72px_140px_56px_1fr] items-center gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5"
-    >
-      {/* Color stripe per container */}
-      <span aria-hidden className={`block h-full w-[3px] rounded-sm ${cs.dot} opacity-70`} />
-      {/* Time (relative + tooltip with absolute) */}
-      <TooltipProvider delayDuration={250}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="text-muted-foreground tabular-nums">{rel}</span>
-          </TooltipTrigger>
-          <TooltipContent side="right" className="font-mono text-xs">
-            {line.ts}
-          </TooltipContent>
-        </Tooltip>
-      </TooltipProvider>
-
-      {/* Container badge */}
-      <span
-        className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${cs.soft} ${cs.text}`}
+    <div style={style}>
+      <div
+        ref={measureRef}
+        data-index={index}
+        onClick={onToggleExpand}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            onToggleExpand();
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={expanded}
+        className={
+          "group hover:bg-accent/40 relative grid cursor-pointer grid-cols-[6px_72px_140px_56px_1fr_28px] items-start gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5 select-text " +
+          (expanded ? "bg-accent/30" : "")
+        }
       >
-        <span className={`inline-block size-1.5 rounded-full ${cs.dot}`} />
-        <span className="truncate">{line.container}</span>
-      </span>
+        {/* Color stripe per container */}
+        <span aria-hidden className={`block h-full w-[3px] rounded-sm ${cs.dot} opacity-70`} />
 
-      {/* Level pill */}
-      {line.level ? (
+        {/* Time (relative + tooltip with absolute) */}
+        <TooltipProvider delayDuration={250}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="text-muted-foreground tabular-nums pt-0.5">{rel}</span>
+            </TooltipTrigger>
+            <TooltipContent side="right" className="font-mono text-xs">
+              {line.ts}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        {/* Container badge */}
         <span
-          className={`inline-flex justify-center rounded px-1 py-0 text-[10px] font-semibold uppercase tracking-wide ${levelPill}`}
+          className={`inline-flex items-center gap-1 self-start rounded-md border px-1.5 py-0.5 text-[11px] font-medium ${cs.soft} ${cs.text}`}
         >
-          {line.level}
+          <span className={`inline-block size-1.5 rounded-full ${cs.dot}`} />
+          <span className="truncate">{line.container}</span>
         </span>
-      ) : (
-        <span />
-      )}
 
-      {/* Message */}
-      <span
-        className={`truncate ${levelTextClass}`}
-        dangerouslySetInnerHTML={{ __html: ansi.toHtml(line.line) }}
-      />
+        {/* Level pill */}
+        {line.level ? (
+          <span
+            className={`inline-flex justify-center self-start rounded px-1 py-0 text-[10px] font-semibold tracking-wide uppercase ${levelPill}`}
+          >
+            {line.level}
+          </span>
+        ) : (
+          <span />
+        )}
+
+        {/* Message */}
+        <span
+          className={
+            (expanded
+              ? "block whitespace-pre-wrap break-words"
+              : "block truncate") +
+            " " +
+            levelTextClass
+          }
+          dangerouslySetInnerHTML={{ __html: ansi.toHtml(line.line) }}
+        />
+
+        {/* Copy button */}
+        <button
+          type="button"
+          onClick={copy}
+          aria-label={copied ? "Copied" : "Copy line"}
+          className={
+            "self-start opacity-0 transition group-hover:opacity-100 focus:opacity-100 " +
+            "rounded p-1 hover:bg-background/80 hover:text-foreground text-muted-foreground"
+          }
+        >
+          {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
+        </button>
+      </div>
     </div>
   );
 }

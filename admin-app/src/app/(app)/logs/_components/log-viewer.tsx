@@ -81,12 +81,24 @@ export function LogViewer() {
   }, [lines, filter]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+
+  function toggleExpand(id: number) {
+    setExpandedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not memoizable; LogViewer opts out of React Compiler memoization
   const virtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => 22,
+    estimateSize: () => 30,
     overscan: 20,
+    measureElement: (el) => el?.getBoundingClientRect().height ?? 30,
   });
 
   // Autoscroll: scroll to bottom whenever lines grow, if autoscroll is on
@@ -136,19 +148,27 @@ export function LogViewer() {
 
       <div ref={parentRef} className="bg-muted/10 h-[70vh] overflow-y-auto rounded-md border">
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
-          {virtualizer.getVirtualItems().map((vi) => (
-            <LogRow
-              key={filtered[vi.index].id}
-              line={filtered[vi.index]}
-              style={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                transform: `translateY(${vi.start}px)`,
-              }}
-            />
-          ))}
+          {virtualizer.getVirtualItems().map((vi) => {
+            const line = filtered[vi.index];
+            const expanded = expandedIds.has(line.id);
+            return (
+              <LogRow
+                key={line.id}
+                line={line}
+                index={vi.index}
+                expanded={expanded}
+                onToggleExpand={() => toggleExpand(line.id)}
+                measureRef={virtualizer.measureElement}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  transform: `translateY(${vi.start}px)`,
+                }}
+              />
+            );
+          })}
         </div>
       </div>
 
