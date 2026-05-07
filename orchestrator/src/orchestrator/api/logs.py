@@ -73,8 +73,11 @@ def _watcher_thread(
         )
         return
 
+    # Docker SDK interprets `since` as a Unix epoch timestamp (not a relative
+    # offset). Convert "N seconds ago" into an absolute timestamp.
+    since_ts = int(datetime.now().timestamp() - since) if since > 0 else None
     try:
-        stream = c.logs(stream=True, follow=True, since=since, timestamps=True)
+        stream = c.logs(stream=True, follow=True, since=since_ts, timestamps=True)
         for raw in stream:
             if stop.is_set():
                 break
