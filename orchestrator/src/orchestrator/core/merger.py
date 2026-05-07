@@ -24,10 +24,18 @@ def build_mkvmerge_command(
     addition: Path,
     addition_audio_langs: list[str],
     output: Path,
+    sync_offset_ms: int | None = None,
 ) -> list[str]:
     """Build mkvmerge invocation that keeps `existing` (video + its audio +
-    subs/chapters) and pulls in only the audio tracks from `addition`."""
-    return [
+    subs/chapters) and pulls in only the audio tracks from `addition`.
+
+    When *sync_offset_ms* is provided (non-None, non-zero) a ``--sync 0:MS``
+    flag is injected before the addition path to shift the addition's first
+    audio track by that many milliseconds.  Positive values delay the track;
+    negative values advance it.  The value comes from the cross-correlation
+    offset detected in :func:`merge_safety.audio_offset_ms`.
+    """
+    cmd = [
         "mkvmerge",
         "-o",
         str(output),
@@ -37,8 +45,13 @@ def build_mkvmerge_command(
         "--no-video",
         "--no-subtitles",
         "--no-chapters",
-        str(addition),
     ]
+    if sync_offset_ms is not None and sync_offset_ms != 0:
+        # --sync TID:DELAY[,SLOWING]  — TID 0 refers to the first track of
+        # the *following* file, which is the first audio track of `addition`.
+        cmd += ["--sync", f"0:{sync_offset_ms}"]
+    cmd.append(str(addition))
+    return cmd
 
 
 def merge_audio(
@@ -47,9 +60,14 @@ def merge_audio(
     addition: Path,
     addition_audio_langs: list[str],
     incoming_root: Path,
+    sync_offset_ms: int | None = None,
 ) -> Path:
     """Merge audio tracks from `addition` into `existing`. Returns the
-    output path inside incoming_root (not yet promoted)."""
+    output path inside incoming_root (not yet promoted).
+
+    *sync_offset_ms* is forwarded to :func:`build_mkvmerge_command` and, when
+    set, injects ``--sync 0:MS`` to correct a detected audio drift.
+    """
     job_id = uuid.uuid4().hex
     job_dir = incoming_root / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -59,6 +77,7 @@ def merge_audio(
         addition=addition,
         addition_audio_langs=addition_audio_langs,
         output=out,
+        sync_offset_ms=sync_offset_ms,
     )
     log.info("merge.start", cmd=cmd)
     result = subprocess.run(cmd, capture_output=True, text=True)

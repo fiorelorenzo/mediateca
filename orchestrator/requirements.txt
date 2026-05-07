@@ -11,3 +11,5 @@ PyYAML==6.0.3
 bcrypt==5.0.0
 docker==7.1.0
 sse-starlette==3.4.1
+numpy>=2.0,<3
+scipy>=1.13,<2

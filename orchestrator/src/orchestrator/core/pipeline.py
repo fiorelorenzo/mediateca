@@ -12,6 +12,14 @@ from sqlmodel import Session, select
 from orchestrator.config import get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.event_bus import publish
+from orchestrator.core.merge_safety import (
+    DURATION_REJECT_THRESHOLD_S,
+    OFFSET_REJECT_MS,
+    OFFSET_SAFE_MS,
+    audio_offset_ms,
+    duration_seconds,
+    parse_release_group,
+)
 from orchestrator.core.merger import merge_audio, promote, replace_atomically
 from orchestrator.core.policy import PolicyEngine, PolicyVerdict
 from orchestrator.core.state import validate_transition
@@ -25,6 +33,43 @@ from orchestrator.db.models import (
 from orchestrator.logging_setup import get_logger
 
 log = get_logger(__name__)
+
+
+def _get_original_scene_name(session: Session, item_id: int) -> str | None:
+    """Return the sceneName stored in the *oldest* ANALYZED event for this item.
+
+    The oldest ANALYZED event corresponds to the original import; later events
+    are follow-up additions.  Returns ``None`` if no scene name was ever stored.
+    """
+    rows = session.exec(
+        select(History)
+        .where(History.item_id == item_id, History.event == "ANALYZED")
+        .order_by(History.id)  # type: ignore[arg-type]
+    ).all()
+    for row in rows:
+        detail = row.detail or {}
+        name = detail.get("scene_name")
+        if name:
+            return str(name)
+    return None
+
+
+def _get_latest_scene_name(session: Session, item_id: int) -> str | None:
+    """Return the sceneName from the *most recent* ANALYZED event for this item.
+
+    Used to retrieve the scene name for the incoming addition file (the latest
+    event written by webhook_inbox just before process_item is invoked).
+    """
+    row = session.exec(
+        select(History)
+        .where(History.item_id == item_id, History.event == "ANALYZED")
+        .order_by(desc(History.id))  # type: ignore[arg-type]
+    ).first()
+    if row and row.detail:
+        name = row.detail.get("scene_name")
+        if name:
+            return str(name)
+    return None
 
 
 def _settings_dict(session: Session) -> dict[str, object]:
@@ -152,6 +197,9 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
                     new_audio=new_audio,
                     addition_audio_langs=addition_audio_langs,
                 )
+                # Retrieve the scene name for the new addition from the latest
+                # ANALYZED event (written by webhook_inbox just before this call).
+                new_scene_name = _get_latest_scene_name(session, item.id or 0)
                 await _merge_into_existing(
                     session,
                     item,
@@ -161,6 +209,7 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
                     combined_verdict,
                     runtime,
                     original,
+                    new_scene_name=new_scene_name,
                 )
                 return
             log.warning(
@@ -277,6 +326,35 @@ async def _mark_incomplete_and_promote(
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
 
 
+def _reject_merge(
+    session: Session,
+    item: Item,
+    source_file: Path,
+    reason: str,
+    extra_detail: dict[str, Any],
+) -> None:
+    """Transition item back to INCOMPLETE and record a MERGE_REJECTED event."""
+    # Restore status to INCOMPLETE (item was set to ANALYZING by webhook_inbox)
+    validate_transition(item.status, ItemStatus.INCOMPLETE)
+    item.status = ItemStatus.INCOMPLETE
+    item.status_reason = reason
+    session.add(item)
+    session.add(
+        History(
+            item_id=item.id,
+            event="MERGE_REJECTED",
+            detail={"reason": reason, **extra_detail},
+        )
+    )
+    session.commit()
+    publish("item.status_changed", {"item_id": item.id, "status": item.status})
+    # Discard the staging addition — it's been rejected
+    try:
+        source_file.unlink(missing_ok=True)  # noqa: ASYNC240
+    except OSError:
+        log.warning("merge.rejected_cleanup_failed", path=str(source_file))
+
+
 async def _merge_into_existing(
     session: Session,
     item: Item,
@@ -286,10 +364,19 @@ async def _merge_into_existing(
     combined_verdict: PolicyVerdict,
     runtime: dict[str, Any],
     original_lang: str | None,
+    new_scene_name: str | None = None,
 ) -> None:
     """Merge new audio track(s) from source_file into the existing library file.
 
-    Flow:
+    Before merging, three safety checks are applied (fail-fast):
+
+    1. **Release-group heuristic** — parse both scene names and warn if groups differ.
+       Never rejects on its own; just emits a log warning.
+    2. **Duration parity** — reject if |existing - addition| > DURATION_REJECT_THRESHOLD_S.
+    3. **Audio cross-correlation** — detect drift; apply ``--sync`` for ≤2 s offset
+       or reject for > 2 s offset.
+
+    Flow on success:
       1. ANALYZING → INCOMPLETE → MERGING  (two hops to stay within allowed transitions)
       2. merge_audio() → tmp merged file in incoming_root
       3. replace_atomically() → overwrite library_path
@@ -300,6 +387,100 @@ async def _merge_into_existing(
     """
     settings = get_settings()
     library_path = Path(item.library_path)  # type: ignore[arg-type]  # guaranteed non-None by caller
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Check 1: Release-group heuristic (informational, never rejects)
+    # ──────────────────────────────────────────────────────────────────────────
+    existing_scene = _get_original_scene_name(session, item.id or 0)
+    existing_group = parse_release_group(existing_scene) if existing_scene else None
+    addition_group = parse_release_group(new_scene_name) if new_scene_name else None
+
+    same_group: bool | None = None
+    if existing_group and addition_group:
+        same_group = existing_group.lower() == addition_group.lower()
+    if same_group is False:
+        log.warning(
+            "merge_safety.group_mismatch",
+            item_id=item.id,
+            existing_group=existing_group,
+            addition_group=addition_group,
+            note="proceeding — groups differ but files may still be compatible",
+        )
+    else:
+        log.info(
+            "merge_safety.group_check",
+            item_id=item.id,
+            existing_group=existing_group,
+            addition_group=addition_group,
+            same_group=same_group,
+        )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Check 2: Duration parity
+    # ──────────────────────────────────────────────────────────────────────────
+    existing_dur: float | None = None
+    addition_dur: float | None = None
+    try:
+        existing_dur = duration_seconds(library_path)
+        addition_dur = duration_seconds(source_file)
+    except RuntimeError as exc:
+        log.warning("merge_safety.duration_probe_failed", item_id=item.id, error=str(exc))
+
+    if existing_dur is not None and addition_dur is not None:
+        dur_diff = abs(existing_dur - addition_dur)
+        if dur_diff > DURATION_REJECT_THRESHOLD_S:
+            reason = (
+                f"merge rejected: duration mismatch "
+                f"(existing={existing_dur:.1f}s, new={addition_dur:.1f}s, "
+                f"diff={dur_diff:.1f}s — likely different cuts)"
+            )
+            log.warning("merge_safety.duration_rejected", item_id=item.id, diff_s=dur_diff)
+            _reject_merge(
+                session,
+                item,
+                source_file,
+                reason,
+                {
+                    "existing_duration": existing_dur,
+                    "addition_duration": addition_dur,
+                    "diff_seconds": dur_diff,
+                },
+            )
+            return
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # Check 3: Audio cross-correlation offset
+    # ──────────────────────────────────────────────────────────────────────────
+    sync_offset_ms: int | None = None
+    offset = audio_offset_ms(library_path, source_file)
+    if offset is not None:
+        abs_offset = abs(offset)
+        if abs_offset > OFFSET_REJECT_MS:
+            reason = (
+                f"merge rejected: audio drift {offset:.0f}ms — "
+                "likely different cuts/framerates"
+            )
+            log.warning("merge_safety.offset_rejected", item_id=item.id, offset_ms=offset)
+            _reject_merge(
+                session,
+                item,
+                source_file,
+                reason,
+                {"offset_ms": offset},
+            )
+            return
+        if abs_offset > OFFSET_SAFE_MS:
+            sync_offset_ms = int(round(offset))
+            log.info(
+                "merge_safety.offset_sync_applied",
+                item_id=item.id,
+                offset_ms=offset,
+                sync_offset_ms=sync_offset_ms,
+            )
+
+    # ──────────────────────────────────────────────────────────────────────────
+    # All checks passed — proceed with merge
+    # ──────────────────────────────────────────────────────────────────────────
 
     # 1. Transition: ANALYZING → INCOMPLETE → MERGING
     #    (state.py allows ANALYZING→INCOMPLETE and INCOMPLETE→MERGING)
@@ -320,6 +501,7 @@ async def _merge_into_existing(
         addition=source_file,
         addition_audio_langs=addition_audio_langs,
         incoming_root=settings.incoming_root,
+        sync_offset_ms=sync_offset_ms,
     )
 
     # 3. Atomically replace the library file
@@ -338,16 +520,20 @@ async def _merge_into_existing(
         log.warning("merge.staging_cleanup_failed", path=str(source_file))
 
     # 6. Record MERGED history
+    merged_detail: dict[str, Any] = {
+        "old_audio": old_audio,
+        "new_audio": merged_audio,
+        "addition_audio_langs": addition_audio_langs,
+        "library_path": str(library_path),
+        "same_group": same_group,
+    }
+    if sync_offset_ms is not None:
+        merged_detail["sync_offset_ms"] = sync_offset_ms
     session.add(
         History(
             item_id=item.id,
             event="MERGED",
-            detail={
-                "old_audio": old_audio,
-                "new_audio": merged_audio,
-                "addition_audio_langs": addition_audio_langs,
-                "library_path": str(library_path),
-            },
+            detail=merged_detail,
         )
     )
     session.commit()

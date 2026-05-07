@@ -28,11 +28,14 @@ def _extract_sonarr(payload: dict[str, Any]) -> dict[str, Any] | None:
         return None
     ep = episodes[0]
     title = f"{series.get('title')} - S{ep.get('seasonNumber'):02d}E{ep.get('episodeNumber'):02d}"
+    # sceneName is present in Sonarr v3/v4 "Download" events under episodeFile
+    scene_name: str | None = episode_file.get("sceneName") or episode_file.get("releaseTitle")
     return {
         "source_id": ep["id"],
         "series_id": series.get("id"),
         "title": title,
         "path": episode_file["path"],
+        "scene_name": scene_name,
     }
 
 
@@ -41,11 +44,14 @@ def _extract_radarr(payload: dict[str, Any]) -> dict[str, Any] | None:
     movie_file = payload.get("movieFile") or {}
     if not movie or not movie_file.get("path"):
         return None
+    # sceneName is present in Radarr v3 "Download" events under movieFile
+    scene_name: str | None = movie_file.get("sceneName") or movie_file.get("releaseTitle")
     return {
         "source_id": movie["id"],
         "series_id": None,
         "title": movie.get("title", ""),
         "path": movie_file["path"],
+        "scene_name": scene_name,
     }
 
 
@@ -90,11 +96,17 @@ def _process_one(session: Session, row: WebhookInbox) -> None:
     item.audio_present = info.audio_languages
     item.updated_at = datetime.utcnow()
     session.add(item)
+    analyzed_detail: dict[str, Any] = {
+        "audio_languages": info.audio_languages,
+        "path": extracted["path"],
+    }
+    if extracted.get("scene_name"):
+        analyzed_detail["scene_name"] = extracted["scene_name"]
     session.add(
         History(
             item_id=item.id,
             event="ANALYZED",
-            detail={"audio_languages": info.audio_languages, "path": extracted["path"]},
+            detail=analyzed_detail,
         )
     )
 
