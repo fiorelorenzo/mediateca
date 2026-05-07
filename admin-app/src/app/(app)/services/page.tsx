@@ -3,9 +3,15 @@ import { orchestrator } from "@/lib/api/orchestrator";
 import { ServicesHealthPulse } from "./_components/services-health-pulse";
 
 export const metadata: Metadata = { title: "Services" };
+export const dynamic = "force-dynamic";
 
 export default async function ServicesPage() {
-  const services = await orchestrator.services().catch(() => []);
+  let services: Awaited<ReturnType<typeof orchestrator.services>> = [];
+  try {
+    services = await orchestrator.services();
+  } catch (err) {
+    console.error("ServicesPage: failed to fetch services", err);
+  }
   const domain = process.env.PUBLIC_DOMAIN ?? "localhost";
 
   return (
