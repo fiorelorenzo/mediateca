@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Sidebar } from "@/components/shell/sidebar";
 import { Header } from "@/components/shell/header";
 import { PageTransition } from "@/components/page-transition";
+import { CommandPalette } from "@/components/command-palette";
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
@@ -13,6 +14,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           <PageTransition>{children}</PageTransition>
         </main>
       </div>
+      <CommandPalette />
     </div>
   );
 }
