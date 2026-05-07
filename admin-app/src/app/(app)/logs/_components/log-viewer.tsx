@@ -70,14 +70,22 @@ export function LogViewer() {
   });
 
   const filtered = useMemo(() => {
-    if (!filter) return lines;
+    // Sort by timestamp first — SSE multiplex preserves arrival order, not
+    // chronological order across containers. ISO-8601 strings sort
+    // lexicographically. Tie-break on line id for stable order between events
+    // emitted in the same millisecond.
+    const sorted = [...lines].sort((a, b) => {
+      if (a.ts === b.ts) return a.id - b.id;
+      return a.ts < b.ts ? -1 : 1;
+    });
+    if (!filter) return sorted;
     let rx: RegExp;
     try {
       rx = new RegExp(filter, "i");
     } catch {
-      return lines.filter((l) => l.line.toLowerCase().includes(filter.toLowerCase()));
+      return sorted.filter((l) => l.line.toLowerCase().includes(filter.toLowerCase()));
     }
-    return lines.filter((l) => rx.test(l.line));
+    return sorted.filter((l) => rx.test(l.line));
   }, [lines, filter]);
 
   const parentRef = useRef<HTMLDivElement>(null);
