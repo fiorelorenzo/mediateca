@@ -1,4 +1,4 @@
-import type { Item, Settings, SystemMetrics, ContainerStat, ServiceEntry } from "./types";
+import type { Item, Settings, SystemMetrics, ContainerStat, ServiceEntry, TimeseriesPoint } from "./types";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/proxy${path}`, {
@@ -35,6 +35,8 @@ export const api = {
   containers: () => call<ContainerStat[]>("/api/metrics/containers"),
   services: () => call<ServiceEntry[]>("/api/services"),
   recyclarrSync: () => call<{ status: string }>("/api/recyclarr/sync", { method: "POST" }),
+  itemsTimeseries: (sinceSeconds = 604800) =>
+    call<TimeseriesPoint[]>(`/api/items/timeseries?since_seconds=${sinceSeconds}`),
 };
 
 export interface CustomFormat {

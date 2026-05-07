@@ -66,3 +66,11 @@ export interface HistoryEvent {
   event: string;
   created_at: string;
 }
+
+export interface TimeseriesPoint {
+  ts: string;
+  promoted: number;
+  incomplete: number;
+  merged: number;
+  failed: number;
+}

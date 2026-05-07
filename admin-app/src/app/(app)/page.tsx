@@ -1,35 +1,22 @@
 import type { Metadata } from "next";
 import { orchestrator } from "@/lib/api/orchestrator";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { StatCard } from "./_components/stat-card";
+import { TimeseriesChart } from "./_components/timeseries-chart";
+import { EventFeed } from "./_components/event-feed";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-const STATUS_COLORS: Record<string, string> = {
-  PROMOTED: "bg-emerald-500",
-  INCOMPLETE: "bg-amber-500",
-  ENCODING: "bg-sky-500",
-  FAILED: "bg-red-500",
-};
+async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
+  return p.catch(() => fallback);
+}
 
 export default async function Dashboard() {
-  const [pending, incomplete, promoted, failed, sysm] = await Promise.all([
-    orchestrator
-      .listItems({ status: "PENDING", limit: 1 })
-      .then((r) => r.total)
-      .catch(() => 0),
-    orchestrator
-      .listItems({ status: "INCOMPLETE", limit: 1 })
-      .then((r) => r.total)
-      .catch(() => 0),
-    orchestrator
-      .listItems({ status: "PROMOTED", limit: 1 })
-      .then((r) => r.total)
-      .catch(() => 0),
-    orchestrator
-      .listItems({ status: "FAILED", limit: 1 })
-      .then((r) => r.total)
-      .catch(() => 0),
-    orchestrator.systemMetrics().catch(() => null),
+  const [pending, incomplete, promoted, failed, timeseries] = await Promise.all([
+    safe(orchestrator.listItems({ status: "PENDING", limit: 1 }).then((r) => r.total), 0),
+    safe(orchestrator.listItems({ status: "INCOMPLETE", limit: 1 }).then((r) => r.total), 0),
+    safe(orchestrator.listItems({ status: "PROMOTED", limit: 1 }).then((r) => r.total), 0),
+    safe(orchestrator.listItems({ status: "FAILED", limit: 1 }).then((r) => r.total), 0),
+    safe(orchestrator.itemsTimeseries(604800), []),
   ]);
 
   return (
@@ -38,43 +25,19 @@ export default async function Dashboard() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard title="Pending" value={pending} color="bg-zinc-500" />
-        <StatCard title="Incomplete" value={incomplete} color={STATUS_COLORS.INCOMPLETE} />
-        <StatCard title="Promoted" value={promoted} color={STATUS_COLORS.PROMOTED} />
-        <StatCard title="Failed" value={failed} color={STATUS_COLORS.FAILED} />
+        <StatCard title="Incomplete" value={incomplete} color="bg-amber-500" />
+        <StatCard title="Promoted" value={promoted} color="bg-emerald-500" />
+        <StatCard title="Failed" value={failed} color="bg-red-500" />
       </div>
 
-      {sysm && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Server</CardTitle>
-          </CardHeader>
-          <CardContent className="grid gap-2 text-sm sm:grid-cols-3">
-            <div>
-              Load 1m: <strong>{sysm.load_avg["1m"].toFixed(2)}</strong> ({sysm.cpu_count} CPUs)
-            </div>
-            <div>
-              Memory available: <strong>{Math.round(sysm.mem.available_kb / 1024)} MB</strong>
-            </div>
-            <div>
-              Disk free: <strong>{(sysm.disk_data.free / 1e9).toFixed(1)} GB</strong>
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      <div className="grid gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <TimeseriesChart data={timeseries} />
+        </div>
+        <div className="lg:col-span-1">
+          <EventFeed />
+        </div>
+      </div>
     </div>
-  );
-}
-
-function StatCard({ title, value, color }: { title: string; value: number; color: string }) {
-  return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between pb-2">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        <span className={`size-2 rounded-full ${color}`} />
-      </CardHeader>
-      <CardContent>
-        <div className="text-3xl font-bold">{value}</div>
-      </CardContent>
-    </Card>
   );
 }
