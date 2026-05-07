@@ -36,6 +36,9 @@ export interface Settings {
   retry_interval_hours: number;
   accept_as_is_after_attempts: number;
   hls_enabled: boolean;
+  merge_duration_reject_threshold_s: number;
+  merge_offset_safe_ms: number;
+  merge_offset_reject_ms: number;
 }
 
 export interface SystemMetrics {
