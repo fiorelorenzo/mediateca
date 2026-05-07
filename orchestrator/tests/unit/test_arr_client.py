@@ -1,5 +1,6 @@
 # orchestrator/tests/unit/test_arr_client.py
 import httpx
+import pytest
 import respx
 
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
@@ -23,12 +24,106 @@ async def test_sonarr_get_series_original_language() -> None:
 
 
 @respx.mock
+async def test_sonarr_get_series_original_language_404_returns_none() -> None:
+    respx.get("http://sonarr:8989/api/v3/series/901").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    result = await c.get_series_original_language(901)
+    assert result is None
+
+
+@respx.mock
+async def test_sonarr_get_series_original_language_4xx_returns_none() -> None:
+    respx.get("http://sonarr:8989/api/v3/series/999").mock(
+        return_value=httpx.Response(403, json={"message": "Forbidden"})
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    result = await c.get_series_original_language(999)
+    assert result is None
+
+
+@respx.mock
+async def test_sonarr_get_series_original_language_5xx_raises() -> None:
+    respx.get("http://sonarr:8989/api/v3/series/42").mock(
+        return_value=httpx.Response(500, json={"message": "Internal Server Error"})
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await c.get_series_original_language(42)
+    assert exc_info.value.response.status_code == 500
+
+
+@respx.mock
+async def test_radarr_get_movie_original_language_404_returns_none() -> None:
+    respx.get("http://radarr:7878/api/v3/movie/999").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = RadarrClient(base_url="http://radarr:7878", api_key="k")
+    result = await c.get_movie_original_language(999)
+    assert result is None
+
+
+@respx.mock
+async def test_radarr_get_movie_original_language_5xx_raises() -> None:
+    respx.get("http://radarr:7878/api/v3/movie/1").mock(
+        return_value=httpx.Response(503, json={"message": "Service Unavailable"})
+    )
+    c = RadarrClient(base_url="http://radarr:7878", api_key="k")
+    with pytest.raises(httpx.HTTPStatusError) as exc_info:
+        await c.get_movie_original_language(1)
+    assert exc_info.value.response.status_code == 503
+
+
+@respx.mock
+async def test_sonarr_get_episode_file_404_returns_none() -> None:
+    respx.get("http://sonarr:8989/api/v3/episodefile/55").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    result = await c.get_episode_file(55)
+    assert result is None
+
+
+@respx.mock
+async def test_radarr_get_movie_file_404_returns_none() -> None:
+    respx.get("http://radarr:7878/api/v3/moviefile/55").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = RadarrClient(base_url="http://radarr:7878", api_key="k")
+    result = await c.get_movie_file(55)
+    assert result is None
+
+
+@respx.mock
 async def test_radarr_unmonitor_movie_file() -> None:
     route = respx.delete("http://radarr:7878/api/v3/moviefile/7").mock(
         return_value=httpx.Response(200, json={"ok": True})
     )
     c = RadarrClient(base_url="http://radarr:7878", api_key="k")
     await c.delete_movie_file(7)
+    assert route.called
+
+
+@respx.mock
+async def test_radarr_unmonitor_movie_file_404_is_silent() -> None:
+    """404 on delete means file is already gone — should not raise."""
+    route = respx.delete("http://radarr:7878/api/v3/moviefile/99").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = RadarrClient(base_url="http://radarr:7878", api_key="k")
+    await c.delete_movie_file(99)  # must not raise
+    assert route.called
+
+
+@respx.mock
+async def test_sonarr_unmonitor_episode_file_404_is_silent() -> None:
+    """404 on delete means file is already gone — should not raise."""
+    route = respx.delete("http://sonarr:8989/api/v3/episodefile/99").mock(
+        return_value=httpx.Response(404, json={"message": "Not Found"})
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    await c.delete_episode_file(99)  # must not raise
     assert route.called
 
 
