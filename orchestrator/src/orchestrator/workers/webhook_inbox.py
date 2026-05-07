@@ -62,7 +62,7 @@ def _extract_radarr(payload: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _process_one(session: Session, row: WebhookInbox) -> None:
+async def _process_one(session: Session, row: WebhookInbox) -> None:
     extractor = _extract_sonarr if row.source == ItemSource.SONARR else _extract_radarr
     extracted = extractor(row.payload)
     if extracted is None:
@@ -132,17 +132,17 @@ def _process_one(session: Session, row: WebhookInbox) -> None:
         )
     )
 
-    import asyncio
-
     from orchestrator.core.pipeline import process_item  # local import to avoid cycle
 
-    asyncio.run(process_item(session, item, Path(probed_path)))
+    await process_item(session, item, Path(probed_path))
     row.processed_at = datetime.utcnow()
     session.add(row)
     session.commit()
 
 
-def process_inbox(session: Session, limit: int = 50) -> int:
+async def process_inbox_async(session: Session, limit: int = 50) -> int:
+    """Async drain — used by the scheduler tick (already running on the
+    event loop; calling asyncio.run() from there blows up)."""
     rows = session.exec(
         select(WebhookInbox)
         .where(WebhookInbox.processed_at.is_(None))  # type: ignore[union-attr]
@@ -150,7 +150,7 @@ def process_inbox(session: Session, limit: int = 50) -> int:
     ).all()
     for row in rows:
         try:
-            _process_one(session, row)
+            await _process_one(session, row)
         except Exception as exc:  # noqa: BLE001
             row.attempts += 1
             row.last_error = str(exc)
@@ -158,3 +158,11 @@ def process_inbox(session: Session, limit: int = 50) -> int:
             session.commit()
             log.exception("inbox.failed", inbox_id=row.id)
     return len(rows)
+
+
+def process_inbox(session: Session, limit: int = 50) -> int:
+    """Sync convenience wrapper — used by tests and ad-hoc invocations from
+    contexts without a running event loop."""
+    import asyncio
+
+    return asyncio.run(process_inbox_async(session, limit))

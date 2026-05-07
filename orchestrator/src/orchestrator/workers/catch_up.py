@@ -57,10 +57,10 @@ async def inbox_tick() -> None:
     Download/Rename event. The webhook handler only buffers (so the *arr
     timeout is small even when ffprobe is slow); this tick does the actual
     work."""
-    from orchestrator.workers.webhook_inbox import process_inbox
+    from orchestrator.workers.webhook_inbox import process_inbox_async
 
     with Session(get_engine()) as session:
-        n = process_inbox(session)
+        n = await process_inbox_async(session)
         if n:
             log.info("inbox.tick.processed", count=n)
 
