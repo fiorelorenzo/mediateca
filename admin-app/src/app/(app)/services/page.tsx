@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import { ExternalLink } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { orchestrator } from "@/lib/api/orchestrator";
+
+export const metadata: Metadata = { title: "Services" };
 
 export default async function ServicesPage() {
   const services = await orchestrator.services().catch(() => []);

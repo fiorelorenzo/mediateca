@@ -1,6 +1,9 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { CFEditor } from "./_components/cf-editor";
+
+export const metadata: Metadata = { title: "Custom Formats" };
 
 export default function CFPage() {
   return (

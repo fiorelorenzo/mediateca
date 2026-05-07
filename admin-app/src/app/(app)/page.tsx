@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { orchestrator } from "@/lib/api/orchestrator";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
+export const metadata: Metadata = { title: "Dashboard" };
 
 const STATUS_COLORS: Record<string, string> = {
   PROMOTED: "bg-emerald-500",

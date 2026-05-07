@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { RequestsList } from "./_components/requests-list";
+
+export const metadata: Metadata = { title: "Requests" };
 
 export default function RequestsPage() {
   return (

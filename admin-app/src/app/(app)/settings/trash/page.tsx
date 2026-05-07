@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { TrashSyncButton } from "./_components/trash-sync-button";
+
+export const metadata: Metadata = { title: "TRaSH Sync" };
 
 export default async function TrashPage() {
   return (

@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { ItemsTable } from "./_components/items-table";
+
+export const metadata: Metadata = { title: "Library" };
 
 export default function LibraryPage() {
   return (

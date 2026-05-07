@@ -1,5 +1,8 @@
+import type { Metadata } from "next";
 import { ContainersTable } from "./_components/containers-table";
 import { MetricsCards } from "./_components/metrics-cards";
+
+export const metadata: Metadata = { title: "Server" };
 
 export default function ServerPage() {
   return (

@@ -1,4 +1,7 @@
+import type { Metadata } from "next";
 import { QueueTable } from "./_components/queue-table";
+
+export const metadata: Metadata = { title: "Downloads" };
 
 export default function DownloadsPage() {
   return (
