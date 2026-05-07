@@ -9,7 +9,8 @@ export default function RequestsPage() {
       <div>
         <h1 className="text-3xl font-semibold tracking-tight">Requests</h1>
         <p className="text-muted-foreground">
-          Pending Seerr requests. Approving here is the same as in Seerr&apos;s UI.
+          Seerr requests with full media context. Approve / decline acts on Seerr
+          directly — same as the Seerr UI.
         </p>
       </div>
       <RequestsList />
