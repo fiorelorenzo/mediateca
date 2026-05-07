@@ -134,7 +134,12 @@ async def _process_one(session: Session, row: WebhookInbox) -> None:
 
     from orchestrator.core.pipeline import process_item  # local import to avoid cycle
 
-    await process_item(session, item, Path(probed_path))
+    # Pass the *canonical* path (extracted["path"], the imported file under
+    # /data/staging/...) to the pipeline, even when ffprobe had to read the
+    # /data/incoming/ hardlink because of CIFS quirks. The pipeline derives
+    # the library layout from this path (movies/<title>/<file>) and uses
+    # os.rename() which works on the staging name regardless of read errors.
+    await process_item(session, item, Path(primary_path))
     row.processed_at = datetime.utcnow()
     session.add(row)
     session.commit()
