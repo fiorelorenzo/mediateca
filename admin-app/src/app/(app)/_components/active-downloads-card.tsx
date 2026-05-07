@@ -13,16 +13,33 @@ function pct(total: number, left: number) {
   return Math.max(0, Math.min(100, (1 - left / total) * 100));
 }
 
+function effProgress(q: QueueRecord): number {
+  if (typeof q.liveProgress === "number") return q.liveProgress * 100;
+  return pct(q.size, q.sizeleft);
+}
+
+function formatSpeed(b: number | undefined): string {
+  if (!b || b <= 0) return "";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let v = b;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
 export function ActiveDownloadsCard() {
   const { data, isLoading } = useQuery({
     queryKey: ["arrs", "queue"],
     queryFn: () => arrs.unifiedQueue(),
-    refetchInterval: 5_000,
+    refetchInterval: 3_000,
   });
 
   const records = (data ?? [])
     .slice()
-    .sort((a, b) => pct(b.size, b.sizeleft) - pct(a.size, a.sizeleft))
+    .sort((a, b) => effProgress(b) - effProgress(a))
     .slice(0, 5);
 
   return (
@@ -54,8 +71,9 @@ export function ActiveDownloadsCard() {
         ) : (
           <div className="space-y-3">
             {records.map((q: QueueRecord) => {
-              const p = pct(q.size, q.sizeleft);
+              const p = effProgress(q);
               const poster = arrPoster(q.movie?.images ?? q.series?.images);
+              const speed = formatSpeed(q.liveDlSpeed);
               const title = q.movie?.title ?? q.series?.title ?? q.title;
               return (
                 <div key={`${q.kind}-${q.id}`} className="flex items-center gap-3">
@@ -88,9 +106,13 @@ export function ActiveDownloadsCard() {
                       </div>
                     </div>
                     <Progress value={p} className="mt-1 h-1.5" />
-                    <div className="text-muted-foreground mt-0.5 flex justify-between font-mono text-[10px] tabular-nums">
+                    <div className="text-muted-foreground mt-0.5 flex justify-between gap-2 font-mono text-[10px] tabular-nums">
                       <span>{p.toFixed(1)}%</span>
-                      <span>{q.indexer ?? q.protocol ?? ""}</span>
+                      {speed ? (
+                        <span className="text-blue-700 dark:text-blue-400">↓ {speed}</span>
+                      ) : (
+                        <span>{q.indexer ?? q.protocol ?? ""}</span>
+                      )}
                     </div>
                   </div>
                 </div>

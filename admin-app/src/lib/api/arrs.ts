@@ -88,6 +88,7 @@ export interface QueueRecord {
   estimatedCompletionTime?: string; // ISO
   protocol?: "torrent" | "usenet";
   downloadClient?: string;
+  downloadId?: string; // torrent hash (uppercase) for torrent downloads
   indexer?: string;
   errorMessage?: string;
   outputPath?: string;
@@ -98,6 +99,30 @@ export interface QueueRecord {
   series?: ArrSeries;
   // attached client-side:
   kind?: "tv" | "movie";
+  // live qBit overlay (filled by unifiedQueue when the hash matches):
+  liveProgress?: number; // 0..1
+  liveDlSpeed?: number; // bytes/s
+  liveUpSpeed?: number; // bytes/s
+  liveSeeds?: number;
+  liveLeechers?: number;
+  liveState?: string;
+  liveSizeLeft?: number;
+}
+
+export interface QbitTorrent {
+  hash: string;
+  name: string;
+  state: string;
+  progress: number; // 0..1
+  dlspeed: number; // bytes/s
+  upspeed: number;
+  num_seeds: number;
+  num_leechs: number;
+  size: number;
+  amount_left: number;
+  eta: number; // seconds; 8640000 = unknown
+  category: string;
+  save_path: string;
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -120,18 +145,40 @@ export interface SonarrEpisode {
 }
 
 export const arrs = {
+  // Fetches Sonarr + Radarr queues *and* the live qBit torrent list, then
+  // overlays qBit's real-time progress on each queue record by matching
+  // downloadId (uppercase) → hash (lowercase). Sonarr/Radarr only refresh
+  // their queue from qBit every ~60s, so without this overlay the admin app
+  // looks frozen even though the torrent is downloading at MB/s.
   unifiedQueue: async (): Promise<QueueRecord[]> => {
-    const [sonarr, radarr] = await Promise.all([
+    const [sonarr, radarr, qbit] = await Promise.all([
       fetchJson<{ records: QueueRecord[] }>(
         "/api/sonarr/queue?pageSize=200&includeSeries=true&includeEpisode=true",
       ),
       fetchJson<{ records: QueueRecord[] }>(
         "/api/radarr/queue?pageSize=200&includeMovie=true",
       ),
+      fetchJson<QbitTorrent[]>("/api/qbit/torrents").catch(() => [] as QbitTorrent[]),
     ]);
+    const byHash = new Map<string, QbitTorrent>();
+    for (const t of qbit) byHash.set(t.hash.toLowerCase(), t);
+    const overlay = (r: QueueRecord): QueueRecord => {
+      const t = r.downloadId ? byHash.get(r.downloadId.toLowerCase()) : undefined;
+      if (!t) return r;
+      return {
+        ...r,
+        liveProgress: t.progress,
+        liveDlSpeed: t.dlspeed,
+        liveUpSpeed: t.upspeed,
+        liveSeeds: t.num_seeds,
+        liveLeechers: t.num_leechs,
+        liveState: t.state,
+        liveSizeLeft: t.amount_left,
+      };
+    };
     return [
-      ...sonarr.records.map((r) => ({ ...r, kind: "tv" as const })),
-      ...radarr.records.map((r) => ({ ...r, kind: "movie" as const })),
+      ...sonarr.records.map((r) => overlay({ ...r, kind: "tv" as const })),
+      ...radarr.records.map((r) => overlay({ ...r, kind: "movie" as const })),
     ];
   },
 

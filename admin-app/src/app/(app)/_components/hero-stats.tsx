@@ -89,7 +89,9 @@ export function HeroStats() {
     );
     const queueCount = queue.data?.length ?? 0;
     const queueDownloading = (queue.data ?? []).filter(
-      (q) => (q.status ?? "").toLowerCase() === "downloading",
+      (q) =>
+        q.liveState === "downloading" ||
+        (q.liveState == null && (q.status ?? "").toLowerCase() === "downloading"),
     ).length;
     const pendingCount = (pending.data?.pageInfo as { results?: number } | undefined)?.results ??
       pending.data?.results.length ??

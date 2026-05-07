@@ -44,6 +44,38 @@ function pct(total: number, left: number) {
   return Math.max(0, Math.min(100, (1 - left / total) * 100));
 }
 
+function effectiveProgress(q: QueueRecord): number {
+  // Prefer live qBit progress when available — Sonarr/Radarr poll qBit every
+  // ~60s so their `sizeleft` is up to a minute stale.
+  if (typeof q.liveProgress === "number") return q.liveProgress * 100;
+  return pct(q.size, q.sizeleft);
+}
+
+function effectiveSizeLeft(q: QueueRecord): number {
+  return typeof q.liveSizeLeft === "number" ? q.liveSizeLeft : q.sizeleft;
+}
+
+function formatSpeed(b: number | undefined): string {
+  if (!b || b <= 0) return "—";
+  const units = ["B/s", "KB/s", "MB/s", "GB/s"];
+  let v = b;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function formatEtaSeconds(eta: number | undefined): string {
+  if (!eta || eta <= 0 || eta >= 8640000) return "—";
+  if (eta < 60) return `${eta}s`;
+  if (eta < 3600) return `${Math.floor(eta / 60)}m`;
+  const h = Math.floor(eta / 3600);
+  const m = Math.floor((eta % 3600) / 60);
+  return `${h}h ${m}m`;
+}
+
 function StatusPill({ q }: { q: QueueRecord }) {
   const trackedErr = q.trackedDownloadStatus === "error";
   const trackedWarn = q.trackedDownloadStatus === "warning";
@@ -72,12 +104,15 @@ function StatusPill({ q }: { q: QueueRecord }) {
 function SummaryCards({ records }: { records: QueueRecord[] }) {
   const totals = useMemo(() => {
     const totalCount = records.length;
-    const dl = records.filter((r) => r.status?.toLowerCase() === "downloading").length;
+    const dl = records.filter(
+      (r) => r.liveState === "downloading" || r.status?.toLowerCase() === "downloading",
+    ).length;
     const sumSize = records.reduce((a, r) => a + (r.size ?? 0), 0);
-    const sumLeft = records.reduce((a, r) => a + (r.sizeleft ?? 0), 0);
+    const sumLeft = records.reduce((a, r) => a + effectiveSizeLeft(r), 0);
     const sumDone = sumSize - sumLeft;
     const overallPct = sumSize > 0 ? (sumDone / sumSize) * 100 : 0;
-    return { totalCount, dl, sumSize, sumLeft, sumDone, overallPct };
+    const totalSpeed = records.reduce((a, r) => a + (r.liveDlSpeed ?? 0), 0);
+    return { totalCount, dl, sumSize, sumLeft, sumDone, overallPct, totalSpeed };
   }, [records]);
 
   return (
@@ -110,8 +145,15 @@ function SummaryCards({ records }: { records: QueueRecord[] }) {
       <Card>
         <CardContent className="space-y-1.5 p-4">
           <div className="text-muted-foreground text-xs uppercase tracking-wide">Overall progress</div>
-          <div className="text-3xl font-bold tabular-nums leading-none">
-            {totals.overallPct.toFixed(0)}%
+          <div className="flex items-baseline justify-between">
+            <div className="text-3xl font-bold tabular-nums leading-none">
+              {totals.overallPct.toFixed(0)}%
+            </div>
+            {totals.totalSpeed > 0 && (
+              <div className="text-blue-700 dark:text-blue-400 text-xs font-mono tabular-nums">
+                ↓ {formatSpeed(totals.totalSpeed)}
+              </div>
+            )}
           </div>
           <Progress value={totals.overallPct} className="h-1.5" />
         </CardContent>
@@ -125,7 +167,7 @@ export function QueueTable() {
   const { data, isLoading } = useQuery({
     queryKey: ["arrs", "queue"],
     queryFn: () => arrs.unifiedQueue(),
-    refetchInterval: 5_000,
+    refetchInterval: 3_000,
   });
 
   const removeItem = useMutation({
@@ -173,7 +215,7 @@ export function QueueTable() {
           </TableHeader>
           <TableBody>
             {data.map((q) => {
-              const p = pct(q.size, q.sizeleft);
+              const p = effectiveProgress(q);
               const poster = arrPoster(q.movie?.images ?? q.series?.images);
               const title = q.movie?.title ?? q.series?.title ?? q.title;
               const year = q.movie?.year ?? q.series?.year;
@@ -237,15 +279,24 @@ export function QueueTable() {
                   <TableCell>
                     <div className="space-y-1">
                       <Progress value={p} className="h-1.5" />
-                      <div className="text-muted-foreground flex justify-between font-mono text-[11px] tabular-nums">
-                        <span>{p.toFixed(1)}%</span>
+                      <div className="text-muted-foreground flex justify-between gap-2 font-mono text-[11px] tabular-nums">
+                        <span className="text-foreground">{p.toFixed(1)}%</span>
                         <span>
-                          {formatBytes(q.size - q.sizeleft)} / {formatBytes(q.size)}
+                          {formatBytes(q.size - effectiveSizeLeft(q))} / {formatBytes(q.size)}
                         </span>
+                        {(q.liveDlSpeed ?? 0) > 0 && (
+                          <span className="text-blue-700 dark:text-blue-400">
+                            ↓ {formatSpeed(q.liveDlSpeed)}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{formatTimeleft(q.timeleft)}</TableCell>
+                  <TableCell className="font-mono text-xs">
+                    {q.liveDlSpeed && q.liveSizeLeft && q.liveDlSpeed > 0
+                      ? formatEtaSeconds(Math.floor((q.liveSizeLeft ?? 0) / q.liveDlSpeed))
+                      : formatTimeleft(q.timeleft)}
+                  </TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-0.5">
                       <TooltipProvider delayDuration={400}>
