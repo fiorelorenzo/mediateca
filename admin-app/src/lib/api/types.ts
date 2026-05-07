@@ -65,6 +65,7 @@ export interface ServiceEntry {
 export interface HistoryEvent {
   event: string;
   created_at: string;
+  detail?: Record<string, unknown> | null;
 }
 
 export interface TimeseriesPoint {

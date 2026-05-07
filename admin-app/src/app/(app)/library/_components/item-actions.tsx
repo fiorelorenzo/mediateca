@@ -1,6 +1,7 @@
 "use client";
 import { useTransition, useState } from "react";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,8 +28,13 @@ export function ItemActions({ item }: { item: Item }) {
         variant="default"
         onClick={() =>
           start(async () => {
-            await api.searchNow(item.id);
-            refresh();
+            try {
+              await api.searchNow(item.id);
+              toast.success("Search triggered successfully.");
+              refresh();
+            } catch {
+              toast.error("Failed to trigger search.");
+            }
           })
         }
       >
@@ -39,8 +45,13 @@ export function ItemActions({ item }: { item: Item }) {
         variant="outline"
         onClick={() =>
           start(async () => {
-            await api.acceptAsIs(item.id);
-            refresh();
+            try {
+              await api.acceptAsIs(item.id);
+              toast.success("Item accepted as-is.");
+              refresh();
+            } catch {
+              toast.error("Failed to accept item as-is.");
+            }
           })
         }
       >
@@ -88,9 +99,14 @@ function OverrideDialog({ item, onSaved }: { item: Item; onSaved: () => void }) 
                   .split(",")
                   .map((s) => s.trim())
                   .filter(Boolean);
-                await api.overridePolicy(item.id, list.length === 0 ? null : list);
-                setOpen(false);
-                onSaved();
+                try {
+                  await api.overridePolicy(item.id, list.length === 0 ? null : list);
+                  toast.success("Policy override saved.");
+                  setOpen(false);
+                  onSaved();
+                } catch {
+                  toast.error("Failed to save policy override.");
+                }
               })
             }
             disabled={pending}
