@@ -10,7 +10,7 @@ import { CardsSkeleton } from "@/components/skeletons/cards-skeleton";
 import { EmptyState } from "@/components/empty-state";
 import { seerr } from "@/lib/api/seerr";
 
-type Filter = "pending" | "approved" | "declined" | "all";
+type Filter = "pending" | "approved" | "processing" | "available" | "unavailable" | "all";
 
 const STATUS = { 1: "pending", 2: "approved", 3: "declined" } as const;
 
@@ -41,7 +41,7 @@ export function RequestsList() {
     onError: (e) => toast.error(`Decline failed: ${(e as Error).message}`),
   });
 
-  const filters: Filter[] = ["pending", "approved", "declined", "all"];
+  const filters: Filter[] = ["pending", "approved", "processing", "available", "unavailable", "all"];
 
   return (
     <div className="space-y-4">

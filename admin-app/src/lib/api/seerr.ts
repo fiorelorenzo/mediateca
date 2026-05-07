@@ -16,7 +16,7 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export const seerr = {
   pendingRequests: () =>
     call<{ pageInfo: unknown; results: SeerrRequest[] }>("/request?filter=pending&take=50"),
-  allRequests: (filter: "approved" | "declined" | "all") =>
+  allRequests: (filter: "approved" | "processing" | "available" | "unavailable" | "all") =>
     call<{ pageInfo: unknown; results: SeerrRequest[] }>(
       filter === "all" ? "/request?take=50" : `/request?filter=${filter}&take=50`,
     ),
