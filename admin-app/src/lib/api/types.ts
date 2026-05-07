@@ -41,11 +41,19 @@ export interface Settings {
   merge_offset_reject_ms: number;
 }
 
+export interface LoadHistoryPoint {
+  t: number; // unix ms
+  l1: number;
+  l5: number;
+  l15: number;
+}
+
 export interface SystemMetrics {
   cpu_count: number;
   load_avg: { "1m": number; "5m": number; "15m": number };
   mem: { total_kb: number; available_kb: number };
   disk_data: { total: number; used: number; free: number };
+  load_history: LoadHistoryPoint[];
 }
 
 export interface ContainerStat {

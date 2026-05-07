@@ -36,10 +36,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from orchestrator.workers.catch_up import start_scheduler
 
     scheduler = start_scheduler()
+    metrics.start_load_sampler()
     try:
         yield
     finally:
         scheduler.shutdown(wait=False)
+        metrics.stop_load_sampler()
 
 
 app = FastAPI(title="Mediateca Orchestrator", lifespan=lifespan)

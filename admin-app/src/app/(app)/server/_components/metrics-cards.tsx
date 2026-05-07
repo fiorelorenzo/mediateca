@@ -1,7 +1,6 @@
 // admin-app/src/app/(app)/server/_components/metrics-cards.tsx
 "use client";
 
-import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Area,
@@ -86,12 +85,7 @@ function Gauge({ percent, label, primary, secondary }: GaugeProps) {
   );
 }
 
-interface LoadHistoryPoint {
-  t: number;       // unix ms
-  l1: number;
-  l5: number;
-  l15: number;
-}
+import type { LoadHistoryPoint } from "@/lib/api/types";
 
 function LoadHistoryChart({
   history,
@@ -184,20 +178,10 @@ export function MetricsCards() {
     queryFn: () => api.systemMetrics(),
     refetchInterval: 5_000,
   });
-  const historyRef = useRef<LoadHistoryPoint[]>([]);
-  const [history, setHistory] = useState<LoadHistoryPoint[]>([]);
 
-  useEffect(() => {
-    if (!data) return;
-    const next: LoadHistoryPoint = {
-      t: Date.now(),
-      l1: data.load_avg["1m"],
-      l5: data.load_avg["5m"],
-      l15: data.load_avg["15m"],
-    };
-    historyRef.current = [...historyRef.current, next].slice(-72); // 72×5s = 6 min
-    setHistory([...historyRef.current]);
-  }, [data]);
+  // Server-side ring buffer is the source of truth (1h at 5s ticks).
+  // Available immediately on first response, no need to accumulate.
+  const history = data?.load_history ?? [];
 
   if (isLoading || !data) {
     return (

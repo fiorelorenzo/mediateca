@@ -4,6 +4,7 @@ import os
 import shutil
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import APIRouter
@@ -12,6 +13,15 @@ from orchestrator.api.auth import require_admin_token
 from orchestrator.core.docker_client import client as docker_client
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"], dependencies=[require_admin_token])
+
+# Server-side load-avg ring buffer. The sampler thread (started on app
+# lifespan) appends one entry every ~5 seconds. The history is returned
+# inline with /api/metrics/system so the client doesn't have to wait for
+# samples to accumulate after a page load.
+_HISTORY_INTERVAL_S = 5
+_HISTORY_MAX_POINTS = 720  # 1 hour at 5 s
+_load_history: deque[dict[str, float]] = deque(maxlen=_HISTORY_MAX_POINTS)
+_load_history_lock = threading.Lock()
 
 
 def _read_loadavg() -> tuple[float, float, float]:
@@ -29,12 +39,51 @@ def _read_meminfo() -> dict[str, int]:
         return out
 
 
+def _sampler_loop(stop: threading.Event) -> None:
+    while not stop.wait(_HISTORY_INTERVAL_S):
+        try:
+            l1, l5, l15 = _read_loadavg()
+        except Exception:  # noqa: BLE001
+            continue
+        with _load_history_lock:
+            _load_history.append(
+                {"t": time.time() * 1000, "l1": l1, "l5": l5, "l15": l15}
+            )
+
+
+_sampler_stop = threading.Event()
+_sampler_thread: threading.Thread | None = None
+
+
+def start_load_sampler() -> None:
+    """Called from the app lifespan. Idempotent."""
+    global _sampler_thread  # noqa: PLW0603
+    if _sampler_thread and _sampler_thread.is_alive():
+        return
+    # Seed the buffer with one immediate sample so the chart has something to
+    # draw the moment a client first calls /api/metrics/system.
+    try:
+        l1, l5, l15 = _read_loadavg()
+        _load_history.append({"t": time.time() * 1000, "l1": l1, "l5": l5, "l15": l15})
+    except Exception:  # noqa: BLE001
+        pass
+    _sampler_stop.clear()
+    _sampler_thread = threading.Thread(target=_sampler_loop, args=(_sampler_stop,), daemon=True)
+    _sampler_thread.start()
+
+
+def stop_load_sampler() -> None:
+    _sampler_stop.set()
+
+
 @router.get("/system")
 def system() -> dict[str, object]:
     load = _read_loadavg()
     mem = _read_meminfo()
     disk = shutil.disk_usage("/data")
     cpu_count = os.cpu_count() or 1
+    with _load_history_lock:
+        history = list(_load_history)
     return {
         "cpu_count": cpu_count,
         "load_avg": {"1m": load[0], "5m": load[1], "15m": load[2]},
@@ -43,6 +92,7 @@ def system() -> dict[str, object]:
             "available_kb": mem.get("MemAvailable", 0),
         },
         "disk_data": {"total": disk.total, "used": disk.used, "free": disk.free},
+        "load_history": history,
     }
 
 
