@@ -1,6 +1,6 @@
 // admin-app/src/app/(app)/logs/_components/log-row.tsx
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Check, ChevronRight, Copy } from "lucide-react";
 import {
   Tooltip,
@@ -48,6 +48,28 @@ export function LogRow({ line, index, style, expanded, onToggleExpand, measureRe
   const [copied, setCopied] = useState(false);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Detect whether the message overflows (would need expansion to be fully
+  // visible). When expanded, retain the previous truthy value so the chevron
+  // stays visible to allow collapse.
+  const messageRef = useRef<HTMLSpanElement | null>(null);
+  const [isOverflowing, setIsOverflowing] = useState(false);
+  // Sticky: once overflowing in collapsed state, keep showing chevron even
+  // when expanded (because collapsing would re-truncate).
+  const [sticky, setSticky] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = messageRef.current;
+    if (!el) return;
+    if (expanded) {
+      // While expanded, the element wraps; measurement is meaningless. Do
+      // nothing here — `sticky` carries the prior verdict.
+      return;
+    }
+    const overflowing = el.scrollWidth > el.clientWidth + 1;
+    setIsOverflowing(overflowing);
+    if (overflowing) setSticky(true);
+  }, [line.line, expanded]);
+
   useEffect(() => {
     return () => {
       if (copyTimer.current) clearTimeout(copyTimer.current);
@@ -68,34 +90,45 @@ export function LogRow({ line, index, style, expanded, onToggleExpand, measureRe
       });
   }
 
+  const expandable = isOverflowing || sticky;
+
   return (
     <div style={style}>
       <div
         ref={measureRef}
         data-index={index}
-        onClick={onToggleExpand}
+        onClick={() => {
+          if (expandable) onToggleExpand();
+        }}
         onKeyDown={(e) => {
+          if (!expandable) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             onToggleExpand();
           }
         }}
-        role="button"
-        tabIndex={0}
-        aria-expanded={expanded}
+        role={expandable ? "button" : undefined}
+        tabIndex={expandable ? 0 : -1}
+        aria-expanded={expandable ? expanded : undefined}
         className={
-          "group hover:bg-accent/40 relative grid cursor-pointer grid-cols-[18px_6px_72px_140px_56px_1fr_28px] items-start gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5 select-text " +
+          "group hover:bg-accent/40 relative grid grid-cols-[18px_6px_72px_140px_56px_1fr_28px] items-start gap-2 border-b border-transparent px-2 py-1 font-mono text-xs leading-5 select-text " +
+          (expandable ? "cursor-pointer " : "") +
           (expanded ? "bg-accent/30" : "")
         }
       >
-        {/* Expand/collapse chevron */}
-        <ChevronRight
-          aria-hidden
-          className={
-            "text-muted-foreground/60 group-hover:text-muted-foreground mt-0.5 size-3.5 shrink-0 transition-transform duration-150 " +
-            (expanded ? "rotate-90" : "")
-          }
-        />
+        {/* Expand/collapse chevron — only when the row would actually need expanding */}
+        {expandable ? (
+          <ChevronRight
+            aria-hidden
+            className={
+              "text-muted-foreground/60 group-hover:text-muted-foreground mt-0.5 size-3.5 shrink-0 transition-transform duration-150 " +
+              (expanded ? "rotate-90" : "")
+            }
+          />
+        ) : (
+          <span aria-hidden />
+        )}
+
         {/* Color stripe per container */}
         <span aria-hidden className={`block h-full w-[3px] rounded-sm ${cs.dot} opacity-70`} />
 
@@ -132,6 +165,7 @@ export function LogRow({ line, index, style, expanded, onToggleExpand, measureRe
 
         {/* Message */}
         <span
+          ref={messageRef}
           className={
             (expanded
               ? "block whitespace-pre-wrap break-words"
