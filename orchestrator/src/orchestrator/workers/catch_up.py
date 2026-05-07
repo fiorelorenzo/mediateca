@@ -52,6 +52,19 @@ async def tick() -> None:
                 session.commit()
 
 
+async def inbox_tick() -> None:
+    """Drain the webhook_inbox table — one Item per buffered Sonarr/Radarr
+    Download/Rename event. The webhook handler only buffers (so the *arr
+    timeout is small even when ffprobe is slow); this tick does the actual
+    work."""
+    from orchestrator.workers.webhook_inbox import process_inbox
+
+    with Session(get_engine()) as session:
+        n = process_inbox(session)
+        if n:
+            log.info("inbox.tick.processed", count=n)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     from orchestrator.workers.job_runner import run_encode_jobs
 
@@ -59,6 +72,9 @@ def start_scheduler() -> AsyncIOScheduler:
     scheduler.add_job(tick, IntervalTrigger(minutes=15), id="catch_up_tick", replace_existing=True)
     scheduler.add_job(
         run_encode_jobs, IntervalTrigger(minutes=1), id="encode_jobs_tick", replace_existing=True
+    )
+    scheduler.add_job(
+        inbox_tick, IntervalTrigger(seconds=15), id="inbox_tick", replace_existing=True
     )
     scheduler.start()
     return scheduler
