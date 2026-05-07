@@ -8,7 +8,7 @@ This document captures the *why* behind the encoder. The *how to use it*
 lives in [`hls-encoder/README.md`](hls-encoder/README.md); the *how to
 deploy* lives in the top-level [`README.md`](README.md).
 
-## Decisions taken (2026-05-02 / 2026-05-04)
+## Decisions taken
 
 | Question | Decision |
 | --- | --- |
@@ -19,12 +19,50 @@ deploy* lives in the top-level [`README.md`](README.md).
 | CDN auth | **Public** — anyone with the URL can fetch segments. Standard HLS approach; fine for legally-obtained or public-domain personal libraries. |
 | Bundle visibility | The HLS directory is named `.{stem}.hls` (leading dot) so Jellyfin's library scanner skips it. Caddy still serves it under the public CDN URL — only the encoded `.strm` is what Jellyfin matches as a movie/episode. |
 
+## Pipeline overview
+
+```
+Sonarr/Radarr OnImport webhook
+        │
+        ▼
+  Orchestrator (FastAPI)
+    ├── ffprobe audio tracks
+    ├── policy engine (required languages?)
+    │     └── if missing → mkvmerge merge + safety pre-checks
+    ├── promote staging/ → media/
+    └── POST /jobs → hls-encoder   (only if HLS profile active)
+                          │
+                          ▼
+                    FFmpeg ladder
+                    (3 video × N audio)
+                          │
+                    write to /cache/<uuid>/
+                          │
+                    atomic move to
+                    media/<title>/.<stem>.hls/
+                          │
+                    write .strm → Jellyfin
+```
+
+The orchestrator is the **front of the pipeline** — it receives the
+webhook, runs the policy engine, promotes the file, and (when the `hls`
+compose profile is active and the `hls_enabled` runtime toggle is `true`)
+calls `POST /jobs` on the encoder service. The encoder is a passive
+consumer: it does not watch the filesystem or talk to Sonarr/Radarr
+directly.
+
+HLS mode is **opt-in**: the `hls-encoder` container requires the `hls`
+compose profile (`COMPOSE_PROFILES=hls`) to start. The runtime toggle
+(`hls_enabled` in orchestrator settings, controllable from the admin app
+Settings page or via `PUT /api/settings`) lets you enable or disable HLS
+dispatch without restarting the stack.
+
 ## Storage layout
 
 Single tree, single root. Encoder works in-place:
 
 ```
-/mnt/storagebox/data/media/
+/data/media/
   tv/Show Name (Year)/
     S01E01 - Title.strm                   ← Jellyfin reads this; URL to master.m3u8
     .S01E01 - Title.hls/                  ← hidden from Jellyfin scanner
@@ -74,34 +112,34 @@ Saves ~40-60% of CPU per job on compatible sources.
 
 ### `hls-encoder` container
 
-Custom Python service, ~600 LOC. See `hls-encoder/encoder.py`.
+Custom Python service (FastAPI). See `hls-encoder/encoder.py`.
 
-**Responsibilities**:
-- Watch `/data/media/{tv,movies}` via watchdog `PollingObserver` (CIFS
-  doesn't deliver inotify events, polling is the only reliable option).
-- For each new file: ffprobe → build dynamic FFmpeg single-pass command
-  (3 video variants + N audio renditions, or 2 + N if copy_1080p mode) →
-  encode to `/cache/<uuid>/` → atomic move to
-  `<source_dir>/.<basename>.hls/` → write `.strm` → delete source →
-  PUT `monitored=false` on Sonarr/Radarr API.
-- SQLite state DB (`/config/state.db`, WAL mode) for dedup, retry, and
-  observability. `claim_job()` is atomic against multi-worker races;
-  stale `in_progress` rows from a crashed previous run are reset to
-  `failed` on startup so they get retried.
+**Responsibilities** (what it does):
+- Accept `POST /jobs` requests from the orchestrator: receive source path,
+  run ffprobe, build dynamic FFmpeg command (3 video variants + N audio
+  renditions, or 2 + N if copy_1080p mode), encode to `/cache/<uuid>/`,
+  atomically move to `<source_dir>/.<basename>.hls/`, write `.strm`,
+  delete source.
+- Expose `GET /jobs/{id}` for status polling.
 - SIGTERM handler that terminates in-flight ffmpeg subprocesses and
   drains workers; container restart is clean, no orphan ffmpeg.
-- Periodic `status.json` snapshot at `/config/status.json` for the
-  dashboard / Homarr widget.
-- Hourly DB retention sweep (drops `done` rows older than
-  `DB_RETENTION_DAYS`).
+
+**What it does NOT do** (previously done, now removed):
+- Watch the filesystem for new imports — the orchestrator handles that
+  via Sonarr/Radarr webhooks.
+- Maintain a SQLite state DB for dedup or retry — job state is owned by
+  the orchestrator.
+- Call Sonarr/Radarr to set `monitored=false` — the orchestrator does
+  this as part of the promotion step.
 
 **Image base**: `python:3.12-slim` + `ffmpeg` + `tini`.
 
+**Compose profile**: `hls` — the container only starts when
+`COMPOSE_PROFILES=hls` is set (or `--profile hls` is passed).
+
 **Volumes**:
-- `/mnt/storagebox/data:/data` (RW)
-- `/var/lib/hls-cache:/cache` (local NVMe RAID 1, RW — encoding scratch)
-- `./config/hls-encoder:/config` (RW — state.db, status.json, dashboard
-  index.html)
+- `/data` — media tree (same as orchestrator's `MEDIA_DIR`)
+- `/cache` — local NVMe scratch for in-progress encodes
 
 **Env reference**: see `hls-encoder/README.md`.
 
@@ -114,7 +152,7 @@ config had `cpus: 4.0` and saturated at ~50% of host throughput — see
 ### Caddy CDN
 
 `hls.<DOMAIN>` — read-only file_server over `/srv/hls`, mounted from
-`/mnt/storagebox/data/media`:
+`/data/media`:
 
 ```caddy
 hls.{$DOMAIN} {
@@ -136,10 +174,10 @@ hls.{$DOMAIN} {
 - Quality profiles set with `upgradeAllowed = false` (one-shot download
   policy). Without this, Sonarr would re-download a "better" release
   after the encoder deletes the source — the new download lands as a
-  fresh `.mkv`, the encoder picks it up again, infinite loop.
-- The encoder calls `PUT /api/v3/episode/monitor` (Sonarr) or
+  fresh `.mkv`, the orchestrator picks it up again, infinite loop.
+- The **orchestrator** calls `PUT /api/v3/episode/monitor` (Sonarr) or
   `PUT /api/v3/movie/{id}` (Radarr) with `monitored=false` after a
-  successful encode. Keeps the UI clean; without it, the show/movie
+  successful promotion. Keeps the UI clean; without it, the show/movie
   appears as "missing" in the *arr UI even though Jellyfin is serving it.
 
 ### Bazarr
@@ -251,12 +289,14 @@ effective content max — about 150 movies @ 4 GB each, or ~500 episodes
 
 If the HLS pipeline misbehaves and you want plain `.mkv` playback again:
 
-1. Remove `hls-encoder` service from `docker-compose.yml`.
-2. Re-enable upgrades on Sonarr/Radarr profiles.
-3. Drop the `hls.<DOMAIN>` and `encoder-status.<DOMAIN>` blocks from
-   `caddy/Caddyfile`.
-4. New downloads land in `/data/media/` as plain `.mkv`, Jellyfin
+1. Disable HLS dispatch via admin app Settings (or `PUT /api/settings`
+   with `{"hls_enabled": false}`).
+2. Stop the encoder: `docker compose --profile hls down hls-encoder`.
+3. Re-enable upgrades on Sonarr/Radarr profiles.
+4. Drop the `hls.<DOMAIN>` and `encoder-status.<DOMAIN>` blocks from
+   `caddy/Caddyfile` if you no longer want those routes active.
+5. New downloads land in `/data/media/` as plain `.mkv`, Jellyfin
    library scan picks them up directly. Already-encoded content keeps
    working from its `.strm` files.
-5. To recover plain `.mkv` for already-encoded content: re-import via
+6. To recover plain `.mkv` for already-encoded content: re-import via
    Sonarr/Radarr (Search → re-download).

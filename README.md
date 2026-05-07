@@ -11,7 +11,7 @@ connection.
 | Catalog browse + request flow (the page family/friends use) | [Seerr](https://github.com/seerr-team/seerr) |
 | Streaming UI + library scanner | [Jellyfin](https://jellyfin.org) |
 | Ingestion orchestrator (staging → media, webhook API, HLS dispatch) | this repo's `orchestrator/` (FastAPI / SQLite) |
-| Admin app (planned — Plan B) | Next.js app; `admin.<DOMAIN>` reverse-proxies the container once deployed |
+| Admin UI (stack management, logs, settings) | this repo's `admin-app/` (Next.js); `admin.<DOMAIN>` |
 | TV / movie automation | [Sonarr](https://sonarr.tv) / [Radarr](https://radarr.video) |
 | Indexer aggregation | [Prowlarr](https://prowlarr.com) |
 | Subtitles | [Bazarr](https://bazarr.media) |
@@ -65,7 +65,7 @@ your `DOMAIN`:
 | **`streaming.<DOMAIN>`** | Seerr | **Public entry point**: catalog + request UI. Auth via Jellyfin SSO only (local login disabled). |
 | `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes library from `media/` (direct files or `.strm` CDN links). |
 | `orchestrator.<DOMAIN>` | Orchestrator | REST API (ingestion pipeline, settings, events). Requires `Authorization: Bearer $ADMIN_API_TOKEN`. |
-| `admin.<DOMAIN>` | Admin app (planned) | Next.js admin UI — **not yet deployed**. Subdomain reverse-proxies the container once Plan B ships; DNS record + Caddy route exist as stubs. |
+| `admin.<DOMAIN>` | Admin app | Next.js operational UI — single-admin auth (bcrypt password). |
 | `sonarr.<DOMAIN>` | Sonarr | TV automation |
 | `radarr.<DOMAIN>` | Radarr | Movie automation |
 | `prowlarr.<DOMAIN>` | Prowlarr | Indexer manager |
@@ -112,17 +112,18 @@ docker compose up -d
 
 | Page | Purpose |
 | --- | --- |
-| **Dashboard** | Overview counts per status, host metrics summary |
-| **Library** | Search/filter ingested items; accept-as-is, search-now, per-item audio language overrides |
-| **Requests** | Seerr pending requests (approve/decline) |
-| **Downloads** | Unified Sonarr + Radarr queue (download progress, ETA) |
-| **Server** | Host CPU / RAM / disk usage; container statuses |
-| **Services** | Deep-links to native service UIs (Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, qBit) |
-| **Settings** | Runtime config (audio languages, HLS toggle, retry intervals) |
-| **Settings → Custom Formats** | Stack-managed custom formats (CRUD) |
-| **Settings → TRaSH** | Read-only TRaSH custom format reference + sync trigger |
-| **Logs** | Real-time, stack-wide log viewer with filter / pause / autoscroll / save. |
-| **Command palette** | Press ⌘K (or Ctrl-K) to open quick navigation + actions. |
+| **Dashboard** | Status counters per state, 7-day stacked area chart, recent items feed |
+| **Library** | Search/filter ingested items with skeleton + Motion list animations; SSE-driven highlight pulse on new imports; per-item audio language overrides, accept-as-is, search-now actions |
+| **Library detail** | Full item timeline with state icons + action toasts |
+| **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
+| **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
+| **Requests** | Seerr pending requests with filter chips (pending / approved / processing / available / unavailable / all) + approve / decline actions |
+| **Downloads** | Unified Sonarr + Radarr queue with progress bars |
+| **Settings** | Runtime config: HLS toggle, required audio languages, retry interval, merge safety thresholds (duration parity, offset safe, offset reject) |
+| **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
+| **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
+| **Logs** | Real-time SSE multiplex of Docker container logs: virtualized rows, ANSI color, filter regex, pause with drop counter, autoscroll, save-to-file, expand/collapse on long lines, per-line copy button. The orchestrator's own container is excluded to prevent a feedback loop. |
+| **Command palette** | Press ⌘K / Ctrl-K: quick navigation + actions (Recyclarr sync, theme toggle, …) |
 
 ### Screenshots
 
@@ -194,6 +195,46 @@ anywhere writable by the orchestrator container. `media/` is where
 Jellyfin scans — files land here after the orchestrator's policy engine
 approves promotion.
 
+### Orchestrator
+
+The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire ingestion pipeline and exposes the REST API consumed by the admin app. All endpoints except webhooks require `Authorization: Bearer $ADMIN_API_TOKEN`.
+
+**REST endpoints:**
+
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/webhook/sonarr` | Sonarr `OnImport` / `OnUpgrade` webhook |
+| `POST` | `/webhook/radarr` | Radarr `OnImport` / `OnUpgrade` webhook |
+| `GET` | `/api/items` | List ingested items (filterable) |
+| `GET` | `/api/items/timeseries` | 7-day item counts by state (dashboard chart) |
+| `GET` | `/api/items/{id}` | Single item detail |
+| `POST` | `/api/items/{id}/accept-as-is` | Promote without waiting for merge |
+| `POST` | `/api/items/{id}/override-policy` | Set per-item audio language override |
+| `POST` | `/api/items/{id}/search-now` | Trigger *arr search for a new release |
+| `GET` | `/api/settings` | Read runtime settings |
+| `PUT` | `/api/settings` | Update runtime settings (HLS toggle, thresholds, …) |
+| `GET` | `/api/metrics/system` | CPU load, memory, disk + 1-hour load history ring buffer |
+| `GET` | `/api/metrics/containers` | Container list with memory stats (5-second in-memory cache) |
+| `GET` | `/api/services/health` | Probe all service health endpoints |
+| `GET` | `/api/services` | Service URL map |
+| `GET` | `/api/events` | SSE stream of ingestion pipeline events |
+| `GET` | `/api/logs/containers` | Docker container names available for log streaming |
+| `GET` | `/api/logs/stream` | SSE multiplex of Docker container logs (orchestrator self excluded) |
+| `GET` | `/api/custom-formats` | List stack-managed custom formats |
+| `POST` | `/api/custom-formats` | Create a custom format (pushes to Sonarr/Radarr) |
+| `PUT` | `/api/custom-formats/{id}` | Update a custom format |
+| `DELETE` | `/api/custom-formats/{id}` | Delete a custom format |
+| `POST` | `/api/recyclarr/sync` | Trigger a Recyclarr sync run |
+| `GET` | `/healthz` | Liveness probe |
+| `GET` | `/readyz` | Readiness probe |
+
+**Implementation notes:**
+
+- `/api/metrics/containers` is cached for 5 seconds in memory. Docker container stats involve one full sampling interval per container; parallelised with `ThreadPoolExecutor` but still ~1 s for a large stack — the cache prevents per-page-request re-querying.
+- `/api/metrics/system` returns `load_history` inline: a server-side ring buffer (720 points, one per 5 s = 1 hour) populated by a background sampler thread. The chart is fully populated on the first request regardless of when the client connected.
+- `/api/logs/stream` spawns one Docker SDK watcher thread per requested container and multiplexes their output into a single SSE stream. The orchestrator's own container is excluded via `SELF_CONTAINER_BLOCKLIST` to prevent a feedback loop (each SSE payload would be logged, which would trigger another SSE event, and so on).
+- Merge safety pre-checks (before mkvmerge): release group parity, duration difference, and audio cross-correlation offset. Thresholds are runtime-configurable via `/api/settings` and the admin app Settings page.
+
 ### Ingestion pipeline
 
 When Sonarr / Radarr fire the `OnImport` webhook, the orchestrator:
@@ -203,45 +244,38 @@ When Sonarr / Radarr fire the `OnImport` webhook, the orchestrator:
 2. Runs the **policy engine**: checks whether required audio languages are
    already present. If not, queues a merge job (`mkvmerge`) to combine
    tracks from a secondary source.
-3. Once policy is satisfied, promotes the file from `staging/` to `media/`
+3. Before merging, runs **safety pre-checks**: release group parity,
+   duration difference, and audio cross-correlation offset. Items failing
+   the checks are held for manual review.
+4. Once policy is satisfied, promotes the file from `staging/` to `media/`
    (hardlink or atomic move).
-4. Optionally dispatches to `hls-encoder` if the HLS profile is active
-   (see [HLS encoding mode](#hls-encoding-mode) below).
-5. Tells Sonarr / Radarr to set `monitored=false` for the item.
+5. Optionally dispatches to `hls-encoder` via `POST /jobs` if the HLS
+   profile is active (see [HLS encoding mode](#hls-encoding-mode) below).
+6. Tells Sonarr / Radarr to set `monitored=false` for the item.
 
 ### HLS encoding mode
 
-The HLS encoder is **off by default**. Two modes:
+The HLS encoder is **off by default**. Two controls work together: the compose profile (starts/stops the container) and the runtime toggle (tells the orchestrator whether to dispatch jobs).
 
 **Direct (default):** The `hls-encoder` container is not started
 (`COMPOSE_PROFILES` does not include `hls`). Files land in `media/` as
 standard MKV/MP4. Jellyfin transcodes on-the-fly as it always has.
 This is the simplest setup and works without a GPU or fast CPU.
 
-**HLS pipeline:** Bring up the encoder profile and toggle it at runtime:
+**HLS pipeline:** Bring up the `hls` compose profile, then enable dispatch:
 
 ```sh
 # Start the stack with the HLS encoder profile:
 COMPOSE_PROFILES=hls docker compose up -d
 
-# Then enable HLS dispatch via the orchestrator settings API:
+# Then enable HLS dispatch — via the admin app Settings page, or directly:
 curl -X PUT https://orchestrator.<DOMAIN>/api/settings \
   -H "Authorization: Bearer $ADMIN_API_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"hls_enabled": true}'
 ```
 
-When HLS is active, the encoder produces a 3-variant H.264 ladder
-(1080p / 720p / 480p) plus one AAC-stereo audio rendition per language
-track. Output is written to local NVMe cache (`$ENCODER_CACHE_DIR`),
-then atomically moved to a hidden bundle next to the source:
-`<title>/.<basename>.hls/`. A `.strm` sidecar pointing at the public
-CDN URL (`https://hls.<DOMAIN>/…/master.m3u8`) replaces the source
-file in Jellyfin's library. **Zero live transcoding** on the server.
-
-Live status: `https://encoder-status.<DOMAIN>/` shows the queue,
-in-flight jobs (with progress from ffmpeg's `time=` line), recent
-history, CPU load average + sparkline. Raw JSON at `/status.json`.
+When HLS is active the orchestrator calls `POST /jobs` on the encoder after each successful promotion. The encoder produces a 3-variant H.264 ladder (1080p / 720p / 480p) plus one AAC-stereo audio rendition per language track. Output is written to local NVMe cache (`$ENCODER_CACHE_DIR`), then atomically moved to a hidden bundle next to the source: `<title>/.<basename>.hls/`. A `.strm` sidecar pointing at the public CDN URL (`https://hls.<DOMAIN>/…/master.m3u8`) replaces the source file in Jellyfin's library. **Zero live transcoding** on the server.
 
 To disable HLS dispatch at runtime without restarting the stack:
 
@@ -329,7 +363,11 @@ rsync -av --exclude='.git' --exclude='.claude' \
 # 3. Configure.
 ssh <USERNAME>@<HOST-IP>
 cd /opt/servarr
-cp .env.template .env && vim .env    # fill in DOMAIN, ProtonVPN, etc.
+cp .env.template .env && vim .env    # fill in DOMAIN, ProtonVPN keys, API tokens, etc.
+
+# 3a. Generate the admin-app password hash and add it to .env:
+docker run --rm caddy:2-alpine caddy hash-password --plaintext '<your-password>' \
+  | sed 's|^|ADMIN_PASSWORD_HASH=|' >> .env
 
 # 4. Start.
 docker compose up -d
@@ -343,7 +381,8 @@ docker run --rm --network servarr_servarr \
   sh -c "pip install httpx==0.27.2 -q && python /scripts/bootstrap-arr.py"
 
 # 6. (Optional) Enable HLS encoding.
-#    First start the encoder profile, then toggle dispatch via the API.
+#    First start the encoder profile (compose profile: hls), then toggle dispatch
+#    via the admin app Settings page or directly via the API.
 COMPOSE_PROFILES=hls docker compose up -d
 curl -X PUT https://orchestrator.<DOMAIN>/api/settings \
   -H "Authorization: Bearer $ADMIN_API_TOKEN" \
@@ -1078,6 +1117,24 @@ everything else hosted there.
 
 ## Maintenance
 
+### Recyclarr sync scheduling
+
+The `recyclarr` service in `docker-compose.yml` is configured as a one-shot container (`restart: "no"`) with ofelia labels that schedule a weekly sync (Sunday 04:00). The `ofelia` container reads those labels and fires the job. However, ofelia has a known limitation: it cannot discover labels on containers it didn't start alongside — if you start only the `recyclarr` container (e.g. `docker compose run recyclarr sync`) without ofelia running, the schedule won't be picked up until both are cycling together.
+
+For reliable weekly syncs the reference deployment uses a **host crontab** instead:
+
+```sh
+# Run on the host as the stack user:
+0 4 * * 0  cd /opt/servarr && docker compose run --rm recyclarr sync >> /var/log/recyclarr.log 2>&1
+```
+
+You can also trigger a sync on demand from the admin app (Settings → TRaSH → Sync) or via the API:
+
+```sh
+curl -X POST https://orchestrator.<DOMAIN>/api/recyclarr/sync \
+  -H "Authorization: Bearer $ADMIN_API_TOKEN"
+```
+
 ### Routine
 
 ```sh
@@ -1131,6 +1188,7 @@ ssh <USERNAME>@<HOST-IP> "
 | Symptom | Likely cause | Fix |
 | --- | --- | --- |
 | Caddy logs `acme: timeout` or `connection refused` on first start | DNS for that subdomain hasn't propagated, or port 80 is firewalled | Wait for the registrar's NS to publish the record; check the host firewall has TCP 80/443 inbound. |
+| Caddy returns 502 immediately after rebuilding a container | Container restarts faster than Caddy re-probes it | The Caddyfile sets `lb_try_duration 6s` on admin-app and orchestrator — transient 502s during rebuild should self-clear within ~6 s. If not, check the container started successfully. |
 | `mount.cifs: bad UNC` or `iocharset utf8 not found` | SMB password contains non-ASCII chars, or kernel lacks `nls_utf8` | Reset the share password to ASCII-only; ensure `linux-modules-extra-$(uname -r)` is installed (handled by `setup-server.sh`). |
 | qBittorrent shows "no incoming connections" | The VPN's NAT-PMP port not yet propagated to qBit | Check `docker logs qb-port-manager` for the latest `listen_port` update; the sidecar polls every 60 s. |
 | Gluetun and qBittorrent return different IPs | `network_mode: service:gluetun` not actually applied | Recreate the qBit container: `docker compose up -d --force-recreate qbittorrent`. |
@@ -1141,6 +1199,8 @@ ssh <USERNAME>@<HOST-IP> "
 | Seerr "Sign in with Jellyfin" fails | Jellyfin user has no library access | Jellyfin → Dashboard → Users → grant the user library permissions; Seerr inherits them. |
 | Encoder OOM-killed mid-job | `ENCODER_MEM` too small for source | Raise `ENCODER_MEM` in `.env` or drop `ENCODER_WORKERS` to 1 to halve peak memory. |
 | Encoder dashboard "Completed" counter explodes (~hundreds) for a single import | Watcher re-discovering its own `.hls.tmp/` segments as sources | Already fixed in encoder.py (skip filter excludes both `.hls` and `.hls.tmp`). If you see this on an older build, rebuild: `docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder` and clean stale rows: `sudo sqlite3 /opt/servarr/config/hls-encoder/state.db "DELETE FROM jobs WHERE path LIKE '%.hls.tmp/%';"`. |
+| Admin app Logs page floods orchestrator stdout and saturates the stream | SSE log multiplex feedback loop: streaming the orchestrator's own container re-logs every event | The orchestrator blocks its own container name via `SELF_CONTAINER_BLOCKLIST`. If you see this, ensure you are running a recent image build; the orchestrator container is hidden from the Logs container picker entirely. |
+| Server page memory stats lag or appear stale | `/api/metrics/containers` is cached for 5 s, and the admin app polls on a fixed interval | Up to ~10–15 s of visible lag is expected. Memory updates when the next poll fires after the cache expires. |
 | Jellyfin Live TV grid shows duplicate program tiles (e.g. 3× same show) | Multiple channel variants (HD/SD/+1/[Geo-blocked]) mapped to same EPG entry | Re-run `scripts/provision-dispatcharr.py` (the dedupe pass collapses variants by base name); then on Jellyfin, re-save the Tuner Device entry and run "Refresh Guide" task to bust the lineup cache. |
 | Jellyfin still shows old channel count after Dispatcharr changes | Jellyfin caches the HDHomeRun lineup until the tuner config is re-saved | Dashboard → Live TV → Tuner Devices → click the Dispatcharr entry → Save (no fields need to change). Then run the Refresh Guide scheduled task. |
 | Dispatcharr first-run page returns 423 "Locked" | First-run requires creating an admin user before any API call works | Run the `manage.py createsuperuser` snippet from the Live TV section. |
@@ -1279,7 +1339,7 @@ of the above. Total for the reference setup: ~€63/mo.
 ```
 .
 ├── README.md                         # this file
-├── HLS_ABR_DESIGN.md                 # encoder design rationale
+├── HLS_ABR_DESIGN.md                 # HLS pipeline design rationale
 ├── .env.template                     # variable schema; copy to .env locally
 ├── docker-compose.yml                # the whole stack
 ├── setup-server.sh                   # one-shot host bootstrap (run as root)
@@ -1290,11 +1350,20 @@ of the above. Total for the reference setup: ~€63/mo.
 │   ├── headscale/
 │   │   └── config.yaml.template      # rendered into headscale-rendered volume by headscale-init
 │   ├── jellyfin-custom.css           # apply via Dashboard → General → Custom CSS
+│   ├── recyclarr/
+│   │   ├── recyclarr.yml             # Recyclarr config (TRaSH-managed custom formats + quality defs)
+│   │   └── custom-formats/           # stack-managed CF JSON files (pushed by orchestrator at boot)
 │   └── streamyfin/
 │       └── plugin-config.yml         # paste into plugin's YAML Editor tab
+├── admin-app/
+│   ├── Dockerfile                    # multi-stage Next.js standalone build
+│   ├── src/app/
+│   │   ├── (app)/                    # authenticated app shell (dashboard, library, logs, …)
+│   │   └── login/                    # login page + server action
+│   └── …
 ├── hls-encoder/
 │   ├── Dockerfile                    # python:3.12-slim + ffmpeg + tini
-│   ├── encoder.py                    # passive consumer: polls media/, encodes, writes .strm
+│   ├── encoder.py                    # passive REST consumer: POST /jobs triggers encode
 │   ├── README.md                     # env reference + tuning notes
 │   └── index.html                    # live dashboard served at encoder-status.<DOMAIN>
 ├── orchestrator/
@@ -1303,8 +1372,8 @@ of the above. Total for the reference setup: ~€63/mo.
 │   ├── src/orchestrator/
 │   │   ├── app.py                    # FastAPI application factory
 │   │   ├── config.py                 # settings loaded from env
-│   │   ├── api/                      # REST endpoints (webhooks, items, settings, events, …)
-│   │   ├── core/                     # policy engine, probe, merger, arr_client, …
+│   │   ├── api/                      # REST endpoints (webhooks, items, settings, events, logs, …)
+│   │   ├── core/                     # policy engine, probe, merger, merge_safety, arr_client, …
 │   │   └── workers/                  # APScheduler jobs (inbox, catch-up, reconcile)
 │   └── tests/
 └── scripts/
