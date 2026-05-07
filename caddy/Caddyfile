@@ -47,7 +47,12 @@ bazarr.{$DOMAIN} {
 }
 
 orchestrator.{$DOMAIN} {
-    reverse_proxy orchestrator:8000
+    reverse_proxy orchestrator:8000 {
+        # Retry transient connection refused for ~6s — covers a rebuild/restart
+        # window of the upstream container.
+        lb_try_duration 6s
+        lb_try_interval 250ms
+    }
 }
 
 qbit.{$DOMAIN} {
@@ -93,5 +98,10 @@ hls.{$DOMAIN} {
 }
 
 admin.{$DOMAIN} {
-    reverse_proxy admin-app:3000
+    reverse_proxy admin-app:3000 {
+        # Retry transient connection refused for ~6s — covers a rebuild/restart
+        # window of the upstream container.
+        lb_try_duration 6s
+        lb_try_interval 250ms
+    }
 }
