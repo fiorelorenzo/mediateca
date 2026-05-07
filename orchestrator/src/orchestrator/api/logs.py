@@ -18,11 +18,22 @@ from orchestrator.logging_setup import get_logger
 router = APIRouter(prefix="/api/logs", tags=["logs"], dependencies=[require_admin_token])
 log = get_logger(__name__)
 
+# Streaming the orchestrator's own container creates a feedback loop: every
+# log line we emit (including the SSE traffic itself) becomes a new event
+# sent over the stream, which is logged again, which becomes another event,
+# and so on until stdout is saturated. We filter these names out of the
+# /containers listing and reject them in /stream.
+SELF_CONTAINER_BLOCKLIST = {"orchestrator"}
+
 
 @router.get("/containers")
 def containers() -> list[dict[str, Any]]:
     out = []
     for c in docker_client().containers.list(all=True):
+        # Hide the orchestrator's own container — streaming it creates a
+        # feedback loop (see SELF_CONTAINER_BLOCKLIST below).
+        if c.name in SELF_CONTAINER_BLOCKLIST:
+            continue
         out.append(
             {
                 "name": c.name,
@@ -94,7 +105,11 @@ async def stream(
     containers_csv: str = Query("", alias="containers"),
     since: int = Query(60, ge=0, le=3600),
 ) -> EventSourceResponse:
-    requested = [n.strip() for n in containers_csv.split(",") if n.strip()]
+    requested = [
+        n.strip()
+        for n in containers_csv.split(",")
+        if n.strip() and n.strip() not in SELF_CONTAINER_BLOCKLIST
+    ]
 
     queue: asyncio.Queue[str] = asyncio.Queue(maxsize=1000)
     loop = asyncio.get_event_loop()
