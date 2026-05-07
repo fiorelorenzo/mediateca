@@ -121,6 +121,12 @@ docker compose up -d
 | **Settings** | Runtime config (audio languages, HLS toggle, retry intervals) |
 | **Settings → Custom Formats** | Stack-managed custom formats (CRUD) |
 | **Settings → TRaSH** | Read-only TRaSH custom format reference + sync trigger |
+| **Logs** | Real-time, stack-wide log viewer with filter / pause / autoscroll / save. |
+| **Command palette** | Press ⌘K (or Ctrl-K) to open quick navigation + actions. |
+
+### Screenshots
+
+<!-- TODO: paste screenshots of Dashboard, Library, Logs, and Server pages here -->
 
 ### Network topology
 
