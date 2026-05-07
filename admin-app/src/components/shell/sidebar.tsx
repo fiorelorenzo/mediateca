@@ -1,8 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Library, Server, Layers, Download, Settings, Inbox, Home } from "lucide-react";
+import { Library, Server, Layers, Download, Settings, Inbox, Home, ScrollText } from "lucide-react";
 import { cn } from "@/lib/utils/cn";
+import { Logo } from "@/components/icons/logo";
 
 const items = [
   { href: "/", label: "Dashboard", icon: Home },
@@ -11,6 +12,7 @@ const items = [
   { href: "/downloads", label: "Downloads", icon: Download },
   { href: "/server", label: "Server", icon: Server },
   { href: "/services", label: "Services", icon: Layers },
+  { href: "/logs", label: "Logs", icon: ScrollText },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -19,7 +21,7 @@ export function Sidebar() {
   return (
     <aside className="hidden w-64 shrink-0 border-r bg-muted/30 lg:block">
       <div className="flex h-14 items-center border-b px-4">
-        <span className="text-lg font-semibold">Mediateca</span>
+        <Logo size={24} withWordmark />
       </div>
       <nav className="space-y-1 p-2">
         {items.map((it) => {
