@@ -4,7 +4,7 @@
 #      with target="_blank". We rewrite those links to open in the same tab.
 #   2. Seerr has no Live TV concept; we inject a small floating "Live TV"
 #      pill that deep-links to Jellyfin's Live TV UI, so end-users see
-#      one entry point at streaming.<DOMAIN>.
+#      one entry point at the root <DOMAIN>.
 #
 # This file is processed by envsubst at container start (nginx:alpine
 # auto-runs that on anything in /etc/nginx/templates/*.template). The
@@ -12,8 +12,8 @@
 # below — everything else uses nginx's own $variable syntax (no braces)
 # which envsubst leaves alone.
 #
-# Caddy proxies streaming.<DOMAIN> → seerr-inject:80 (this server)
-#                                 → seerr:5055 (real backend)
+# Caddy proxies <DOMAIN> (root) → seerr-inject:80 (this server)
+#                                → seerr:5055 (real backend)
 
 server {
     listen 80;

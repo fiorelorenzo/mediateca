@@ -62,8 +62,8 @@ your `DOMAIN`:
 
 | URL | Service | Notes |
 | --- | --- | --- |
-| **`streaming.<DOMAIN>`** | Seerr | **Public entry point**: catalog + request UI. Auth via Jellyfin SSO only (local login disabled). |
-| `media.<DOMAIN>` | Jellyfin | Streaming UI; consumes library from `media/` (direct files or `.strm` CDN links). |
+| **`<DOMAIN>`** | Seerr | **Public entry point**: catalog + request UI. Auth via Jellyfin SSO only (local login disabled). |
+| `streaming.<DOMAIN>` | Jellyfin | Streaming UI; consumes library from `media/` (direct files or `.strm` CDN links). |
 | `orchestrator.<DOMAIN>` | Orchestrator | REST API (ingestion pipeline, settings, events). Requires `Authorization: Bearer $ADMIN_API_TOKEN`. |
 | `admin.<DOMAIN>` | Admin app | Next.js operational UI — single-admin auth (bcrypt password). |
 | `sonarr.<DOMAIN>` | Sonarr | TV automation |
@@ -511,10 +511,10 @@ and fail-closed (an unmapped subdomain just doesn't resolve).
 Verify against the registrar's authoritative NS, not a cached resolver:
 
 ```sh
-dig +short media.<DOMAIN> @<your-registrar-ns>
+dig +short streaming.<DOMAIN> @<your-registrar-ns>
 ```
 
-Wait until `streaming.<DOMAIN>` resolves before continuing — Caddy will
+Wait until `<DOMAIN>` resolves before continuing — Caddy will
 fail the ACME HTTP-01 challenge otherwise.
 
 ### 5. Configure `.env`
@@ -601,7 +601,7 @@ The order matters because integrations chain (Prowlarr → Sonarr/Radarr
 
 ### Jellyfin
 
-`https://media.<DOMAIN>` — first-run wizard creates the admin account.
+`https://streaming.<DOMAIN>` — first-run wizard creates the admin account.
 Add libraries:
 - TV Shows → `/data/tv`
 - Movies → `/data/movies`
@@ -695,19 +695,19 @@ clear the triggers on its scheduled task:
 
 ```sh
 JF_TASK=2c66a88bca43e565d7f8099f825478f1   # stable GUID of "Download missing subtitles"
-curl -sS -X POST "https://media.<DOMAIN>/ScheduledTasks/$JF_TASK/Triggers?api_key=<JF_KEY>" \
+curl -sS -X POST "https://streaming.<DOMAIN>/ScheduledTasks/$JF_TASK/Triggers?api_key=<JF_KEY>" \
   -H 'Content-Type: application/json' -d '[]'
 ```
 
 ### Seerr
 
-`https://streaming.<DOMAIN>` — wizard chooses Jellyfin backend →
+`https://<DOMAIN>` — wizard chooses Jellyfin backend →
 `http://jellyfin:8096` + admin login. Then Settings → Sonarr
 (`sonarr`/`8989` + API key) and Radarr (`radarr`/`7878` + API key) and
 mark them as **Default** (`isDefault=true`) so user requests have a
-target. Application URL = `https://streaming.<DOMAIN>`.
+target. Application URL = `https://<DOMAIN>`.
 
-To make `streaming.<DOMAIN>` the single user-facing entry-point, also
+To make `<DOMAIN>` the single user-facing entry-point, also
 set `localLogin=false` in Seerr's main settings (Settings → Users →
 Local Login → off, or directly patch `config/seerr/settings.json`).
 The login page exposes only "Sign in with Jellyfin", which keeps the
@@ -724,7 +724,7 @@ General → Custom CSS code, or programmatically:
 JELLYFIN_KEY=$(ssh <USERNAME>@<HOST-IP> 'sudo find /opt/servarr/config/jellyfin -name "jellyfin.db" | head -1 | xargs sudo sqlite3 -bail "SELECT AccessToken FROM ApiKeys" 2>/dev/null')
 CSS=$(cat config/jellyfin-custom.css)
 BODY=$(jq -nc --arg css "$CSS" '{SplashscreenEnabled: false, CustomCss: $css}')
-curl -sS -X POST "https://media.<DOMAIN>/System/Configuration/branding?api_key=$JELLYFIN_KEY" \
+curl -sS -X POST "https://streaming.<DOMAIN>/System/Configuration/branding?api_key=$JELLYFIN_KEY" \
   -H 'Content-Type: application/json' -d "$BODY"
 ```
 
@@ -861,7 +861,7 @@ Jellyfin to refresh its lineup cache: open the Tuner Device entry and
 click Save again, then re-run the Refresh Guide task. Otherwise
 Jellyfin keeps serving the stale channel list.
 
-End-users hit the same `streaming.<DOMAIN>` (Seerr) entry point as
+End-users hit the same `<DOMAIN>` (Seerr) entry point as
 before. The `seerr-inject` sidecar (nginx) clones Seerr's existing
 "Movies" sidebar entry, swaps icon (Heroicons TV outline), text
 (`Live TV`), and href (Jellyfin's `/web/index.html#/livetv.html`),
@@ -898,7 +898,7 @@ docker compose -f /opt/servarr/docker-compose.yml restart jellyfin
 ```
 
 After Jellyfin restarts, configure at
-`https://media.<DOMAIN>/web/index.html#/dashboard/plugins/configurationpage?name=Streamyfin`.
+`https://streaming.<DOMAIN>/web/index.html#/dashboard/plugins/configurationpage?name=Streamyfin`.
 Two tabs matter:
 
 **Don't use the Application form tab.** Its fields ship with placeholder
@@ -924,7 +924,7 @@ empty until viewing history accumulates — expected.
 [App Store](https://apps.apple.com/app/streamyfin/id6593660679),
 [Play Store](https://play.google.com/store/apps/details?id=com.fredrikburmester.streamyfin),
 or [GitHub releases](https://github.com/streamyfin/streamyfin/releases/latest)
-(also available via Obtainium for Android). Server URL: `https://media.<DOMAIN>`.
+(also available via Obtainium for Android). Server URL: `https://streaming.<DOMAIN>`.
 Login with the user's Jellyfin credentials. Seerr SSO + Live TV + library
 streaming all flow through this single app.
 

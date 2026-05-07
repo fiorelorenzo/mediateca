@@ -2,8 +2,8 @@
 # Container env reads: {$DOMAIN}, {$ACME_EMAIL}.
 #
 # Layout:
-#   media.{$DOMAIN}       → Jellyfin (streaming UI)
-#   seerr.{$DOMAIN}       → Seerr (request management)
+#   {$DOMAIN}             → Seerr (public entry: request UI)
+#   streaming.{$DOMAIN}   → Jellyfin (streaming UI)
 #   <app>.{$DOMAIN}       → other apps, one subdomain each
 #
 # Auth: each app handles its own (Sonarr/Radarr/Prowlarr/Bazarr →
@@ -14,20 +14,20 @@
     email {$ACME_EMAIL}
 }
 
-media.{$DOMAIN} {
-    reverse_proxy jellyfin:8096
-}
-
 # Public-facing entry point. The URL we hand out to non-technical users
 # (family, friends). They land on the Seerr request UI, log in with
 # Jellyfin credentials (Seerr local login is disabled, only mediaServerLogin
 # is exposed), browse the catalog, and the "Play on Jellyfin" button
-# bounces them to media.{$DOMAIN} for items already in the library —
+# bounces them to streaming.{$DOMAIN} for items already in the library —
 # routed through seerr-inject (tiny nginx) which rewrites the HTML
 # response so Jellyfin links open in the same tab. See
 # docker-compose.yml + caddy/seerr-inject.conf.
-streaming.{$DOMAIN} {
+{$DOMAIN} {
     reverse_proxy seerr-inject:80
+}
+
+streaming.{$DOMAIN} {
+    reverse_proxy jellyfin:8096
 }
 
 sonarr.{$DOMAIN} {

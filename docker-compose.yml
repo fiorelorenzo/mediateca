@@ -281,7 +281,7 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ:-UTC}
-      - JELLYFIN_PublishedServerUrl=https://media.${DOMAIN}
+      - JELLYFIN_PublishedServerUrl=https://streaming.${DOMAIN}
     volumes:
       - ./config/jellyfin:/config
       - ${MEDIA_DIR}/media:/data
@@ -304,8 +304,8 @@ services:
 
   # =========================================
   # nginx sidecar that wraps Seerr to inject a tiny client-side script
-  # which removes target="_blank" from links pointing at media.${DOMAIN}.
-  # Caddy points streaming.${DOMAIN} → this container → seerr.
+  # which removes target="_blank" from links pointing at streaming.${DOMAIN}.
+  # Caddy points the bare ${DOMAIN} (root) → this container → seerr.
   # See caddy/seerr-inject.conf for the why and what.
   # =========================================
   seerr-inject:
@@ -318,8 +318,8 @@ services:
       # nginx:alpine's entrypoint runs envsubst on
       # /etc/nginx/templates/*.template at startup. Variables below get
       # substituted into the rendered config.
-      - JELLYFIN_HOST=media.${DOMAIN}
-      - LIVETV_URL=https://media.${DOMAIN}/web/index.html#/livetv.html
+      - JELLYFIN_HOST=streaming.${DOMAIN}
+      - LIVETV_URL=https://streaming.${DOMAIN}/web/index.html#/livetv.html
       # Limit envsubst to the variables we actually want; defends
       # against accidental substitution of unrelated env names.
       - NGINX_ENVSUBST_FILTER=^(JELLYFIN_HOST|LIVETV_URL)$$

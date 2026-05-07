@@ -88,7 +88,7 @@ settings:
   # Streamyfin app v0.51 reads `jellyseerrServerUrl`, so this matches.
   jellyseerrServerUrl:
     locked: false
-    value: https://streaming.<DOMAIN>
+    value: https://<DOMAIN>
 
   # Search backend — Jellyfin native (no Marlin running)
   searchEngine:
