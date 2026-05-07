@@ -125,8 +125,8 @@ export function ContainersTable() {
     refetchInterval: 10_000,
   });
 
-  const [sortKey, setSortKey] = useState<SortKey>("status");
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [sortKey, setSortKey] = useState<SortKey>("mem");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
 
   function handleSort(k: SortKey) {
     if (sortKey === k) {
