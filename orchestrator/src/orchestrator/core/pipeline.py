@@ -6,13 +6,14 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import desc
 from sqlmodel import Session, select
 
 from orchestrator.config import get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.event_bus import publish
-from orchestrator.core.merger import promote
-from orchestrator.core.policy import PolicyEngine
+from orchestrator.core.merger import merge_audio, promote, replace_atomically
+from orchestrator.core.policy import PolicyEngine, PolicyVerdict
 from orchestrator.core.state import validate_transition
 from orchestrator.db.models import (
     History,
@@ -43,6 +44,56 @@ def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Pa
     return media_root / rel
 
 
+def _get_library_audio(session: Session, item_id: int) -> list[str]:
+    """Return the audio track list that is currently in the library file.
+
+    Sources checked in priority order:
+    1. The most recent MERGED event's ``new_audio`` field — reflects the
+       merged union after a previous merge pass.
+    2. The most recent INCOMPLETE event's ``audio_languages`` detail — set
+       by the first-time promotion of a single-lang file.
+    3. The second-to-last ANALYZED event — oldest fallback.
+
+    webhook_inbox overwrites item.audio_present before calling process_item,
+    so we cannot use the DB field directly.
+    """
+    # 1. Last MERGED event → new_audio is the post-merge union
+    merged_rows = session.exec(
+        select(History)
+        .where(History.item_id == item_id, History.event == "MERGED")
+        .order_by(desc(History.id))  # type: ignore[arg-type]
+    ).all()
+    if merged_rows:
+        detail = merged_rows[0].detail or {}
+        langs = detail.get("new_audio", [])
+        if isinstance(langs, list) and langs:
+            return list(langs)
+
+    # 2. Last INCOMPLETE event → the audio that was promoted incomplete
+    incomplete_rows = session.exec(
+        select(History)
+        .where(History.item_id == item_id, History.event == "INCOMPLETE")
+        .order_by(desc(History.id))  # type: ignore[arg-type]
+    ).all()
+    if incomplete_rows:
+        # INCOMPLETE detail has "missing" not the full audio, so fall through
+        # but we can reconstruct from the second-to-last ANALYZED below.
+        pass
+
+    # 3. Second-to-last ANALYZED event (first promotion's audio)
+    analyzed_rows = session.exec(
+        select(History)
+        .where(History.item_id == item_id, History.event == "ANALYZED")
+        .order_by(desc(History.id))  # type: ignore[arg-type]
+    ).all()
+    if len(analyzed_rows) >= 2:
+        prev = analyzed_rows[1]  # second-to-last (latest is the current follow-up)
+        detail = prev.detail or {}
+        langs = detail.get("audio_languages", [])
+        return list(langs) if isinstance(langs, list) else []
+    return []
+
+
 async def process_item(session: Session, item: Item, source_file: Path) -> None:
     """Apply policy + take next action. Idempotent — safe to call after
     a crash; state is persisted at every step."""
@@ -62,6 +113,79 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
         original = await radarr.get_movie_original_language(item.source_id)
 
     engine = PolicyEngine(default_required=runtime.get("required_audio_langs", []))  # type: ignore[arg-type]
+
+    # -----------------------------------------------------------------
+    # Merge branch detection
+    # webhook_inbox resets item.status → ANALYZING and sets
+    # item.audio_present → new file's tracks before calling us.
+    # So we detect a follow-up by library_path being set.
+    # We recover old audio from History.
+    # -----------------------------------------------------------------
+    new_audio = list(item.audio_present)  # new file's tracks
+
+    if item.library_path is not None:
+        old_audio = _get_library_audio(session, item.id or 0)
+        if old_audio:
+            # Evaluate policy against the COMBINED audio set to know what's still missing
+            combined_audio = sorted(set(old_audio) | set(new_audio))
+            combined_verdict = engine.evaluate(
+                present=combined_audio,
+                original_lang=original,
+                override_required=item.audio_required,
+            )
+            # Evaluate policy against old audio alone to know what was missing before
+            old_verdict = engine.evaluate(
+                present=old_audio,
+                original_lang=original,
+                override_required=item.audio_required,
+            )
+            # New tracks add value if they cover at least one language that was missing
+            # from the old library file
+            previously_missing = set(old_verdict.missing)
+            addition_audio_langs = [lang for lang in new_audio if lang in previously_missing]
+
+            if addition_audio_langs and not old_verdict.complete:
+                log.info(
+                    "merge.detected",
+                    item_id=item.id,
+                    old_audio=old_audio,
+                    new_audio=new_audio,
+                    addition_audio_langs=addition_audio_langs,
+                )
+                await _merge_into_existing(
+                    session,
+                    item,
+                    source_file,
+                    old_audio,
+                    addition_audio_langs,
+                    combined_verdict,
+                    runtime,
+                    original,
+                )
+                return
+            log.warning(
+                "merge.no_new_tracks",
+                item_id=item.id,
+                old_audio=old_audio,
+                new_audio=new_audio,
+                previously_missing=list(previously_missing),
+            )
+            # New file adds nothing — discard it and keep item as-is.
+            # Restore audio_present and status to what they were before
+            # webhook_inbox clobbered them.
+            try:
+                source_file.unlink(missing_ok=True)  # noqa: ASYNC240
+            except OSError:
+                log.warning("merge.cleanup_failed", path=str(source_file))
+            item.audio_present = old_audio
+            # Restore status: INCOMPLETE if old audio was still missing langs,
+            # PROMOTED if old audio was already satisfying policy.
+            item.status = ItemStatus.PROMOTED if old_verdict.complete else ItemStatus.INCOMPLETE
+            session.add(item)
+            session.commit()
+            return
+
+    # Normal (first-time) flow
     verdict = engine.evaluate(
         present=item.audio_present,
         original_lang=original,
@@ -151,6 +275,112 @@ async def _mark_incomplete_and_promote(
     )
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
+
+
+async def _merge_into_existing(
+    session: Session,
+    item: Item,
+    source_file: Path,
+    old_audio: list[str],
+    addition_audio_langs: list[str],
+    combined_verdict: PolicyVerdict,
+    runtime: dict[str, Any],
+    original_lang: str | None,
+) -> None:
+    """Merge new audio track(s) from source_file into the existing library file.
+
+    Flow:
+      1. ANALYZING → INCOMPLETE → MERGING  (two hops to stay within allowed transitions)
+      2. merge_audio() → tmp merged file in incoming_root
+      3. replace_atomically() → overwrite library_path
+      4. Update audio_present to union of old + new
+      5. Delete staging addition
+      6. Record MERGED history
+      7. MERGING → PROMOTED (or ENCODING) if now complete, else MERGING → INCOMPLETE
+    """
+    settings = get_settings()
+    library_path = Path(item.library_path)  # type: ignore[arg-type]  # guaranteed non-None by caller
+
+    # 1. Transition: ANALYZING → INCOMPLETE → MERGING
+    #    (state.py allows ANALYZING→INCOMPLETE and INCOMPLETE→MERGING)
+    validate_transition(item.status, ItemStatus.INCOMPLETE)
+    item.status = ItemStatus.INCOMPLETE
+    session.add(item)
+    session.commit()
+
+    validate_transition(item.status, ItemStatus.MERGING)
+    item.status = ItemStatus.MERGING
+    session.add(item)
+    session.commit()
+    publish("item.status_changed", {"item_id": item.id, "status": item.status})
+
+    # 2. Merge audio tracks from addition into existing library file
+    merged_output = merge_audio(
+        existing=library_path,
+        addition=source_file,
+        addition_audio_langs=addition_audio_langs,
+        incoming_root=settings.incoming_root,
+    )
+
+    # 3. Atomically replace the library file
+    replace_atomically(source=merged_output, target=library_path)
+
+    # 4. Update audio_present to union of old library tracks + addition tracks
+    merged_audio = sorted(set(old_audio) | set(addition_audio_langs))
+    item.audio_present = merged_audio
+    item.updated_at = datetime.utcnow()
+    session.add(item)
+
+    # 5. Delete the staging addition (it's been consumed)
+    try:
+        source_file.unlink(missing_ok=True)  # noqa: ASYNC240
+    except OSError:
+        log.warning("merge.staging_cleanup_failed", path=str(source_file))
+
+    # 6. Record MERGED history
+    session.add(
+        History(
+            item_id=item.id,
+            event="MERGED",
+            detail={
+                "old_audio": old_audio,
+                "new_audio": merged_audio,
+                "addition_audio_langs": addition_audio_langs,
+                "library_path": str(library_path),
+            },
+        )
+    )
+    session.commit()
+
+    # 7. Decide final state based on combined_verdict (pre-computed by caller)
+    if not combined_verdict.complete:
+        # Still missing some langs after merge — remain INCOMPLETE
+        validate_transition(item.status, ItemStatus.INCOMPLETE)
+        item.status = ItemStatus.INCOMPLETE
+        item.status_reason = f"missing: {','.join(combined_verdict.missing)}"
+        session.add(item)
+        session.commit()
+        publish("item.status_changed", {"item_id": item.id, "status": item.status})
+        return
+
+    # Fully satisfied — transition to PROMOTED (or ENCODING)
+    if runtime.get("hls_enabled"):
+        validate_transition(item.status, ItemStatus.ENCODING)
+        item.status = ItemStatus.ENCODING
+        session.add(item)
+        session.commit()
+        from orchestrator.workers.job_runner import enqueue_encode
+
+        await enqueue_encode(item, session)
+        publish("item.status_changed", {"item_id": item.id, "status": item.status})
+    else:
+        validate_transition(item.status, ItemStatus.PROMOTED)
+        item.status = ItemStatus.PROMOTED
+        item.status_reason = None
+        session.add(item)
+        session.commit()
+        publish("item.status_changed", {"item_id": item.id, "status": item.status})
+        await _unmonitor_in_arr(item)
 
 
 async def _unmonitor_in_arr(item: Item) -> None:
