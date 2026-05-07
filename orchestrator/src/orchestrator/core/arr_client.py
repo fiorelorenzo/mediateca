@@ -39,13 +39,95 @@ class _ArrClient:
 
 
 class SonarrClient(_ArrClient):
-    async def get_series_original_language(self, series_id: int) -> str | None:
+    async def get_series(self, series_id: int) -> dict[str, Any] | None:
         async with await self._client() as c:
             r = await c.get(f"/api/v3/series/{series_id}")
             if not self._handle_status(r, f"sonarr /api/v3/series/{series_id}"):
                 return None
-            data = r.json()
-            return (data.get("originalLanguage") or {}).get("name")
+            return cast(dict[str, Any], r.json())
+
+    async def get_series_original_language(self, series_id: int) -> str | None:
+        data = await self.get_series(series_id)
+        if not data:
+            return None
+        return (data.get("originalLanguage") or {}).get("name")
+
+    async def list_episodes(self, series_id: int) -> list[dict[str, Any]]:
+        """All episodes for a series, including monitored state and episodeFileId."""
+        async with await self._client() as c:
+            r = await c.get("/api/v3/episode", params={"seriesId": series_id})
+            if not self._handle_status(r, f"sonarr /api/v3/episode?seriesId={series_id}"):
+                return []
+            return cast(list[dict[str, Any]], r.json())
+
+    async def delete_series(
+        self,
+        series_id: int,
+        *,
+        delete_files: bool = True,
+        add_import_list_exclusion: bool = False,
+    ) -> None:
+        """Hard-delete a series. With delete_files=True Sonarr unlinks the series
+        folder from disk; addImportListExclusion controls whether the title is
+        blocked from re-add by ImportLists."""
+        async with await self._client() as c:
+            r = await c.delete(
+                f"/api/v3/series/{series_id}",
+                params={
+                    "deleteFiles": str(delete_files).lower(),
+                    "addImportListExclusion": str(add_import_list_exclusion).lower(),
+                },
+            )
+            if r.status_code == 404:
+                log.warning("sonarr /api/v3/series/%s already gone (404)", series_id)
+                return
+            r.raise_for_status()
+
+    async def list_queue_for_series(self, series_id: int) -> list[dict[str, Any]]:
+        """Queue records belonging to one series. Sonarr v3 returns the global
+        queue paginated; we fetch a wide page and filter client-side because
+        the seriesId query param is undocumented in some versions."""
+        async with await self._client() as c:
+            r = await c.get(
+                "/api/v3/queue",
+                params={"pageSize": 1000, "includeSeries": "true"},
+            )
+            if not self._handle_status(r, "sonarr /api/v3/queue"):
+                return []
+            records = cast(list[dict[str, Any]], r.json().get("records", []))
+            return [rec for rec in records if rec.get("seriesId") == series_id]
+
+    async def delete_queue_item(
+        self,
+        queue_id: int,
+        *,
+        remove_from_client: bool = True,
+        blocklist: bool = False,
+    ) -> None:
+        async with await self._client() as c:
+            r = await c.delete(
+                f"/api/v3/queue/{queue_id}",
+                params={
+                    "removeFromClient": str(remove_from_client).lower(),
+                    "blocklist": str(blocklist).lower(),
+                    "skipRedownload": "true",
+                },
+            )
+            if r.status_code == 404:
+                return
+            r.raise_for_status()
+
+    async def unmonitor_episodes(self, episode_ids: list[int]) -> None:
+        """Best-effort unmonitor — useful after partial-delete so Sonarr doesn't
+        immediately re-search and re-grab the episodes the user wanted gone."""
+        if not episode_ids:
+            return
+        async with await self._client() as c:
+            r = await c.put(
+                "/api/v3/episode/monitor",
+                json={"episodeIds": episode_ids, "monitored": False},
+            )
+            r.raise_for_status()
 
     async def get_episode_file(self, episode_file_id: int) -> dict[str, Any] | None:
         async with await self._client() as c:
@@ -75,13 +157,69 @@ class SonarrClient(_ArrClient):
 
 
 class RadarrClient(_ArrClient):
-    async def get_movie_original_language(self, movie_id: int) -> str | None:
+    async def get_movie(self, movie_id: int) -> dict[str, Any] | None:
         async with await self._client() as c:
             r = await c.get(f"/api/v3/movie/{movie_id}")
             if not self._handle_status(r, f"radarr /api/v3/movie/{movie_id}"):
                 return None
-            data = r.json()
-            return (data.get("originalLanguage") or {}).get("name")
+            return cast(dict[str, Any], r.json())
+
+    async def get_movie_original_language(self, movie_id: int) -> str | None:
+        data = await self.get_movie(movie_id)
+        if not data:
+            return None
+        return (data.get("originalLanguage") or {}).get("name")
+
+    async def delete_movie(
+        self,
+        movie_id: int,
+        *,
+        delete_files: bool = True,
+        add_import_exclusion: bool = False,
+    ) -> None:
+        async with await self._client() as c:
+            r = await c.delete(
+                f"/api/v3/movie/{movie_id}",
+                params={
+                    "deleteFiles": str(delete_files).lower(),
+                    "addImportExclusion": str(add_import_exclusion).lower(),
+                },
+            )
+            if r.status_code == 404:
+                log.warning("radarr /api/v3/movie/%s already gone (404)", movie_id)
+                return
+            r.raise_for_status()
+
+    async def list_queue_for_movie(self, movie_id: int) -> list[dict[str, Any]]:
+        async with await self._client() as c:
+            r = await c.get(
+                "/api/v3/queue",
+                params={"pageSize": 1000, "includeMovie": "true"},
+            )
+            if not self._handle_status(r, "radarr /api/v3/queue"):
+                return []
+            records = cast(list[dict[str, Any]], r.json().get("records", []))
+            return [rec for rec in records if rec.get("movieId") == movie_id]
+
+    async def delete_queue_item(
+        self,
+        queue_id: int,
+        *,
+        remove_from_client: bool = True,
+        blocklist: bool = False,
+    ) -> None:
+        async with await self._client() as c:
+            r = await c.delete(
+                f"/api/v3/queue/{queue_id}",
+                params={
+                    "removeFromClient": str(remove_from_client).lower(),
+                    "blocklist": str(blocklist).lower(),
+                    "skipRedownload": "true",
+                },
+            )
+            if r.status_code == 404:
+                return
+            r.raise_for_status()
 
     async def get_movie_file(self, movie_file_id: int) -> dict[str, Any] | None:
         async with await self._client() as c:

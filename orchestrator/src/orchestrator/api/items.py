@@ -10,6 +10,8 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from orchestrator.api.auth import require_admin_token
+from orchestrator.config import get_settings
+from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.state import validate_transition
 from orchestrator.db.models import History, Item, ItemStatus
 from orchestrator.db.session import get_session
@@ -108,6 +110,145 @@ def override_policy(
     session.commit()
     session.refresh(item)
     return item.model_dump()
+
+
+class DeletePayload(BaseModel):
+    """Body for DELETE /api/items/:id.
+
+    Movies always get a full delete (radarr → qBit → orchestrator). Series
+    behave the same when neither `seasons` nor `episode_ids` is supplied; if
+    either is present we run a *partial* delete: episode-files only, the
+    series stays in Sonarr and the orchestrator item stays in the DB.
+    """
+
+    delete_files: bool = True
+    purge_torrent: bool = True
+    seasons: list[int] | None = None
+    episode_ids: list[int] | None = None
+    unmonitor: bool = True  # for partial deletes
+
+
+async def _purge_radarr_queue(radarr: RadarrClient, movie_id: int) -> int:
+    queued = await radarr.list_queue_for_movie(movie_id)
+    for q in queued:
+        await radarr.delete_queue_item(q["id"], remove_from_client=True, blocklist=False)
+    return len(queued)
+
+
+async def _purge_sonarr_queue(sonarr: SonarrClient, series_id: int) -> int:
+    queued = await sonarr.list_queue_for_series(series_id)
+    for q in queued:
+        await sonarr.delete_queue_item(q["id"], remove_from_client=True, blocklist=False)
+    return len(queued)
+
+
+@router.delete("/{item_id}")
+async def delete_item(
+    item_id: int,
+    payload: DeletePayload | None = None,
+    session: Session = Depends(get_session),
+) -> dict[str, Any]:
+    """Wipe a title across the stack.
+
+    Sequence (best-effort, each step independent so a failure mid-flow leaves
+    the system in a recoverable state):
+      1. Cancel any active torrent for it (DELETE arr queue with
+         removeFromClient=true; deletes /data/incoming partials).
+      2. Tell *arr to delete the series/movie + files (unlinks /data/media).
+      3. Delete the orchestrator item row + emit event.
+
+    For series, when seasons/episode_ids is supplied we instead run a partial
+    delete: episode-files for the targeted scope, optional unmonitor, no
+    series/queue/orchestrator removal.
+    """
+    payload = payload or DeletePayload()
+    item = session.get(Item, item_id)
+    if item is None:
+        raise HTTPException(404, "item not found")
+
+    s = get_settings()
+    summary: dict[str, Any] = {"item_id": item_id, "kind": item.source}
+
+    if item.source == "radarr":
+        radarr = RadarrClient(s.radarr_url, s.radarr_api_key)
+        if payload.purge_torrent:
+            summary["queue_removed"] = await _purge_radarr_queue(radarr, item.source_id)
+        try:
+            await radarr.delete_movie(
+                item.source_id,
+                delete_files=payload.delete_files,
+                add_import_exclusion=False,
+            )
+            summary["radarr_deleted"] = True
+        except Exception as e:  # noqa: BLE001 — surface but don't abort cascade
+            summary["radarr_error"] = str(e)
+        _record(session, item_id, "DELETED", {"delete_files": payload.delete_files})
+        session.delete(item)
+        session.commit()
+        summary["mode"] = "full"
+        return summary
+
+    # ── sonarr (series) ────────────────────────────────────────────────────
+    sonarr = SonarrClient(s.sonarr_url, s.sonarr_api_key)
+    series_id = item.series_id or item.source_id
+
+    is_partial = bool(payload.seasons) or bool(payload.episode_ids)
+
+    if is_partial:
+        episodes = await sonarr.list_episodes(series_id)
+        targeted: list[dict[str, Any]] = []
+        season_set = set(payload.seasons or [])
+        episode_set = set(payload.episode_ids or [])
+        for ep in episodes:
+            if season_set and ep.get("seasonNumber") in season_set:
+                targeted.append(ep)
+            elif episode_set and ep["id"] in episode_set:
+                targeted.append(ep)
+        file_ids = {ep["episodeFileId"] for ep in targeted if ep.get("episodeFileId")}
+        for fid in file_ids:
+            try:
+                await sonarr.delete_episode_file(fid)
+            except Exception as e:  # noqa: BLE001
+                summary.setdefault("episode_file_errors", []).append({"id": fid, "err": str(e)})
+        if payload.unmonitor and targeted:
+            await sonarr.unmonitor_episodes([ep["id"] for ep in targeted])
+        _record(
+            session,
+            item_id,
+            "PARTIAL_DELETE",
+            {
+                "seasons": payload.seasons,
+                "episode_ids": payload.episode_ids,
+                "files_deleted": len(file_ids),
+            },
+        )
+        session.commit()
+        summary.update(
+            {
+                "mode": "partial",
+                "episodes_targeted": len(targeted),
+                "files_deleted": len(file_ids),
+            }
+        )
+        return summary
+
+    # full series wipe
+    if payload.purge_torrent:
+        summary["queue_removed"] = await _purge_sonarr_queue(sonarr, series_id)
+    try:
+        await sonarr.delete_series(
+            series_id,
+            delete_files=payload.delete_files,
+            add_import_list_exclusion=False,
+        )
+        summary["sonarr_deleted"] = True
+    except Exception as e:  # noqa: BLE001
+        summary["sonarr_error"] = str(e)
+    _record(session, item_id, "DELETED", {"delete_files": payload.delete_files})
+    session.delete(item)
+    session.commit()
+    summary["mode"] = "full"
+    return summary
 
 
 @router.post("/{item_id}/search-now")

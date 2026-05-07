@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api/client";
 import type { Item } from "@/lib/api/types";
+import { DeleteDialog } from "./delete-dialog";
 
 export function ItemActions({ item }: { item: Item }) {
   const router = useRouter();
@@ -58,6 +59,7 @@ export function ItemActions({ item }: { item: Item }) {
         Accept as-is
       </Button>
       <OverrideDialog item={item} onSaved={refresh} />
+      <DeleteDialog item={item} />
     </div>
   );
 }

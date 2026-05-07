@@ -106,6 +106,19 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await r.json()) as T;
 }
 
+export interface SonarrEpisode {
+  id: number;
+  seriesId: number;
+  seasonNumber: number;
+  episodeNumber: number;
+  title: string;
+  airDate?: string;
+  airDateUtc?: string;
+  hasFile: boolean;
+  monitored: boolean;
+  episodeFileId: number; // 0 when no file
+}
+
 export const arrs = {
   unifiedQueue: async (): Promise<QueueRecord[]> => {
     const [sonarr, radarr] = await Promise.all([
@@ -124,6 +137,8 @@ export const arrs = {
 
   allMovies: () => fetchJson<ArrMovie[]>("/api/radarr/movie"),
   allSeries: () => fetchJson<ArrSeries[]>("/api/sonarr/series"),
+  seriesEpisodes: (seriesId: number) =>
+    fetchJson<SonarrEpisode[]>(`/api/sonarr/episode?seriesId=${seriesId}`),
 
   // Queue actions. removeFromClient=true also tells qBit/SAB to delete the torrent;
   // blocklist=true marks the release as bad so it isn't grabbed again on next search.

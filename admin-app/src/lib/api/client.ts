@@ -30,6 +30,11 @@ export const api = {
   getItem: (id: number) => call<{ item: Item; history: unknown[] }>(`/api/items/${id}`),
   acceptAsIs: (id: number) => call<Item>(`/api/items/${id}/accept-as-is`, { method: "POST" }),
   searchNow: (id: number) => call<Item>(`/api/items/${id}/search-now`, { method: "POST" }),
+  deleteItem: (id: number, opts: DeleteItemPayload) =>
+    call<DeleteItemResult>(`/api/items/${id}`, {
+      method: "DELETE",
+      body: JSON.stringify(opts),
+    }),
   overridePolicy: (id: number, langs: string[] | null) =>
     call<Item>(`/api/items/${id}/override-policy`, {
       method: "POST",
@@ -45,6 +50,28 @@ export const api = {
   itemsTimeseries: (sinceSeconds = 604800) =>
     call<TimeseriesPoint[]>(`/api/items/timeseries?since_seconds=${sinceSeconds}`),
 };
+
+export interface DeleteItemPayload {
+  delete_files?: boolean;
+  purge_torrent?: boolean;
+  seasons?: number[] | null;
+  episode_ids?: number[] | null;
+  unmonitor?: boolean;
+}
+
+export interface DeleteItemResult {
+  item_id: number;
+  kind: string;
+  mode: "full" | "partial";
+  queue_removed?: number;
+  radarr_deleted?: boolean;
+  sonarr_deleted?: boolean;
+  episodes_targeted?: number;
+  files_deleted?: number;
+  radarr_error?: string;
+  sonarr_error?: string;
+  episode_file_errors?: { id: number; err: string }[];
+}
 
 export interface CustomFormat {
   id: number;
