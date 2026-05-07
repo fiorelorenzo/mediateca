@@ -93,13 +93,21 @@ entire stack. Single-admin auth via password (bcrypt hash in `.env`).
 Generate a bcrypt hash of your password using either:
 
 ```sh
-# Via Caddy:
+# Via Caddy (auto-escapes $ to $$ for docker compose):
 docker run --rm caddy:2-alpine caddy hash-password --plaintext '<new-pwd>' \
-  | sed 's|^|ADMIN_PASSWORD_HASH=|' >> .env
+  | sed 's|[$]|$$|g; s|^|ADMIN_PASSWORD_HASH=|' >> .env
 
 # Via Python:
 python3 -c "import bcrypt; print(bcrypt.hashpw(b'<new-pwd>', bcrypt.gensalt()).decode())"
 ```
+
+> ⚠ Bcrypt hashes contain `$` separators (e.g. `$2a$14$…`). When the value
+> ends up in `.env` and is consumed via `${ADMIN_PASSWORD_HASH}` in
+> `docker-compose.yml`, every `$` must be **doubled** (`$$`) — otherwise
+> Compose treats `$2a` as a variable reference and silently strips
+> portions of the hash before the container sees it. The `sed` snippets
+> above already do this; if you paste a hash by hand, do the doubling
+> yourself.
 
 Place the resulting `ADMIN_PASSWORD_HASH=...` line in `.env`. Then start
 the stack:
@@ -365,9 +373,11 @@ ssh <USERNAME>@<HOST-IP>
 cd /opt/servarr
 cp .env.template .env && vim .env    # fill in DOMAIN, ProtonVPN keys, API tokens, etc.
 
-# 3a. Generate the admin-app password hash and add it to .env:
+# 3a. Generate the admin-app password hash and add it to .env.
+#     The sed pipeline doubles every '$' so docker compose passes the
+#     hash through verbatim instead of interpreting `$2a` as a variable.
 docker run --rm caddy:2-alpine caddy hash-password --plaintext '<your-password>' \
-  | sed 's|^|ADMIN_PASSWORD_HASH=|' >> .env
+  | sed 's|[$]|$$|g; s|^|ADMIN_PASSWORD_HASH=|' >> .env
 
 # 4. Start.
 docker compose up -d
@@ -486,36 +496,44 @@ sudo chown 1000:1000 /var/lib/hls-cache
 
 ### 4. Configure DNS
 
-Add per-subdomain A records on your registrar. Replace `<HOST-IP>` with
-your server's public IPv4. Use AAAA for v6 if you have it.
+The recommended layout is **two records**: the bare `<DOMAIN>` (Seerr,
+the public entry) plus a wildcard for everything else. If `<DOMAIN>`
+is `mediateca.example.com`, on your registrar:
 
 | Type | Host | Value |
 | --- | --- | --- |
-| A | `streaming` | `<HOST-IP>` |
-| A | `media` | `<HOST-IP>` |
-| A | `orchestrator` | `<HOST-IP>` |
-| A | `admin` | `<HOST-IP>` |
-| A | `sonarr` | `<HOST-IP>` |
-| A | `radarr` | `<HOST-IP>` |
-| A | `prowlarr` | `<HOST-IP>` |
-| A | `bazarr` | `<HOST-IP>` |
-| A | `tv` | `<HOST-IP>` |
-| A | `qbit` | `<HOST-IP>` |
-| A | `headscale` | `<HOST-IP>` |
-| A | `hls` | `<HOST-IP>` |
-| A | `encoder-status` | `<HOST-IP>` |
+| A | `mediateca` | `<HOST-IP>` |
+| A | `*.mediateca` | `<HOST-IP>` |
 
-A wildcard `*` works too but per-subdomain records are easier to audit
-and fail-closed (an unmapped subdomain just doesn't resolve).
+(or `@` and `*` if you're using the apex of your domain). Use AAAA for
+IPv6 if you have it.
 
-Verify against the registrar's authoritative NS, not a cached resolver:
+Per-subdomain records work too (e.g. `A streaming → <HOST-IP>`,
+`A admin → <HOST-IP>`, …) and are easier to audit, but the wildcard
+is one-click less and avoids the "I forgot to add `encoder-status`"
+trap. The full list of subdomains the stack actually serves is in the
+[Routing](#routing) table above (`streaming`, `admin`, `orchestrator`,
+`sonarr`, `radarr`, `prowlarr`, `bazarr`, `tv`, `qbit`, `headscale`,
+`hls`, `encoder-status`).
+
+Verify against the registrar's authoritative NS, not a cached resolver
+(public resolvers can lag by minutes):
 
 ```sh
-dig +short streaming.<DOMAIN> @<your-registrar-ns>
+# Find the authoritative NS for your zone:
+dig +short NS <DOMAIN>
+
+# Then ask it directly. SOA serial is the canary — it changes on every
+# successful zone publish, so if it doesn't bump after you save records,
+# the registrar didn't actually push the zone (open a ticket).
+dig +short SOA <DOMAIN> @<your-registrar-ns>
+dig +short A <DOMAIN> @<your-registrar-ns>
+dig +short A streaming.<DOMAIN> @<your-registrar-ns>
 ```
 
-Wait until `<DOMAIN>` resolves before continuing — Caddy will
-fail the ACME HTTP-01 challenge otherwise.
+Wait until both `<DOMAIN>` and at least one wildcard hit (e.g.
+`streaming.<DOMAIN>`) resolve before continuing — Caddy will fail the
+ACME HTTP-01 challenge otherwise.
 
 ### 5. Configure `.env`
 
