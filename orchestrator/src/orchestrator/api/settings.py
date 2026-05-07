@@ -56,9 +56,7 @@ class SettingsPayload(BaseModel):
         safe = self.merge_offset_safe_ms
         reject = self.merge_offset_reject_ms
         if safe is not None and reject is not None and reject <= safe:
-            raise ValueError(
-                "merge_offset_reject_ms must be greater than merge_offset_safe_ms"
-            )
+            raise ValueError("merge_offset_reject_ms must be greater than merge_offset_safe_ms")
         return self
 
 

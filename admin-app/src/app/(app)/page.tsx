@@ -12,10 +12,22 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 
 export default async function Dashboard() {
   const [pending, incomplete, promoted, failed, timeseries] = await Promise.all([
-    safe(orchestrator.listItems({ status: "PENDING", limit: 1 }).then((r) => r.total), 0),
-    safe(orchestrator.listItems({ status: "INCOMPLETE", limit: 1 }).then((r) => r.total), 0),
-    safe(orchestrator.listItems({ status: "PROMOTED", limit: 1 }).then((r) => r.total), 0),
-    safe(orchestrator.listItems({ status: "FAILED", limit: 1 }).then((r) => r.total), 0),
+    safe(
+      orchestrator.listItems({ status: "PENDING", limit: 1 }).then((r) => r.total),
+      0,
+    ),
+    safe(
+      orchestrator.listItems({ status: "INCOMPLETE", limit: 1 }).then((r) => r.total),
+      0,
+    ),
+    safe(
+      orchestrator.listItems({ status: "PROMOTED", limit: 1 }).then((r) => r.total),
+      0,
+    ),
+    safe(
+      orchestrator.listItems({ status: "FAILED", limit: 1 }).then((r) => r.total),
+      0,
+    ),
     safe(orchestrator.itemsTimeseries(604800), []),
   ]);
 

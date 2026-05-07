@@ -14,11 +14,17 @@ function formatBytes(kb: number): string {
 }
 
 function Gauge({ percent, label, sub }: { percent: number; label: string; sub: string }) {
-  const data = [{ name: "used", v: percent }, { name: "free", v: 100 - percent }];
-  const color = percent < 60 ? "hsl(142 76% 36%)" : percent < 85 ? "hsl(38 92% 50%)" : "hsl(0 84% 60%)";
+  const data = [
+    { name: "used", v: percent },
+    { name: "free", v: 100 - percent },
+  ];
+  const color =
+    percent < 60 ? "hsl(142 76% 36%)" : percent < 85 ? "hsl(38 92% 50%)" : "hsl(0 84% 60%)";
   return (
     <Card>
-      <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">{label}</CardTitle></CardHeader>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm font-medium">{label}</CardTitle>
+      </CardHeader>
       <CardContent>
         <div className="relative">
           <ResponsiveContainer width="100%" height={120}>
@@ -41,7 +47,7 @@ function Gauge({ percent, label, sub }: { percent: number; label: string; sub: s
           </ResponsiveContainer>
           <div className="absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-2xl font-bold">{percent.toFixed(0)}%</div>
-            <div className="text-xs text-muted-foreground">{sub}</div>
+            <div className="text-muted-foreground text-xs">{sub}</div>
           </div>
         </div>
       </CardContent>
@@ -58,7 +64,9 @@ function LoadSparkline({ values }: { values: number[] }) {
         stroke="currentColor"
         strokeWidth="1.5"
         className="text-primary"
-        points={values.map((v, i) => `${(i / (values.length - 1)) * 100},${30 - (v / max) * 28}`).join(" ")}
+        points={values
+          .map((v, i) => `${(i / (values.length - 1)) * 100},${30 - (v / max) * 28}`)
+          .join(" ")}
       />
     </svg>
   );
@@ -82,7 +90,9 @@ export function MetricsCards() {
   if (isLoading || !data) {
     return (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Skeleton className="h-40" /><Skeleton className="h-40" /><Skeleton className="h-40" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-40" />
+        <Skeleton className="h-40" />
       </div>
     );
   }
@@ -95,14 +105,30 @@ export function MetricsCards() {
   return (
     <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Gauge percent={cpuLoadPct} label="CPU load" sub={`${data.load_avg["1m"].toFixed(2)} / ${data.cpu_count} cores`} />
-        <Gauge percent={memPct} label="Memory" sub={`${formatBytes(memUsedKb)} of ${formatBytes(data.mem.total_kb)}`} />
-        <Gauge percent={diskPct} label="Disk (data)" sub={`${(data.disk_data.free / 1e9).toFixed(1)} GB free`} />
+        <Gauge
+          percent={cpuLoadPct}
+          label="CPU load"
+          sub={`${data.load_avg["1m"].toFixed(2)} / ${data.cpu_count} cores`}
+        />
+        <Gauge
+          percent={memPct}
+          label="Memory"
+          sub={`${formatBytes(memUsedKb)} of ${formatBytes(data.mem.total_kb)}`}
+        />
+        <Gauge
+          percent={diskPct}
+          label="Disk (data)"
+          sub={`${(data.disk_data.free / 1e9).toFixed(1)} GB free`}
+        />
       </div>
       {sparkData.length >= 2 && (
         <Card>
-          <CardHeader className="pb-2"><CardTitle className="text-sm font-medium">Load avg (last 5 minutes)</CardTitle></CardHeader>
-          <CardContent><LoadSparkline values={sparkData} /></CardContent>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium">Load avg (last 5 minutes)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <LoadSparkline values={sparkData} />
+          </CardContent>
         </Card>
       )}
     </div>

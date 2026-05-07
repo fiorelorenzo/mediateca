@@ -86,7 +86,7 @@ function OverrideDialog({ item, onSaved }: { item: Item; onSaved: () => void }) 
             onChange={(e) => setLangs(e.target.value)}
             placeholder="ita, @original"
           />
-          <p className="text-sm text-muted-foreground">Leave empty to clear the override.</p>
+          <p className="text-muted-foreground text-sm">Leave empty to clear the override.</p>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)} disabled={pending}>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
@@ -47,18 +47,14 @@ export function EventFeed() {
           label: item.title,
           status: item.status,
           at: item.updated_at ?? item.created_at,
-        }))
+        })),
       ),
     staleTime: 60_000,
   });
 
-  const [feed, setFeed] = useState<FeedEntry[]>([]);
+  const seedFeed = useMemo(() => (itemsData ? itemsData.slice(0, MAX_FEED) : []), [itemsData]);
 
-  useEffect(() => {
-    if (itemsData) {
-      setFeed(itemsData.slice(0, MAX_FEED));
-    }
-  }, [itemsData]);
+  const [liveFeed, setLiveFeed] = useState<FeedEntry[]>([]);
 
   useOrchestratorEvents((ev) => {
     if (ev.event === "item.status_changed") {
@@ -68,21 +64,24 @@ export function EventFeed() {
         status: ev.data.status,
         at: new Date().toISOString(),
       };
-      setFeed((prev) => [entry, ...prev].slice(0, MAX_FEED));
+      setLiveFeed((prev) => [entry, ...prev].slice(0, MAX_FEED));
     }
   });
+
+  const feed = useMemo<FeedEntry[]>(() => {
+    if (liveFeed.length === 0) return seedFeed;
+    return [...liveFeed, ...seedFeed].slice(0, MAX_FEED);
+  }, [liveFeed, seedFeed]);
 
   return (
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Recent Activity</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-1 overflow-y-auto max-h-64 pr-1">
+      <CardContent className="max-h-64 space-y-1 overflow-y-auto pr-1">
         <AnimatePresence initial={false}>
           {feed.length === 0 && (
-            <p className="text-sm text-muted-foreground py-4 text-center">
-              No events yet
-            </p>
+            <p className="text-muted-foreground py-4 text-center text-sm">No events yet</p>
           )}
           {feed.map((entry, i) => (
             <motion.div
@@ -91,14 +90,12 @@ export function EventFeed() {
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0, x: -16 }}
               transition={{ duration: 0.2, delay: i * 0.03 }}
-              className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
+              className="hover:bg-muted/50 flex items-center gap-2 rounded-md px-2 py-1.5 text-sm"
             >
               <span className={`size-2 shrink-0 rounded-full ${dotColor(entry.status)}`} />
               <span className="flex-1 truncate">{entry.label}</span>
-              <span className="shrink-0 text-xs text-muted-foreground">
-                {entry.status}
-              </span>
-              <span className="shrink-0 text-xs text-muted-foreground tabular-nums">
+              <span className="text-muted-foreground shrink-0 text-xs">{entry.status}</span>
+              <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {relativeTime(entry.at)}
               </span>
             </motion.div>

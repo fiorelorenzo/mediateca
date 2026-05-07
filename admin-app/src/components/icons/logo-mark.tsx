@@ -27,7 +27,13 @@ export function LogoMark({ size = 24, variant = "stacked", className }: Props) {
   }
   // stacked (default)
   return (
-    <svg width={size} height={size} viewBox="0 0 32 32" className={cn(className)} fill="currentColor">
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 32 32"
+      className={cn(className)}
+      fill="currentColor"
+    >
       <rect x="2" y="20" width="28" height="6" rx="1.5" opacity="0.45" />
       <rect x="4" y="13" width="24" height="6" rx="1.5" opacity="0.7" />
       <rect x="6" y="6" width="20" height="6" rx="1.5" opacity="1" />

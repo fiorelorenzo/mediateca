@@ -19,7 +19,7 @@ const items = [
 export function Sidebar() {
   const path = usePathname();
   return (
-    <aside className="hidden w-64 shrink-0 border-r bg-muted/30 lg:block">
+    <aside className="bg-muted/30 hidden w-64 shrink-0 border-r lg:block">
       <div className="flex h-14 items-center border-b px-4">
         <Logo size={24} withWordmark />
       </div>
@@ -32,7 +32,7 @@ export function Sidebar() {
               key={it.href}
               href={it.href}
               className={cn(
-                "flex items-center gap-3 rounded-md px-3 py-2 text-sm hover:bg-accent",
+                "hover:bg-accent flex items-center gap-3 rounded-md px-3 py-2 text-sm",
                 active && "bg-accent font-medium",
               )}
             >

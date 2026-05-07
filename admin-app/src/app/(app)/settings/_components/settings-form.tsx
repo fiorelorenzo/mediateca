@@ -70,7 +70,7 @@ function SettingsFormInner({ initial }: FormProps) {
           onChange={(e) => setLangs(e.target.value)}
           placeholder="ita, @original"
         />
-        <p className="text-sm text-muted-foreground">
+        <p className="text-muted-foreground text-sm">
           ISO-639-2 codes; <code>@original</code> resolves per-item.
         </p>
       </div>
@@ -101,7 +101,7 @@ function SettingsFormInner({ initial }: FormProps) {
         <Switch id="hls" checked={hls} onCheckedChange={setHls} />
         <div>
           <Label htmlFor="hls">HLS encoding</Label>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             When off, files are promoted as-is. Container must be running.
           </p>
         </div>
@@ -121,7 +121,7 @@ function SettingsFormInner({ initial }: FormProps) {
             value={durationThreshold}
             onChange={(e) => setDurationThreshold(Number(e.target.value))}
           />
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Merge is rejected if the two files differ in duration by more than this value.
           </p>
         </div>
@@ -136,7 +136,7 @@ function SettingsFormInner({ initial }: FormProps) {
             value={offsetSafe}
             onChange={(e) => setOffsetSafe(Number(e.target.value))}
           />
-          <p className="text-sm text-muted-foreground">
+          <p className="text-muted-foreground text-sm">
             Tracks are considered perfectly aligned when the detected offset is below this value.
           </p>
         </div>
@@ -151,18 +151,23 @@ function SettingsFormInner({ initial }: FormProps) {
             value={offsetReject}
             onChange={(e) => setOffsetReject(Number(e.target.value))}
           />
-          <p className="text-sm text-muted-foreground">
-            Merge is rejected when the detected audio drift exceeds this value (must be &gt;
-            safe limit).
+          <p className="text-muted-foreground text-sm">
+            Merge is rejected when the detected audio drift exceeds this value (must be &gt; safe
+            limit).
           </p>
-          {offsetError && <p className="text-sm text-destructive">{offsetError}</p>}
+          {offsetError && <p className="text-destructive text-sm">{offsetError}</p>}
         </div>
       </div>
 
       <Button type="submit" disabled={save.isPending || !!offsetError}>
         <AnimatePresence mode="wait">
           {save.isSuccess ? (
-            <motion.span key="ok" initial={{ scale: 0 }} animate={{ scale: 1 }} className="flex items-center gap-1">
+            <motion.span
+              key="ok"
+              initial={{ scale: 0 }}
+              animate={{ scale: 1 }}
+              className="flex items-center gap-1"
+            >
               <Check className="size-4" /> Saved
             </motion.span>
           ) : save.isPending ? (

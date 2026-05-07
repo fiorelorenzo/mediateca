@@ -55,7 +55,7 @@ export function CFEditor() {
               Add
             </Button>
           </form>
-          <p className="mt-2 text-sm text-muted-foreground">
+          <p className="text-muted-foreground mt-2 text-sm">
             Spec edits via JSON: open the row to expand.
           </p>
         </CardContent>
@@ -67,14 +67,14 @@ export function CFEditor() {
             <CardHeader className="flex flex-row items-center justify-between space-y-0">
               <div>
                 <CardTitle className="text-base">{cf.name}</CardTitle>
-                <p className="text-sm text-muted-foreground">score {cf.score}</p>
+                <p className="text-muted-foreground text-sm">score {cf.score}</p>
               </div>
               <Button variant="destructive" size="sm" onClick={() => remove.mutate(cf.id)}>
                 Delete
               </Button>
             </CardHeader>
             <CardContent>
-              <pre className="overflow-x-auto rounded bg-muted p-2 text-xs">
+              <pre className="bg-muted overflow-x-auto rounded p-2 text-xs">
                 {JSON.stringify(cf.spec, null, 2)}
               </pre>
             </CardContent>

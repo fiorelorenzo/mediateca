@@ -1,7 +1,11 @@
 "use client";
 import { useQuery } from "@tanstack/react-query";
 
-export interface HealthEntry { key: string; healthy: boolean; reason?: string; }
+export interface HealthEntry {
+  key: string;
+  healthy: boolean;
+  reason?: string;
+}
 
 export function useServicesHealth() {
   return useQuery({

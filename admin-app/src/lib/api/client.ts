@@ -1,4 +1,11 @@
-import type { Item, Settings, SystemMetrics, ContainerStat, ServiceEntry, TimeseriesPoint } from "./types";
+import type {
+  Item,
+  Settings,
+  SystemMetrics,
+  ContainerStat,
+  ServiceEntry,
+  TimeseriesPoint,
+} from "./types";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`/api/proxy${path}`, {

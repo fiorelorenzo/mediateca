@@ -1,5 +1,6 @@
 # orchestrator/tests/unit/test_merge_safety.py
 """Unit tests for orchestrator.core.merge_safety."""
+
 from __future__ import annotations
 
 import io
@@ -12,7 +13,6 @@ from scipy.io import wavfile  # type: ignore[import-untyped]
 
 from orchestrator.core.merge_safety import (
     DURATION_REJECT_THRESHOLD_S,
-    OFFSET_REJECT_MS,
     OFFSET_SAFE_MS,
     audio_offset_ms,
     duration_seconds,
@@ -201,9 +201,7 @@ def _write_wav(path: Path, duration_s: float = 35.0) -> None:
     path.write_bytes(_sine_wav(duration_s))
 
 
-def _shifted_wav(
-    base_wav: bytes, shift_ms: float, sample_rate: int = _SAMPLE_RATE
-) -> bytes:
+def _shifted_wav(base_wav: bytes, shift_ms: float, sample_rate: int = _SAMPLE_RATE) -> bytes:
     """Shift a WAV signal by prepending/removing silence.
 
     Positive shift_ms → addition lags existing (prepend zeros to addition).
@@ -228,7 +226,6 @@ def _shifted_wav(
 
 def _mock_ffmpeg_extract(existing_bytes: bytes, addition_bytes: bytes):
     """Patch subprocess.run so that ffmpeg "extraction" just writes our pre-built WAVs."""
-    import subprocess
 
     def _fake_run(cmd: list[str], **kwargs):  # type: ignore[no-untyped-def]
         # cmd contains the output path as the last argument

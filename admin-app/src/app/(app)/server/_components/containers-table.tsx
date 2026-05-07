@@ -48,7 +48,7 @@ export function ContainersTable() {
                 </Badge>
               </TableCell>
               <TableCell className="font-mono text-xs">{c.image}</TableCell>
-              <TableCell className="text-right text-muted-foreground">
+              <TableCell className="text-muted-foreground text-right">
                 {c.mem ? `${(c.mem / 1024 / 1024).toFixed(0)} MB` : "—"}
               </TableCell>
             </TableRow>

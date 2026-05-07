@@ -23,11 +23,13 @@ log = get_logger(__name__)
 def containers() -> list[dict[str, Any]]:
     out = []
     for c in docker_client().containers.list(all=True):
-        out.append({
-            "name": c.name,
-            "status": c.status,
-            "image": c.image.tags[0] if c.image.tags else c.image.id,
-        })
+        out.append(
+            {
+                "name": c.name,
+                "status": c.status,
+                "image": c.image.tags[0] if c.image.tags else c.image.id,
+            }
+        )
     return out
 
 
@@ -71,12 +73,14 @@ def _watcher_thread(
             parsed = _parse_docker_line(raw)
             if not parsed:
                 continue
-            payload = json.dumps({
-                "container": container_name,
-                "ts": parsed["ts"],
-                "stream": "stdout",
-                "line": parsed["line"],
-            })
+            payload = json.dumps(
+                {
+                    "container": container_name,
+                    "ts": parsed["ts"],
+                    "stream": "stdout",
+                    "line": parsed["line"],
+                }
+            )
             try:
                 loop.call_soon_threadsafe(queue.put_nowait, payload)
             except RuntimeError:

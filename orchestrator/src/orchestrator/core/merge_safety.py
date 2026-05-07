@@ -12,6 +12,7 @@ Thresholds (easy to tune):
   OFFSET_REJECT_MS            = 2000  (merge_safety.py:L34)
   SAMPLE_SECONDS              = 30    (audio_offset_ms default arg)
 """
+
 from __future__ import annotations
 
 import re
@@ -117,9 +118,12 @@ def duration_seconds(path: Path) -> float:
     result = subprocess.run(
         [
             "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_entries", "format=duration",
+            "-v",
+            "quiet",
+            "-print_format",
+            "json",
+            "-show_entries",
+            "format=duration",
             str(path),
         ],
         capture_output=True,
@@ -188,12 +192,18 @@ def audio_offset_ms(
 
         for src, dst in ((existing, wav_existing), (addition, wav_addition)):
             cmd = [
-                "ffmpeg", "-y",
-                "-ss", str(start_seconds),
-                "-i", str(src),
-                "-t", str(sample_seconds),
-                "-ac", "1",            # mono
-                "-ar", str(_SAMPLE_RATE),
+                "ffmpeg",
+                "-y",
+                "-ss",
+                str(start_seconds),
+                "-i",
+                str(src),
+                "-t",
+                str(sample_seconds),
+                "-ac",
+                "1",  # mono
+                "-ar",
+                str(_SAMPLE_RATE),
                 "-vn",
                 str(dst),
             ]

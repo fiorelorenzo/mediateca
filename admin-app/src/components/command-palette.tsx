@@ -28,14 +28,14 @@ import { api } from "@/lib/api/client";
 import { toast } from "sonner";
 
 const PAGES = [
-  { href: "/",          label: "Dashboard",      icon: Home },
-  { href: "/library",   label: "Library",        icon: Library },
-  { href: "/requests",  label: "Requests",       icon: Inbox },
-  { href: "/downloads", label: "Downloads",      icon: Download },
-  { href: "/server",    label: "Server",         icon: Server },
-  { href: "/services",  label: "Services",       icon: Layers },
-  { href: "/settings",  label: "Settings",       icon: Settings },
-  { href: "/logs",      label: "Logs",           icon: ScrollText },
+  { href: "/", label: "Dashboard", icon: Home },
+  { href: "/library", label: "Library", icon: Library },
+  { href: "/requests", label: "Requests", icon: Inbox },
+  { href: "/downloads", label: "Downloads", icon: Download },
+  { href: "/server", label: "Server", icon: Server },
+  { href: "/services", label: "Services", icon: Layers },
+  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/logs", label: "Logs", icon: ScrollText },
 ];
 
 export function CommandPalette() {
@@ -79,7 +79,12 @@ export function CommandPalette() {
         </CommandGroup>
         <CommandSeparator />
         <CommandGroup heading="Actions">
-          <CommandItem onSelect={() => { setOpen(false); sync.mutate(); }}>
+          <CommandItem
+            onSelect={() => {
+              setOpen(false);
+              sync.mutate();
+            }}
+          >
             <RefreshCw className="mr-2 size-4" />
             Recyclarr sync now
           </CommandItem>

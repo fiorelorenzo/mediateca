@@ -464,8 +464,7 @@ async def _merge_into_existing(
         abs_offset = abs(offset)
         if abs_offset > offset_reject:
             reason = (
-                f"merge rejected: audio drift {offset:.0f}ms — "
-                "likely different cuts/framerates"
+                f"merge rejected: audio drift {offset:.0f}ms — likely different cuts/framerates"
             )
             log.warning("merge_safety.offset_rejected", item_id=item.id, offset_ms=offset)
             _reject_merge(

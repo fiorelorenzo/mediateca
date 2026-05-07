@@ -20,10 +20,7 @@ export function RequestsList() {
 
   const { data, isLoading } = useQuery({
     queryKey: ["seerr", filter],
-    queryFn: () =>
-      filter === "pending"
-        ? seerr.pendingRequests()
-        : seerr.allRequests(filter),
+    queryFn: () => (filter === "pending" ? seerr.pendingRequests() : seerr.allRequests(filter)),
     refetchInterval: 30_000,
   });
 
@@ -68,11 +65,7 @@ export function RequestsList() {
       {isLoading ? (
         <CardsSkeleton count={6} />
       ) : (data?.results?.length ?? 0) === 0 ? (
-        <EmptyState
-          icon={Inbox}
-          title="No requests"
-          description="Nothing pending right now."
-        />
+        <EmptyState icon={Inbox} title="No requests" description="Nothing pending right now." />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {data!.results.map((r) => (
@@ -84,11 +77,8 @@ export function RequestsList() {
               </CardHeader>
               <CardContent className="space-y-2 text-sm">
                 <div className="text-muted-foreground">
-                  {r.type} · by{" "}
-                  {r.requestedBy?.displayName ??
-                    r.requestedBy?.username ??
-                    "anon"}{" "}
-                  · {STATUS[r.status as 1 | 2 | 3] ?? "?"}
+                  {r.type} · by {r.requestedBy?.displayName ?? r.requestedBy?.username ?? "anon"} ·{" "}
+                  {STATUS[r.status as 1 | 2 | 3] ?? "?"}
                 </div>
                 {r.status === 1 && (
                   <div className="flex gap-2 pt-2">

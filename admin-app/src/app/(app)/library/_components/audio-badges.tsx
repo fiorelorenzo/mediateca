@@ -20,7 +20,7 @@ export function AudioBadges({
           {m}?
         </Badge>
       ))}
-      {present.length === 0 && <span className="text-xs text-muted-foreground">unknown</span>}
+      {present.length === 0 && <span className="text-muted-foreground text-xs">unknown</span>}
     </div>
   );
 }

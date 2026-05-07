@@ -9,8 +9,21 @@ import { Library } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { EmptyState } from "@/components/empty-state";
 
@@ -21,28 +34,43 @@ import { useOrchestratorEvents } from "@/lib/hooks/use-events";
 import { AudioBadges } from "./audio-badges";
 
 const STATUS_FILTERS: (ItemStatus | "ALL")[] = [
-  "ALL", "PENDING", "INCOMPLETE", "PROMOTED", "FAILED", "POLICY_OVERRIDDEN", "FROZEN_AS_IS",
+  "ALL",
+  "PENDING",
+  "INCOMPLETE",
+  "PROMOTED",
+  "FAILED",
+  "POLICY_OVERRIDDEN",
+  "FROZEN_AS_IS",
 ];
 
 const STATUS_VARIANT: Record<ItemStatus, "default" | "secondary" | "destructive" | "outline"> = {
-  PENDING: "secondary", ANALYZING: "secondary", PROMOTING: "secondary",
-  INCOMPLETE: "outline", MERGING: "secondary", ENCODING: "secondary",
-  PROMOTED: "default", FROZEN_AS_IS: "outline", POLICY_OVERRIDDEN: "outline",
-  FAILED: "destructive", LEGACY: "outline",
+  PENDING: "secondary",
+  ANALYZING: "secondary",
+  PROMOTING: "secondary",
+  INCOMPLETE: "outline",
+  MERGING: "secondary",
+  ENCODING: "secondary",
+  PROMOTED: "default",
+  FROZEN_AS_IS: "outline",
+  POLICY_OVERRIDDEN: "outline",
+  FAILED: "destructive",
+  LEGACY: "outline",
 };
 
 export function ItemsTable() {
-  const [status, setStatus] = useState<(ItemStatus | "ALL")>("ALL");
+  const [status, setStatus] = useState<ItemStatus | "ALL">("ALL");
   const [q, setQ] = useState("");
   const [highlightId, setHighlightId] = useState<number | null>(null);
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ["items", status, q],
-    queryFn: () => api.listItems({
-      status: status === "ALL" ? undefined : status,
-      q: q || undefined, limit: 100,
-    }),
+    queryFn: () =>
+      api.listItems({
+        status: status === "ALL" ? undefined : status,
+        q: q || undefined,
+        limit: 100,
+      }),
   });
 
   useOrchestratorEvents((ev) => {
@@ -63,9 +91,15 @@ export function ItemsTable() {
           className="max-w-xs"
         />
         <Select value={status} onValueChange={(v) => setStatus(v as ItemStatus | "ALL")}>
-          <SelectTrigger className="w-44"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-44">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
-            {STATUS_FILTERS.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            {STATUS_FILTERS.map((s) => (
+              <SelectItem key={s} value={s}>
+                {s}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -106,22 +140,27 @@ export function ItemsTable() {
                         initial={{ opacity: 0 }}
                         animate={{
                           opacity: 1,
-                          backgroundColor: highlightId === it.id
-                            ? "hsl(var(--primary) / 0.10)"
-                            : "transparent",
+                          backgroundColor:
+                            highlightId === it.id ? "hsl(var(--primary) / 0.10)" : "transparent",
                         }}
                         exit={{ opacity: 0 }}
                         transition={{ duration: 0.4 }}
-                        className="border-b hover:bg-accent/50"
+                        className="hover:bg-accent/50 border-b"
                       >
                         <TableCell>
                           <Link href={`/library/${it.id}`} className="font-medium hover:underline">
                             {it.title}
                           </Link>
                         </TableCell>
-                        <TableCell><Badge variant={STATUS_VARIANT[it.status]}>{it.status}</Badge></TableCell>
-                        <TableCell><AudioBadges present={it.audio_present} required={it.audio_required} /></TableCell>
-                        <TableCell className="text-right text-muted-foreground">{it.retry_count}</TableCell>
+                        <TableCell>
+                          <Badge variant={STATUS_VARIANT[it.status]}>{it.status}</Badge>
+                        </TableCell>
+                        <TableCell>
+                          <AudioBadges present={it.audio_present} required={it.audio_required} />
+                        </TableCell>
+                        <TableCell className="text-muted-foreground text-right">
+                          {it.retry_count}
+                        </TableCell>
                       </motion.tr>
                     ))}
                   </AnimatePresence>
@@ -132,7 +171,7 @@ export function ItemsTable() {
         </motion.div>
       </AnimatePresence>
 
-      {data && <div className="text-sm text-muted-foreground">{data.total} total</div>}
+      {data && <div className="text-muted-foreground text-sm">{data.total} total</div>}
     </div>
   );
 }

@@ -41,9 +41,7 @@ def timeseries(
     session: Session = Depends(get_session),
 ) -> list[dict[str, Any]]:
     cutoff = datetime.utcnow() - timedelta(seconds=since)
-    rows = session.exec(
-        select(History).where(History.created_at >= cutoff)
-    ).all()
+    rows = session.exec(select(History).where(History.created_at >= cutoff)).all()
     bucket: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     for h in rows:
         day = h.created_at.strftime("%Y-%m-%d")

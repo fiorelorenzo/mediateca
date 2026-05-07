@@ -9,6 +9,7 @@ invocations are required.  We verify that:
   - Compatible files          → merge proceeds normally (MERGED event, PROMOTED).
   - Release-group mismatch    → warning only, merge NOT blocked.
 """
+
 from __future__ import annotations
 
 import json
@@ -166,9 +167,7 @@ def test_duration_mismatch_rejects_merge(tmp_path: Path, monkeypatch) -> None:
             select(Item).where(Item.source == ItemSource.RADARR, Item.source_id == movie_id)
         ).one()
         events = s.exec(
-            select(History).where(
-                History.item_id == item.id, History.event == "MERGE_REJECTED"
-            )
+            select(History).where(History.item_id == item.id, History.event == "MERGE_REJECTED")
         ).all()
         assert len(events) >= 1
         detail = events[0].detail or {}
@@ -226,9 +225,7 @@ def test_audio_drift_rejects_merge(tmp_path: Path, monkeypatch) -> None:
             select(Item).where(Item.source == ItemSource.RADARR, Item.source_id == movie_id)
         ).one()
         events = s.exec(
-            select(History).where(
-                History.item_id == item.id, History.event == "MERGE_REJECTED"
-            )
+            select(History).where(History.item_id == item.id, History.event == "MERGE_REJECTED")
         ).all()
         assert len(events) >= 1
 
@@ -244,7 +241,7 @@ def test_compatible_files_merge_succeeds(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INCOMING_ROOT", str(tmp_path / "incoming"))
 
     movie_id = next(_MOVIE_IDS)
-    library_path = _setup_ita_only_item(tmp_path, movie_id)
+    _setup_ita_only_item(tmp_path, movie_id)
 
     staging2 = tmp_path / "staging2" / "movies" / "Dune (2021)"
     staging2.mkdir(parents=True)
@@ -297,7 +294,7 @@ def test_release_group_mismatch_does_not_block_merge(tmp_path: Path, monkeypatch
     monkeypatch.setenv("INCOMING_ROOT", str(tmp_path / "incoming"))
 
     movie_id = next(_MOVIE_IDS)
-    library_path = _setup_ita_only_item(
+    _setup_ita_only_item(
         tmp_path,
         movie_id,
         scene_name="Dune.2021.iTALiAN.WEBDL-DDLBits",
@@ -313,9 +310,7 @@ def test_release_group_mismatch_does_not_block_merge(tmp_path: Path, monkeypatch
         return_value=httpx.Response(200, json={})
     )
     # The addition has a DIFFERENT release group (RARBG vs DDLBits)
-    payload2 = _make_radarr_payload(
-        src2, movie_id, scene_name="Dune.2021.ENGLISH.WEBDL-RARBG"
-    )
+    payload2 = _make_radarr_payload(src2, movie_id, scene_name="Dune.2021.ENGLISH.WEBDL-RARBG")
     with Session(get_engine()) as s:
         _add_inbox(s, payload2)
 

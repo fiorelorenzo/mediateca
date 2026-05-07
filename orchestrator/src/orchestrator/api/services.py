@@ -7,19 +7,19 @@ from orchestrator.config import get_settings
 router = APIRouter(prefix="/api/services", tags=["services"], dependencies=[require_admin_token])
 
 PROBES = {
-    "sonarr":      ("/api/v3/system/status", "sonarr_url",   "sonarr_api_key"),
-    "radarr":      ("/api/v3/system/status", "radarr_url",   "radarr_api_key"),
-    "prowlarr":    ("/api/v1/system/status", "prowlarr_url", "prowlarr_api_key"),
-    "bazarr":      ("/api/system/status",    "bazarr_url",   "bazarr_api_key"),
-    "jellyfin":    ("/System/Info/Public",   "jellyfin_url", None),
-    "seerr":       ("/api/v1/status",        "seerr_url",    None),
+    "sonarr": ("/api/v3/system/status", "sonarr_url", "sonarr_api_key"),
+    "radarr": ("/api/v3/system/status", "radarr_url", "radarr_api_key"),
+    "prowlarr": ("/api/v1/system/status", "prowlarr_url", "prowlarr_api_key"),
+    "bazarr": ("/api/system/status", "bazarr_url", "bazarr_api_key"),
+    "jellyfin": ("/System/Info/Public", "jellyfin_url", None),
+    "seerr": ("/api/v1/status", "seerr_url", None),
 }
 
 
 @router.get("/health")
-async def health() -> list[dict]:
+async def health() -> list[dict[str, object]]:
     s = get_settings()
-    out: list[dict] = []
+    out: list[dict[str, object]] = []
     async with httpx.AsyncClient(timeout=5.0) as c:
         for key, (path, url_attr, key_attr) in PROBES.items():
             url = getattr(s, url_attr, None)
@@ -37,6 +37,7 @@ async def health() -> list[dict]:
             except Exception:
                 out.append({"key": key, "healthy": False})
     return out
+
 
 _SERVICES = [
     {"key": "sonarr", "name": "Sonarr", "subdomain": "sonarr"},

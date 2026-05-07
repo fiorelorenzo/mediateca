@@ -24,10 +24,12 @@ def _seed() -> None:
         s.refresh(i1)
         s.refresh(i2)
         today = datetime.utcnow().replace(microsecond=0)
-        s.add_all([
-            History(item_id=i1.id, event="PROMOTED", created_at=today - timedelta(days=2)),
-            History(item_id=i2.id, event="INCOMPLETE", created_at=today - timedelta(days=1)),
-        ])
+        s.add_all(
+            [
+                History(item_id=i1.id, event="PROMOTED", created_at=today - timedelta(days=2)),
+                History(item_id=i2.id, event="INCOMPLETE", created_at=today - timedelta(days=1)),
+            ]
+        )
         s.commit()
 
 

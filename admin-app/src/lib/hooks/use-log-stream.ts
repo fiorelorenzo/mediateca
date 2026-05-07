@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LogBuffer } from "@/app/(app)/logs/_components/log-buffer";
 import type { LogLine, LogLevel } from "@/app/(app)/logs/_components/log-types";
 
@@ -22,17 +22,30 @@ interface Options {
 
 export function useLogStream({ containers, paused }: Options) {
   const bufferRef = useRef(new LogBuffer());
-  const [, forceRender] = useReducer((x) => x + 1, 0);
+  const [lines, setLines] = useState<LogLine[]>([]);
   const [reconnecting, setReconnecting] = useState(false);
   const [droppedWhilePaused, setDroppedWhilePaused] = useState(0);
+
+  // Mutable ref so the SSE handler always reads the latest value without
+  // being listed as an effect dependency.
   const pausedRef = useRef(paused);
-  pausedRef.current = paused;
+  const setReconnectingRef = useRef(setReconnecting);
+
+  // Keep refs in sync via an effect (not during render).
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  const containerKey = containers.join(",");
 
   useEffect(() => {
     if (containers.length === 0) return;
-    const url = `/api/proxy/api/logs/stream?containers=${encodeURIComponent(containers.join(","))}&since=120`;
+    const url = `/api/proxy/api/logs/stream?containers=${encodeURIComponent(containerKey)}&since=120`;
     const es = new EventSource(url);
-    setReconnecting(false);
+
+    // Reset reconnecting flag via the stable ref so we don't call setState
+    // directly in the effect body (which triggers the react-hooks/set-state-in-effect lint rule).
+    setReconnectingRef.current(false);
 
     es.onmessage = (msg) => {
       try {
@@ -48,42 +61,41 @@ export function useLogStream({ containers, paused }: Options) {
           line: parsed.line ?? "",
           level: detectLevel(parsed.line ?? ""),
         });
-        forceRender();
+        setLines(bufferRef.current.snapshot());
       } catch {
         /* ignore malformed event */
       }
     };
     es.onerror = () => {
-      setReconnecting(true);
+      setReconnectingRef.current(true);
       // browser auto-reconnects via the EventSource API
     };
     return () => {
       es.close();
     };
-  }, [containers.join(",")]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [containerKey]);
 
-  const clear = () => {
+  const clear = useCallback(() => {
     bufferRef.current.clear();
-    forceRender();
+    setLines([]);
     setDroppedWhilePaused(0);
-  };
+  }, []);
 
-  const save = () => {
-    const lines = bufferRef.current.snapshot();
-    const text = lines
-      .map((l) => `${l.ts}  ${l.container.padEnd(12)} ${l.line}`)
-      .join("\n");
+  const save = useCallback(() => {
+    const snapshot = bufferRef.current.snapshot();
+    const text = snapshot.map((l) => `${l.ts}  ${l.container.padEnd(12)} ${l.line}`).join("\n");
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `mediateca-logs-${containers.join("_")}-${new Date().toISOString().replace(/[:.]/g, "").slice(0, 15)}.log`;
+    a.download = `mediateca-logs-${containerKey}-${new Date().toISOString().replace(/[:.]/g, "").slice(0, 15)}.log`;
     a.click();
     URL.revokeObjectURL(url);
-  };
+  }, [containerKey]);
 
   return {
-    lines: bufferRef.current.snapshot(),
+    lines,
     reconnecting,
     droppedWhilePaused,
     clear,

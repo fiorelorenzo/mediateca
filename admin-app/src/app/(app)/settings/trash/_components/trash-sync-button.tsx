@@ -11,7 +11,7 @@ export function TrashSyncButton() {
         {m.isPending ? "Starting…" : "Sync now"}
       </Button>
       {m.isSuccess && <span className="text-sm text-emerald-600">Sync started.</span>}
-      {m.isError && <span className="text-sm text-destructive">{(m.error as Error).message}</span>}
+      {m.isError && <span className="text-destructive text-sm">{(m.error as Error).message}</span>}
     </div>
   );
 }

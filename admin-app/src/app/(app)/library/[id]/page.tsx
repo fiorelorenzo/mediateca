@@ -1,14 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import {
-  Check,
-  GitMerge,
-  AlertCircle,
-  Lock,
-  Tag,
-  Search,
-  Inbox,
-} from "lucide-react";
+import { Check, GitMerge, AlertCircle, Lock, Tag, Search, Inbox } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { orchestrator } from "@/lib/api/orchestrator";
@@ -46,7 +38,7 @@ function HistoryTimeline({ history }: { history: HistoryEvent[] }) {
   }
 
   return (
-    <ol className="relative border-l border-border ml-3 space-y-6">
+    <ol className="border-border relative ml-3 space-y-6 border-l">
       {history.map((h, i) => {
         const Icon = EVENT_ICON[h.event] ?? AlertCircle;
         const colorClass = EVENT_COLOR[h.event] ?? "text-muted-foreground";
@@ -55,22 +47,20 @@ function HistoryTimeline({ history }: { history: HistoryEvent[] }) {
           <li key={i} className="ml-6">
             {/* Dot on the timeline */}
             <span
-              className={`absolute -left-3 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background ${colorClass}`}
+              className={`border-border bg-background absolute -left-3 flex h-6 w-6 items-center justify-center rounded-full border ${colorClass}`}
             >
               <Icon className="h-3.5 w-3.5" />
             </span>
 
             {/* Event name + timestamp */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className={`font-mono text-sm font-semibold ${colorClass}`}>
-                {h.event}
-              </span>
-              <time className="text-xs text-muted-foreground">{h.created_at}</time>
+              <span className={`font-mono text-sm font-semibold ${colorClass}`}>{h.event}</span>
+              <time className="text-muted-foreground text-xs">{h.created_at}</time>
             </div>
 
             {/* Optional JSON detail */}
             {h.detail && Object.keys(h.detail).length > 0 && (
-              <pre className="mt-1 rounded bg-muted px-3 py-2 text-xs overflow-x-auto whitespace-pre-wrap break-all">
+              <pre className="bg-muted mt-1 overflow-x-auto rounded px-3 py-2 text-xs break-all whitespace-pre-wrap">
                 {JSON.stringify(h.detail, null, 2)}
               </pre>
             )}
@@ -102,7 +92,7 @@ export default async function ItemDetail(props: { params: Promise<{ id: string }
         </Button>
       </div>
       <h1 className="text-3xl font-semibold tracking-tight">{item.title}</h1>
-      <div className="text-sm text-muted-foreground">
+      <div className="text-muted-foreground text-sm">
         {item.source} · id #{item.source_id} · status: <strong>{item.status}</strong>
         {item.status_reason && ` — ${item.status_reason}`}
       </div>

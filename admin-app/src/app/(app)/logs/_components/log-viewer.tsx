@@ -8,7 +8,11 @@ import { LogToolbar } from "./log-toolbar";
 import { LogRow } from "./log-row";
 import { useLogStream } from "@/lib/hooks/use-log-stream";
 
-interface ContainerEntry { name: string; status: string; image: string; }
+interface ContainerEntry {
+  name: string;
+  status: string;
+  image: string;
+}
 
 const DEFAULT = ["orchestrator", "sonarr", "radarr"];
 
@@ -29,7 +33,9 @@ export function LogViewer() {
     try {
       const raw = localStorage.getItem("logs.selected");
       return raw ? JSON.parse(raw) : DEFAULT;
-    } catch { return DEFAULT; }
+    } catch {
+      return DEFAULT;
+    }
   });
   useEffect(() => {
     localStorage.setItem("logs.selected", JSON.stringify(selected));
@@ -39,16 +45,24 @@ export function LogViewer() {
   const [paused, setPaused] = useState(false);
   const [autoscroll, setAutoscroll] = useState(true);
 
-  const { lines, reconnecting, droppedWhilePaused, clear, save } = useLogStream({ containers: selected, paused });
+  const { lines, reconnecting, droppedWhilePaused, clear, save } = useLogStream({
+    containers: selected,
+    paused,
+  });
 
   const filtered = useMemo(() => {
     if (!filter) return lines;
     let rx: RegExp;
-    try { rx = new RegExp(filter, "i"); } catch { return lines.filter((l) => l.line.toLowerCase().includes(filter.toLowerCase())); }
+    try {
+      rx = new RegExp(filter, "i");
+    } catch {
+      return lines.filter((l) => l.line.toLowerCase().includes(filter.toLowerCase()));
+    }
     return lines.filter((l) => rx.test(l.line));
   }, [lines, filter]);
 
   const parentRef = useRef<HTMLDivElement>(null);
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is not memoizable; LogViewer opts out of React Compiler memoization
   const virtualizer = useVirtualizer({
     count: filtered.length,
     getScrollElement: () => parentRef.current,
@@ -80,9 +94,11 @@ export function LogViewer() {
         onSave={save}
       />
 
-      {reconnecting && <div className="text-xs text-amber-600 dark:text-amber-400">Reconnecting…</div>}
+      {reconnecting && (
+        <div className="text-xs text-amber-600 dark:text-amber-400">Reconnecting…</div>
+      )}
 
-      <div ref={parentRef} className="h-[70vh] overflow-y-auto rounded-md border bg-muted/10">
+      <div ref={parentRef} className="bg-muted/10 h-[70vh] overflow-y-auto rounded-md border">
         <div style={{ height: virtualizer.getTotalSize(), position: "relative" }}>
           {virtualizer.getVirtualItems().map((vi) => (
             <LogRow
@@ -90,7 +106,9 @@ export function LogViewer() {
               line={filtered[vi.index]}
               style={{
                 position: "absolute",
-                top: 0, left: 0, right: 0,
+                top: 0,
+                left: 0,
+                right: 0,
                 transform: `translateY(${vi.start}px)`,
               }}
             />
@@ -98,7 +116,7 @@ export function LogViewer() {
         </div>
       </div>
 
-      <div className="text-xs text-muted-foreground">
+      <div className="text-muted-foreground text-xs">
         {filtered.length} / {lines.length} lines
       </div>
     </div>

@@ -19,7 +19,7 @@ export default async function TrashPage() {
           <CardTitle>Manual sync</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="mb-3 text-sm text-muted-foreground">
+          <p className="text-muted-foreground mb-3 text-sm">
             Triggers <code>recyclarr sync</code> via the orchestrator.
           </p>
           <TrashSyncButton />

@@ -5,7 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
-interface ContainerEntry { name: string; status: string; }
+interface ContainerEntry {
+  name: string;
+  status: string;
+}
 
 interface Props {
   containers: ContainerEntry[];
@@ -24,7 +27,7 @@ interface Props {
 
 export function LogToolbar(p: Props) {
   return (
-    <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+    <div className="bg-muted/30 space-y-2 rounded-md border p-3">
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex flex-wrap gap-1">
           {p.containers.map((c) => {
@@ -33,7 +36,9 @@ export function LogToolbar(p: Props) {
               <button
                 key={c.name}
                 onClick={() => {
-                  p.onSelectedChange(on ? p.selected.filter((n) => n !== c.name) : [...p.selected, c.name]);
+                  p.onSelectedChange(
+                    on ? p.selected.filter((n) => n !== c.name) : [...p.selected, c.name],
+                  );
                 }}
                 className={
                   "rounded-full border px-2 py-0.5 text-xs transition " +
@@ -60,14 +65,24 @@ export function LogToolbar(p: Props) {
             {p.paused ? <Play className="size-4" /> : <Pause className="size-4" />}
             <span className="ml-1">{p.paused ? "Resume" : "Pause"}</span>
             {p.paused && p.droppedWhilePaused > 0 && (
-              <Badge variant="secondary" className="ml-2">{p.droppedWhilePaused} dropped</Badge>
+              <Badge variant="secondary" className="ml-2">
+                {p.droppedWhilePaused} dropped
+              </Badge>
             )}
           </Button>
-          <Button size="sm" variant={p.autoscroll ? "default" : "outline"} onClick={p.onAutoscrollToggle}>
+          <Button
+            size="sm"
+            variant={p.autoscroll ? "default" : "outline"}
+            onClick={p.onAutoscrollToggle}
+          >
             <ChevronsDown className="size-4" /> <span className="ml-1">Auto</span>
           </Button>
-          <Button size="sm" variant="outline" onClick={p.onClear}><Eraser className="size-4" /></Button>
-          <Button size="sm" variant="outline" onClick={p.onSave}><Download className="size-4" /></Button>
+          <Button size="sm" variant="outline" onClick={p.onClear}>
+            <Eraser className="size-4" />
+          </Button>
+          <Button size="sm" variant="outline" onClick={p.onSave}>
+            <Download className="size-4" />
+          </Button>
         </div>
       </div>
     </div>

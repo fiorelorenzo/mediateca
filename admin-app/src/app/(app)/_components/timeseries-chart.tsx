@@ -1,12 +1,6 @@
 "use client";
 
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-} from "recharts";
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid } from "recharts";
 import {
   ChartContainer,
   ChartTooltip,
@@ -57,12 +51,7 @@ export function TimeseriesChart({ data }: TimeseriesChartProps) {
               ))}
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} />
-            <XAxis
-              dataKey="label"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fontSize: 11 }}
-            />
+            <XAxis dataKey="label" tickLine={false} axisLine={false} tick={{ fontSize: 11 }} />
             <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={28} />
             <ChartTooltip content={<ChartTooltipContent />} />
             <ChartLegend content={<ChartLegendContent />} />
