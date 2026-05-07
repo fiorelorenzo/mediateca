@@ -426,9 +426,16 @@ async def _merge_into_existing(
     except RuntimeError as exc:
         log.warning("merge_safety.duration_probe_failed", item_id=item.id, error=str(exc))
 
+    # Read thresholds from runtime settings, falling back to module-level defaults
+    dur_threshold = float(
+        runtime.get("merge_duration_reject_threshold_s", DURATION_REJECT_THRESHOLD_S)
+    )
+    offset_safe = float(runtime.get("merge_offset_safe_ms", OFFSET_SAFE_MS))
+    offset_reject = float(runtime.get("merge_offset_reject_ms", OFFSET_REJECT_MS))
+
     if existing_dur is not None and addition_dur is not None:
         dur_diff = abs(existing_dur - addition_dur)
-        if dur_diff > DURATION_REJECT_THRESHOLD_S:
+        if dur_diff > dur_threshold:
             reason = (
                 f"merge rejected: duration mismatch "
                 f"(existing={existing_dur:.1f}s, new={addition_dur:.1f}s, "
@@ -455,7 +462,7 @@ async def _merge_into_existing(
     offset = audio_offset_ms(library_path, source_file)
     if offset is not None:
         abs_offset = abs(offset)
-        if abs_offset > OFFSET_REJECT_MS:
+        if abs_offset > offset_reject:
             reason = (
                 f"merge rejected: audio drift {offset:.0f}ms — "
                 "likely different cuts/framerates"
@@ -469,7 +476,7 @@ async def _merge_into_existing(
                 {"offset_ms": offset},
             )
             return
-        if abs_offset > OFFSET_SAFE_MS:
+        if abs_offset > offset_safe:
             sync_offset_ms = int(round(offset))
             log.info(
                 "merge_safety.offset_sync_applied",

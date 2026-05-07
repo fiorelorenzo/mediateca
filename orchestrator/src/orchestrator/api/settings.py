@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from sqlmodel import Session, select
 
 from orchestrator.api.auth import require_admin_token
@@ -19,6 +19,9 @@ class SettingsPayload(BaseModel):
     retry_interval_hours: int | None = None
     accept_as_is_after_attempts: int | None = None
     hls_enabled: bool | None = None
+    merge_duration_reject_threshold_s: float | None = None
+    merge_offset_safe_ms: float | None = None
+    merge_offset_reject_ms: float | None = None
 
     @field_validator("retry_interval_hours")
     @classmethod
@@ -26,6 +29,37 @@ class SettingsPayload(BaseModel):
         if v is not None and v < 1:
             raise ValueError("retry_interval_hours must be >= 1")
         return v
+
+    @field_validator("merge_duration_reject_threshold_s")
+    @classmethod
+    def _duration_threshold_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("merge_duration_reject_threshold_s must be > 0")
+        return v
+
+    @field_validator("merge_offset_safe_ms")
+    @classmethod
+    def _offset_safe_non_negative(cls, v: float | None) -> float | None:
+        if v is not None and v < 0:
+            raise ValueError("merge_offset_safe_ms must be >= 0")
+        return v
+
+    @field_validator("merge_offset_reject_ms")
+    @classmethod
+    def _offset_reject_positive(cls, v: float | None) -> float | None:
+        if v is not None and v <= 0:
+            raise ValueError("merge_offset_reject_ms must be > 0")
+        return v
+
+    @model_validator(mode="after")
+    def _offset_reject_gt_safe(self) -> SettingsPayload:
+        safe = self.merge_offset_safe_ms
+        reject = self.merge_offset_reject_ms
+        if safe is not None and reject is not None and reject <= safe:
+            raise ValueError(
+                "merge_offset_reject_ms must be greater than merge_offset_safe_ms"
+            )
+        return self
 
 
 def _get_all(session: Session) -> dict[str, object]:

@@ -10,3 +10,15 @@ required_audio_langs:
 retry_interval_hours: 24
 accept_as_is_after_attempts: 0   # 0 = never auto-freeze
 hls_enabled: false
+
+# Merge safety thresholds
+# Maximum duration difference (seconds) between existing and new file before the
+# merge is rejected as incompatible (likely different cuts).
+merge_duration_reject_threshold_s: 3.0
+
+# Audio offset (ms) below which tracks are considered perfectly aligned.
+merge_offset_safe_ms: 100.0
+
+# Audio offset (ms) above which the merge is rejected (likely different cuts/framerates).
+# Must be greater than merge_offset_safe_ms.
+merge_offset_reject_ms: 2000.0

@@ -14,6 +14,9 @@ DEFAULTS: dict[str, object] = {
     "retry_interval_hours": 24,
     "accept_as_is_after_attempts": 0,
     "hls_enabled": False,
+    "merge_duration_reject_threshold_s": 3.0,
+    "merge_offset_safe_ms": 100.0,
+    "merge_offset_reject_ms": 2000.0,
 }
 
 
