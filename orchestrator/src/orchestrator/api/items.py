@@ -1,7 +1,8 @@
 # orchestrator/src/orchestrator/api/items.py
 from __future__ import annotations
 
-from datetime import datetime
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -32,6 +33,27 @@ def list_items(
     total = len(session.exec(stmt).all())
     rows = session.exec(stmt.offset(offset).limit(limit)).all()
     return {"total": total, "items": [r.model_dump() for r in rows]}
+
+
+@router.get("/timeseries")
+def timeseries(
+    since: int = 604800,  # default 7 days
+    session: Session = Depends(get_session),
+) -> list[dict[str, Any]]:
+    cutoff = datetime.utcnow() - timedelta(seconds=since)
+    rows = session.exec(
+        select(History).where(History.created_at >= cutoff)
+    ).all()
+    bucket: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    for h in rows:
+        day = h.created_at.strftime("%Y-%m-%d")
+        bucket[day][h.event] += 1
+    out: list[dict[str, Any]] = []
+    for day in sorted(bucket.keys()):
+        entry: dict[str, Any] = {"day": day}
+        entry.update(bucket[day])
+        out.append(entry)
+    return out
 
 
 @router.get("/{item_id}")
