@@ -9,9 +9,28 @@
 # Auth: each app handles its own (Sonarr/Radarr/Prowlarr/Bazarr →
 # Settings → General → Authentication = "Forms"; qBittorrent has its own
 # WebUI auth; Jellyfin/Seerr have native login).
-
 {
-    email {$ACME_EMAIL}
+	email {$ACME_EMAIL}
+}
+
+# ─── Anti-indexing snippet ────────────────────────────────────────────────
+# Imported into every site below. Two layers of defence so search engines
+# cannot index any subdomain of the stack:
+#   1. /robots.txt served inline as `User-agent: * / Disallow: /` — what
+#      polite crawlers respect first.
+#   2. X-Robots-Tag header on every other response, covering crawlers that
+#      don't fetch robots.txt and indirectly-linked assets (posters, JSON).
+# Both are required because robots.txt only governs path crawling, not the
+# indexability of URLs already linked from outside.
+(no_index) {
+	@robots path /robots.txt
+	handle @robots {
+		header Content-Type "text/plain; charset=utf-8"
+		respond "User-agent: *
+Disallow: /
+" 200
+	}
+	header X-Robots-Tag "noindex, nofollow, noarchive, noimageindex, nosnippet"
 }
 
 # Public-facing entry point. The URL we hand out to non-technical users
@@ -23,85 +42,98 @@
 # response so Jellyfin links open in the same tab. See
 # docker-compose.yml + caddy/seerr-inject.conf.
 {$DOMAIN} {
-    reverse_proxy seerr-inject:80
+	import no_index
+	reverse_proxy seerr-inject:80
 }
 
 streaming.{$DOMAIN} {
-    reverse_proxy jellyfin:8096
+	import no_index
+	reverse_proxy jellyfin:8096
 }
 
 sonarr.{$DOMAIN} {
-    reverse_proxy sonarr:8989
+	import no_index
+	reverse_proxy sonarr:8989
 }
 
 radarr.{$DOMAIN} {
-    reverse_proxy radarr:7878
+	import no_index
+	reverse_proxy radarr:7878
 }
 
 prowlarr.{$DOMAIN} {
-    reverse_proxy prowlarr:9696
+	import no_index
+	reverse_proxy prowlarr:9696
 }
 
 bazarr.{$DOMAIN} {
-    reverse_proxy bazarr:6767
+	import no_index
+	reverse_proxy bazarr:6767
 }
 
 orchestrator.{$DOMAIN} {
-    reverse_proxy orchestrator:8000 {
-        # Retry transient connection refused for ~6s — covers a rebuild/restart
-        # window of the upstream container.
-        lb_try_duration 6s
-        lb_try_interval 250ms
-    }
+	import no_index
+	reverse_proxy orchestrator:8000 {
+		# Retry transient connection refused for ~6s — covers a rebuild/restart
+		# window of the upstream container.
+		lb_try_duration 6s
+		lb_try_interval 250ms
+	}
 }
 
 qbit.{$DOMAIN} {
-    reverse_proxy gluetun:8080
+	import no_index
+	reverse_proxy gluetun:8080
 }
 
 headscale.{$DOMAIN} {
-    reverse_proxy headscale:8080
+	import no_index
+	reverse_proxy headscale:8080
 }
 
 # Dispatcharr — IPTV middleware (active fork of xTeVe/Threadfin). Aggregates
 # M3U playlists, applies XMLTV EPG, exposes HDHomeRun emulator on the same
 # port; Jellyfin's Live TV auto-discovers it as a virtual tuner.
 tv.{$DOMAIN} {
-    reverse_proxy dispatcharr:9191
+	import no_index
+	reverse_proxy dispatcharr:9191
 }
 
 encoder-status.{$DOMAIN} {
-    # Read-only snapshot of the hls-encoder queue state. Refreshed by
-    # the encoder every STATUS_INTERVAL seconds (default 10s). Pollable
-    # by cron / Prometheus blackbox.
-    header {
-        Cache-Control "no-store"
-        Access-Control-Allow-Origin "*"
-    }
-    root * /srv/encoder-status
-    file_server
+	import no_index
+	# Read-only snapshot of the hls-encoder queue state. Refreshed by
+	# the encoder every STATUS_INTERVAL seconds (default 10s). Pollable
+	# by cron / Prometheus blackbox.
+	header {
+		Cache-Control "no-store"
+		Access-Control-Allow-Origin "*"
+	}
+	root * /srv/encoder-status
+	file_server
 }
 
 hls.{$DOMAIN} {
-    # Public HLS CDN: serves segments + playlists from the Storage Box
-    # mounted read-only at /srv/hls in the Caddy container. CORS is open
-    # so HLS.js (browser Jellyfin) can fetch cross-origin if a future
-    # client lives on a different host.
-    header {
-        Cache-Control "public, max-age=86400, immutable"
-        Access-Control-Allow-Origin "*"
-    }
-    encode gzip
-    file_server {
-        root /srv/hls
-    }
+	import no_index
+	# Public HLS CDN: serves segments + playlists from the Storage Box
+	# mounted read-only at /srv/hls in the Caddy container. CORS is open
+	# so HLS.js (browser Jellyfin) can fetch cross-origin if a future
+	# client lives on a different host.
+	header {
+		Cache-Control "public, max-age=86400, immutable"
+		Access-Control-Allow-Origin "*"
+	}
+	encode gzip
+	file_server {
+		root /srv/hls
+	}
 }
 
 admin.{$DOMAIN} {
-    reverse_proxy admin-app:3000 {
-        # Retry transient connection refused for ~6s — covers a rebuild/restart
-        # window of the upstream container.
-        lb_try_duration 6s
-        lb_try_interval 250ms
-    }
+	import no_index
+	reverse_proxy admin-app:3000 {
+		# Retry transient connection refused for ~6s — covers a rebuild/restart
+		# window of the upstream container.
+		lb_try_duration 6s
+		lb_try_interval 250ms
+	}
 }

@@ -1,8 +1,11 @@
 import type { Metadata } from "next";
 import { orchestrator } from "@/lib/api/orchestrator";
-import { StatCard } from "./_components/stat-card";
 import { TimeseriesChart } from "./_components/timeseries-chart";
 import { EventFeed } from "./_components/event-feed";
+import { HeroStats } from "./_components/hero-stats";
+import { RecentAdditions } from "./_components/recent-additions";
+import { ActiveDownloadsCard } from "./_components/active-downloads-card";
+import { PendingRequestsCard } from "./_components/pending-requests-card";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -11,35 +14,28 @@ async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
 }
 
 export default async function Dashboard() {
-  const [pending, incomplete, promoted, failed, timeseries] = await Promise.all([
-    safe(
-      orchestrator.listItems({ status: "PENDING", limit: 1 }).then((r) => r.total),
-      0,
-    ),
-    safe(
-      orchestrator.listItems({ status: "INCOMPLETE", limit: 1 }).then((r) => r.total),
-      0,
-    ),
-    safe(
-      orchestrator.listItems({ status: "PROMOTED", limit: 1 }).then((r) => r.total),
-      0,
-    ),
-    safe(
-      orchestrator.listItems({ status: "FAILED", limit: 1 }).then((r) => r.total),
-      0,
-    ),
-    safe(orchestrator.itemsTimeseries(604800), []),
-  ]);
+  // Initial server-side fetch only for the timeseries chart (chart is a client
+  // component but it accepts seeded data so the first paint is meaningful).
+  // Live widgets below fetch their own data client-side and refetch on intervals.
+  const timeseries = await safe(orchestrator.itemsTimeseries(604800), []);
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+      <div>
+        <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
+        <p className="text-muted-foreground text-sm">
+          Library + pipeline at a glance. All widgets refresh on their own;
+          drill down into a section by clicking its title.
+        </p>
+      </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard title="Pending" value={pending} color="bg-zinc-500" />
-        <StatCard title="Incomplete" value={incomplete} color="bg-amber-500" />
-        <StatCard title="Promoted" value={promoted} color="bg-emerald-500" />
-        <StatCard title="Failed" value={failed} color="bg-red-500" />
+      <HeroStats />
+
+      <RecentAdditions />
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <ActiveDownloadsCard />
+        <PendingRequestsCard />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
