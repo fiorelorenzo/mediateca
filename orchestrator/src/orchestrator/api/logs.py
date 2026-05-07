@@ -34,13 +34,10 @@ def containers() -> list[dict[str, Any]]:
         # feedback loop (see SELF_CONTAINER_BLOCKLIST below).
         if c.name in SELF_CONTAINER_BLOCKLIST:
             continue
-        out.append(
-            {
-                "name": c.name,
-                "status": c.status,
-                "image": c.image.tags[0] if c.image.tags else c.image.id,
-            }
-        )
+        # Use cached attrs (no extra API roundtrip per container).
+        config = c.attrs.get("Config", {}) or {}
+        image = config.get("Image") or c.attrs.get("Image", "")
+        out.append({"name": c.name, "status": c.status, "image": image})
     return out
 
 

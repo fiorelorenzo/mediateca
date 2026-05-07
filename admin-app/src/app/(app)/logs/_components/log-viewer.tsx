@@ -7,6 +7,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { LogToolbar } from "./log-toolbar";
 import { LogRow } from "./log-row";
 import { useLogStream } from "@/lib/hooks/use-log-stream";
+import { Skeleton } from "@/components/ui/skeleton";
 
 interface ContainerEntry {
   name: string;
@@ -14,10 +15,14 @@ interface ContainerEntry {
   image: string;
 }
 
-const DEFAULT = ["orchestrator", "sonarr", "radarr"];
+const SELECTION_KEY = "logs.selected";
 
 export function LogViewer() {
-  const { data: containers = [] } = useQuery<ContainerEntry[]>({
+  const {
+    data: containers = [],
+    isLoading: containersLoading,
+    error: containersError,
+  } = useQuery<ContainerEntry[]>({
     queryKey: ["logs", "containers"],
     queryFn: async () => {
       const r = await fetch("/api/proxy/api/logs/containers");
@@ -27,19 +32,33 @@ export function LogViewer() {
     refetchInterval: 30_000,
   });
 
-  // Persisted selection
+  // Selection: read from localStorage on first render. If empty/absent, we'll
+  // default to "all" once the containers list arrives (see effect below).
   const [selected, setSelected] = useState<string[]>(() => {
-    if (typeof window === "undefined") return DEFAULT;
+    if (typeof window === "undefined") return [];
     try {
-      const raw = localStorage.getItem("logs.selected");
-      return raw ? JSON.parse(raw) : DEFAULT;
+      const raw = localStorage.getItem(SELECTION_KEY);
+      return raw ? JSON.parse(raw) : [];
     } catch {
-      return DEFAULT;
+      return [];
     }
   });
+
+  // First-time visitor (no saved selection): select every available container.
+  const [hasInitialised, setHasInitialised] = useState(false);
   useEffect(() => {
-    localStorage.setItem("logs.selected", JSON.stringify(selected));
-  }, [selected]);
+    if (hasInitialised) return;
+    if (containers.length === 0) return;
+    setHasInitialised(true);
+    if (selected.length === 0 && !localStorage.getItem(SELECTION_KEY)) {
+      setSelected(containers.map((c) => c.name));
+    }
+  }, [containers, hasInitialised, selected.length]);
+
+  useEffect(() => {
+    if (!hasInitialised) return;
+    localStorage.setItem(SELECTION_KEY, JSON.stringify(selected));
+  }, [selected, hasInitialised]);
 
   const [filter, setFilter] = useState("");
   const [paused, setPaused] = useState(false);
@@ -76,6 +95,23 @@ export function LogViewer() {
       virtualizer.scrollToIndex(filtered.length - 1, { align: "end" });
     }
   }, [filtered.length, autoscroll, virtualizer]);
+
+  if (containersLoading) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-24 w-full" />
+        <Skeleton className="h-[70vh] w-full" />
+      </div>
+    );
+  }
+
+  if (containersError) {
+    return (
+      <div className="border-destructive/40 bg-destructive/5 rounded-md border p-4 text-sm">
+        Could not load container list: {(containersError as Error).message}.
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-3">
