@@ -1,6 +1,9 @@
 "use client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { motion, AnimatePresence } from "motion/react";
+import { Check } from "lucide-react";
+import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -32,7 +35,11 @@ function SettingsFormInner({ initial }: FormProps) {
 
   const save = useMutation({
     mutationFn: (s: Partial<Settings>) => api.putSettings(s),
-    onSuccess: (next) => qc.setQueryData(["settings"], next),
+    onSuccess: (next) => {
+      qc.setQueryData(["settings"], next);
+      toast.success("Settings saved");
+    },
+    onError: (e) => toast.error(`Save failed: ${(e as Error).message}`),
   });
 
   return (
@@ -153,9 +160,18 @@ function SettingsFormInner({ initial }: FormProps) {
       </div>
 
       <Button type="submit" disabled={save.isPending || !!offsetError}>
-        {save.isPending ? "Saving…" : "Save"}
+        <AnimatePresence mode="wait">
+          {save.isSuccess ? (
+            <motion.span key="ok" initial={{ scale: 0 }} animate={{ scale: 1 }} className="flex items-center gap-1">
+              <Check className="size-4" /> Saved
+            </motion.span>
+          ) : save.isPending ? (
+            <motion.span key="loading">Saving…</motion.span>
+          ) : (
+            <motion.span key="idle">Save</motion.span>
+          )}
+        </AnimatePresence>
       </Button>
-      {save.isSuccess && <span className="ml-3 text-sm text-emerald-600">Saved.</span>}
     </form>
   );
 }
