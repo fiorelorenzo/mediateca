@@ -184,6 +184,8 @@ export const arrs = {
 
   allMovies: () => fetchJson<ArrMovie[]>("/api/radarr/movie"),
   allSeries: () => fetchJson<ArrSeries[]>("/api/sonarr/series"),
+  movie: (id: number) => fetchJson<ArrMovie>(`/api/radarr/movie/${id}`),
+  series: (id: number) => fetchJson<ArrSeries>(`/api/sonarr/series/${id}`),
   seriesEpisodes: (seriesId: number) =>
     fetchJson<SonarrEpisode[]>(`/api/sonarr/episode?seriesId=${seriesId}`),
 
@@ -202,6 +204,12 @@ export function arrPoster(images: ArrImage[] | undefined, fallback: string | nul
   if (!images) return fallback;
   const poster = images.find((i) => i.coverType === "poster");
   return poster?.remoteUrl ?? poster?.url ?? fallback;
+}
+
+export function arrBackdrop(images: ArrImage[] | undefined, fallback: string | null = null): string | null {
+  if (!images) return fallback;
+  const bg = images.find((i) => i.coverType === "fanart") ?? images.find((i) => i.coverType === "banner");
+  return bg?.remoteUrl ?? bg?.url ?? fallback;
 }
 
 // Format Sonarr's "00:42:11" timeleft into "42m 11s" or "1h 42m". Returns "—" for empty.
