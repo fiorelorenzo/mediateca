@@ -321,3 +321,123 @@ def test_no_new_tracks_keeps_item_incomplete(tmp_path: Path, monkeypatch) -> Non
         assert item.status == ItemStatus.INCOMPLETE, f"expected INCOMPLETE, got {item.status}"
         # audio_present should remain the old ita-only value
         assert item.audio_present == ["ita"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scenario 3 — Same flow but for a Sonarr episode, not a Radarr movie
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _make_sonarr_payload(src: Path, episode_id: int = 100, series_id: int = 7) -> dict:
+    payload = json.loads((FIX / "sonarr_on_import.json").read_text())
+    payload["series"]["id"] = series_id
+    payload["episodes"][0]["id"] = episode_id
+    payload["episodeFile"]["path"] = str(src)
+    return payload
+
+
+def _sonarr_series_mock(series_id: int, *, original_lang: str = "English") -> None:
+    respx.get(f"http://sonarr:8989/api/v3/series/{series_id}").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "id": series_id,
+                "title": "Test Show",
+                "originalLanguage": {"id": 1, "name": original_lang},
+            },
+        )
+    )
+
+
+@respx.mock
+def test_happy_merge_sonarr_episode(tmp_path: Path, monkeypatch) -> None:
+    """Sonarr equivalent of test_happy_merge: ita-only episode imported
+    first (INCOMPLETE), then an eng-only follow-up arrives → MERGE → PROMOTED.
+    Proves that the same merge code path that fixed the Iron Man flow for
+    movies is also exercised for TV episodes (no source-specific branching
+    in merger.py / merge_safety.py)."""
+    monkeypatch.setenv("MEDIA_ROOT", str(tmp_path / "media"))
+    monkeypatch.setenv("INCOMING_ROOT", str(tmp_path / "incoming"))
+
+    series_id = 800
+    episode_id = 8001
+
+    # ── First webhook: ita-only episode ──────────────────────────────────────
+    staging1 = tmp_path / "staging" / "tv" / "Test Show" / "Season 01"
+    staging1.mkdir(parents=True)
+    src1 = staging1 / "Test Show - S01E01.mkv"
+    src1.write_bytes(b"\x00" * 16)
+
+    _sonarr_series_mock(series_id)
+    respx.delete(f"http://sonarr:8989/api/v3/episodefile/500").mock(
+        return_value=httpx.Response(200, json={})
+    )
+
+    payload1 = _make_sonarr_payload(src1, episode_id=episode_id, series_id=series_id)
+    with Session(get_engine()) as s:
+        s.add(WebhookInbox(source=ItemSource.SONARR, payload=payload1))
+        s.commit()
+
+    fake_ita = MediaInfo(audio_tracks=[AudioTrack(1, "ac3", 6, "ita")])
+    with patch("orchestrator.workers.webhook_inbox.ffprobe", return_value=fake_ita):
+        with Session(get_engine()) as s:
+            process_inbox(s)
+
+    with Session(get_engine()) as s:
+        item = s.exec(
+            select(Item).where(Item.source == ItemSource.SONARR, Item.source_id == episode_id)
+        ).one()
+        assert item.status == ItemStatus.INCOMPLETE
+        assert item.library_path is not None
+        # Path mirrors the staging tree under media_root — including the
+        # season folder (which is what would otherwise have been mistaken
+        # for the series root before the realign-path fix landed).
+        assert "/Season 01/" in item.library_path
+        library_path = item.library_path
+
+    # ── Second webhook: eng-only same episode ───────────────────────────────
+    staging2 = tmp_path / "staging2" / "tv" / "Test Show" / "Season 01"
+    staging2.mkdir(parents=True)
+    src2 = staging2 / "Test Show - S01E01.mkv"
+    src2.write_bytes(b"\x00" * 32)
+
+    Path(library_path).parent.mkdir(parents=True, exist_ok=True)
+    Path(library_path).write_bytes(b"\x00" * 16)
+
+    _sonarr_series_mock(series_id)
+
+    payload2 = _make_sonarr_payload(src2, episode_id=episode_id, series_id=series_id)
+    with Session(get_engine()) as s:
+        s.add(WebhookInbox(source=ItemSource.SONARR, payload=payload2))
+        s.commit()
+
+    fake_eng = MediaInfo(audio_tracks=[AudioTrack(1, "aac", 6, "eng")])
+
+    merged_tmp = tmp_path / "incoming" / "ep_merge" / "Test Show - S01E01.mkv"
+    merged_tmp.parent.mkdir(parents=True, exist_ok=True)
+    merged_tmp.write_bytes(b"\x00" * 48)
+
+    with (
+        patch("orchestrator.workers.webhook_inbox.ffprobe", return_value=fake_eng),
+        patch("orchestrator.core.pipeline.merge_audio", return_value=merged_tmp) as mock_merge,
+        patch("orchestrator.core.pipeline.replace_atomically") as mock_replace,
+    ):
+        with Session(get_engine()) as s:
+            process_inbox(s)
+
+    mock_merge.assert_called_once()
+    mock_replace.assert_called_once()
+
+    with Session(get_engine()) as s:
+        item = s.exec(
+            select(Item).where(Item.source == ItemSource.SONARR, Item.source_id == episode_id)
+        ).one()
+        assert item.status == ItemStatus.PROMOTED, f"expected PROMOTED, got {item.status}"
+        assert set(item.audio_present) == {"ita", "eng"}
+        assert item.library_path == library_path
+
+    with Session(get_engine()) as s:
+        merged = s.exec(
+            select(History).where(History.item_id == item.id, History.event == "MERGED")
+        ).all()
+        assert len(merged) == 1, "expected exactly one MERGED history row"
