@@ -120,13 +120,14 @@ docker compose up -d
 
 | Page | Purpose |
 | --- | --- |
-| **Dashboard** | Status counters per state, 7-day stacked area chart, recent items feed |
-| **Library** | Search/filter ingested items with skeleton + Motion list animations; SSE-driven highlight pulse on new imports; per-item audio language overrides, accept-as-is, search-now actions |
+| **Dashboard** | Hero stats (movies, series, library size, active downloads, pending requests), recently-added poster strip, top active downloads + pending requests cards, 7-day stacked area chart, live event feed |
+| **Library** | Each row carries a poster, year, runtime, quality, file size, audio badges, status. Search + status filter; SSE highlight pulse on new imports. Per-item action menu: search-now, accept-as-is, override per-item language policy, **delete** (movies: confirm dialog with file-on-disk + cancel-torrent toggles; series: pick-episodes mode with collapsible season tree + per-episode checkboxes). |
 | **Library detail** | Full item timeline with state icons + action toasts |
+| **Requests** | Cards with TMDB poster, year, runtime, rating, overview clamp; request status (pending / approved / declined) + media status (pending / processing / partial / available) shown as separate colored pills, plus 4K badge. Filter chips with live counts. Approve / decline inline + deep link to Seerr. |
+| **Downloads** | Real-time qBit-overlayed Sonarr + Radarr queue. Top summary cards (in queue, downloaded, remaining, overall %, total ↓ speed). Per-row poster, indexer, protocol, download client, ETA, error message inline; quick actions: remove and remove + blocklist. Polled every 3 s with qBittorrent's live progress (avoids the *arr-side ~60 s repoll lag). |
+| **Processing** | Items currently moving through the orchestrator pipeline — ANALYZING, MERGING, PROMOTING, ENCODING. Cards with poster, current state animated chip, audio detected so far, time-in-state, link to detail. SSE-live on `item.*` events; once a row settles it leaves this page and shows up in Library. |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
 | **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
-| **Requests** | Seerr pending requests with filter chips (pending / approved / processing / available / unavailable / all) + approve / decline actions |
-| **Downloads** | Unified Sonarr + Radarr queue with progress bars |
 | **Settings** | Runtime config: HLS toggle, required audio languages, retry interval, merge safety thresholds (duration parity, offset safe, offset reject) |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
@@ -219,6 +220,7 @@ The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire i
 | `POST` | `/api/items/{id}/accept-as-is` | Promote without waiting for merge |
 | `POST` | `/api/items/{id}/override-policy` | Set per-item audio language override |
 | `POST` | `/api/items/{id}/search-now` | Trigger *arr search for a new release |
+| `DELETE` | `/api/items/{id}` | Wipe across the stack: cancel torrent (qBit via *arr queue), delete movie/series + files in *arr, drop orchestrator row. Body opts: `delete_files`, `purge_torrent`, `seasons[]`/`episode_ids[]` (partial-series mode keeps the series, only nukes targeted files; optional `unmonitor`). |
 | `GET` | `/api/settings` | Read runtime settings |
 | `PUT` | `/api/settings` | Update runtime settings (HLS toggle, thresholds, …) |
 | `GET` | `/api/metrics/system` | CPU load, memory, disk + 1-hour load history ring buffer |
@@ -242,6 +244,10 @@ The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire i
 - `/api/metrics/system` returns `load_history` inline: a server-side ring buffer (720 points, one per 5 s = 1 hour) populated by a background sampler thread. The chart is fully populated on the first request regardless of when the client connected.
 - `/api/logs/stream` spawns one Docker SDK watcher thread per requested container and multiplexes their output into a single SSE stream. The orchestrator's own container is excluded via `SELF_CONTAINER_BLOCKLIST` to prevent a feedback loop (each SSE payload would be logged, which would trigger another SSE event, and so on).
 - Merge safety pre-checks (before mkvmerge): release group parity, duration difference, and audio cross-correlation offset. Thresholds are runtime-configurable via `/api/settings` and the admin app Settings page.
+- **Audio sync correction**: when cross-correlation detects an offset between existing and addition above the safety threshold (default ~50 ms), the merge command emits one `--sync TID:OFFSET` *per audio track ID* of the addition. The TIDs are discovered with `mkvmerge --identify --identification-format json`; hard-coding TID 0 would target the (dropped-by-`--no-video`) video track and the sync would be silently lost. The cross-correlation sign convention: positive offset means addition LEADS existing, so the same value handed verbatim to mkvmerge delays the addition track into alignment.
+- **Background scheduler jobs** (apscheduler): `inbox_tick` (15 s — drains the webhook_inbox table), `catch_up_tick` (15 min — re-searches INCOMPLETE items, clearing stale *arr file tracking first so the next grab isn't blocked by an upgrade-spec rejection), `encode_jobs_tick` (1 min — dispatches HLS jobs), `orphan_bak_tick` (1 h — sweeps any leftover `*.bak` under `media_root` so a rare CIFS write-cache miss can't leave a 12 GB ghost on disk).
+- **Realign *arr path after promote/merge**: each successful `promote()` and `replace_atomically()` calls `_realign_arr_path` which does `PUT /movie/{id}?moveFiles=false` (or `/series/{id}`) + `RescanMovie`/`RescanSeries`. Without this, Sonarr/Radarr keep pointing at the (now-empty) staging folder, the UI shows the title as missing, and the next RSS sweep would re-grab it as a duplicate. Sonarr's `series.path` derivation does a staging→media prefix swap because the parent of the episode path is the *season folder*, not the series root.
+- **Jellyfin user defaults** are pushed once per fresh account (when `AudioLanguagePreference` is empty): prefer Italian audio (`AudioLanguagePreference=ita`, `PlayDefaultAudioTrack=false`), never auto-show subtitles (`SubtitleMode=None`). Once the user picks anything in the audio settings — even "Default" — the orchestrator stops touching them for the lifetime of the account.
 
 ### Ingestion pipeline
 
@@ -1073,6 +1079,32 @@ Caveat: a MacBook in clamshell sleep won't route the tunnel. Keep the lid
 open or set Settings → Battery → Power Adapter → "Prevent automatic
 sleeping". A Mac mini / iMac is fine as-is. Long-term, prefer a Pi.
 
+**NAT-keepalive LaunchAgent.** Residential routers drop the UDP NAT
+mapping for the WireGuard tunnel after ~30–60 min of idleness, which
+makes the *server-initiated* path to the Mac time out (server → Mac is
+exactly the direction Prowlarr scrapes use). Tailscale doesn't fall
+back to DERP fast enough to mask this. Drop a LaunchAgent at
+`~/Library/LaunchAgents/io.<you>.mediateca-tailscale-keepalive.plist`
+that pings the server every 30 s:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+    <key>Label</key>             <string>io.mediateca.tailscale-keepalive</string>
+    <key>ProgramArguments</key>
+    <array>
+      <string>/usr/bin/env</string><string>sh</string><string>-c</string>
+      <string>/usr/local/bin/tailscale ping -c 1 100.64.0.1 >/dev/null 2>&amp;1 || true</string>
+    </array>
+    <key>StartInterval</key>     <integer>30</integer>
+    <key>RunAtLoad</key>         <true/>
+</dict></plist>
+```
+
+Then `launchctl load ~/Library/LaunchAgents/io.<you>.mediateca-tailscale-keepalive.plist`.
+A 1-byte/30-s heartbeat is plenty to keep the NAT entry alive.
+
 #### Linux (Debian / Ubuntu / Raspberry Pi OS, x86 or ARM)
 
 ```sh
@@ -1223,6 +1255,14 @@ ssh <USERNAME>@<HOST-IP> "
 | Jellyfin still shows old channel count after Dispatcharr changes | Jellyfin caches the HDHomeRun lineup until the tuner config is re-saved | Dashboard → Live TV → Tuner Devices → click the Dispatcharr entry → Save (no fields need to change). Then run the Refresh Guide scheduled task. |
 | Dispatcharr first-run page returns 423 "Locked" | First-run requires creating an admin user before any API call works | Run the `manage.py createsuperuser` snippet from the Live TV section. |
 | Seerr sidebar `Live TV` link missing | nginx envsubst tripped on `$` in the rendered config (e.g. regex anchor in `seerr-inject.conf.template`) | Check `docker logs seerr-inject` for `[emerg] invalid variable name`. Avoid bare `$` in the JS string, use explicit equality checks instead of `^foo$` regex anchors. |
+| Admin app login fails immediately with "invalid password" though the bcrypt hash matches | docker compose ate the `$` separators in `ADMIN_PASSWORD_HASH` (`$2a$14$…` becomes `$2a$$14…` after substitution) | Double every `$` to `$$` in `.env`; the `sed` snippet under [Admin app → Password setup](#admin-app) does this automatically. Verify in-container with `docker exec admin-app sh -c 'echo "$ADMIN_PASSWORD_HASH"'`. |
+| Radarr/Sonarr health: "Failed to authenticate with qBittorrent" + queue stuck `downloadClientUnavailable` | qBit temp-banned the *arr's IP after too many failed logins, OR the *arr's stored password drifted from qBit's actual password | Restart qBit (`docker compose restart qbittorrent` — clears in-memory ban list). Re-sync the password in *arr's download client config (admin app does NOT manage this). |
+| Radarr UI shows a movie as missing even though it plays in Jellyfin | The orchestrator promoted the file out of `/data/staging` into `/data/media`; without `_realign_arr_path` running, *arr's tracking still points at the old (now empty) folder | Already auto-handled on every promote/merge as of 2026-05. For one-off back-fills: `PUT /api/v3/movie/{id}?moveFiles=false` with `path` set to the new folder + `POST /api/v3/command` with `RescanMovie`. Same shape for Sonarr (`/series/{id}` + `RescanSeries`). |
+| Radarr rejects an obviously-better grab with "Not a quality revision upgrade" | Existing tracked file is a PROPER (v2) and the new release is v1, even though CF score is much higher | The catch-up worker now wipes the *arr's stale movieFile/episodeFile tracking (only when its path differs from the orchestrator's `library_path`) right before triggering the search, so future imports aren't compared against an obsolete file. If you've hit this on an older build, manually `DELETE /api/v3/moviefile/{id}` then re-search. |
+| `replace_atomically` succeeds but a `*.mkv.bak` of the previous library version stays on disk | CIFS write-cache transient: the post-rename `Path.exists()` returned False so the `unlink` was skipped (Hetzner Storage Box quirk) | Already fixed (commit ⓒ-`replace_atomically.backup_unlink_failed` log if it ever happens again). The `orphan_bak_tick` scheduler job (1 h) is the safety net — it sweeps any `*.bak` under `media_root` older than two minutes. |
+| ffprobe fails with "Invalid argument" on the imported file at `/data/staging/.../file.mkv` while `/data/incoming/...` works | CIFS hardlink quirk on Hetzner Storage Box: stat() reports both names sharing one inode but reads via the second name return EINVAL | `webhook_inbox.py` extracts both `episodeFile.path` (canonical) and `episodeFile.sourcePath` (the original under `/data/incoming/`) and falls back automatically. The pipeline still uses the canonical path for layout decisions because `os.rename()` doesn't need the file to be readable. |
+| Italian dual-audio releases of well-known catalogue movies score 0 in Radarr/Sonarr | Old "Dual Audio" CF used `value: 7` (= Dutch in Sonarr/Radarr's language id table) instead of `5`, and its regex required `ita[._-]eng` so `ita eng` (space) didn't match | Fixed in `config/recyclarr/custom-formats/*.json`. The orchestrator pushes the corrected JSON to both arrs at startup. |
+| Seerr's API returns NXDOMAIN-ish errors right after a Caddy `lb_try_duration` retry burst | Bind mount on `/opt/servarr/Caddyfile` keeps the *old* inode after `rsync`-style atomic replace | Restart Caddy: `docker compose restart caddy`. Or use `rsync --inplace` for the Caddyfile so the inode survives. |
 
 ## Security model
 
@@ -1243,6 +1283,15 @@ ssh <USERNAME>@<HOST-IP> "
   public-domain content this is fine; if you need access control, swap
   Caddy's `file_server` for a `forward_auth` to a small auth proxy.
 - Secrets live in `.env` (gitignored) and never get baked into images.
+- **Anti-indexing**: Caddy imports a `(no_index)` snippet in every site
+  block. Two layers, on by default:
+  - `/robots.txt` is served inline as `User-agent: *` / `Disallow: /` for
+    polite crawlers.
+  - `X-Robots-Tag: noindex, nofollow, noarchive, noimageindex, nosnippet`
+    rides on every other response — covers crawlers that don't fetch
+    robots.txt and indirect links from outside.
+  Both are needed because robots.txt only governs path crawling, not
+  the indexability of a URL reached via an external link.
 
 ## Provider notes
 
