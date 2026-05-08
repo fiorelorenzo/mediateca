@@ -1,6 +1,7 @@
 # orchestrator/src/orchestrator/core/merger.py
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import uuid
@@ -9,6 +10,40 @@ from pathlib import Path
 from orchestrator.logging_setup import get_logger
 
 log = get_logger(__name__)
+
+
+def identify_audio_track_ids(path: Path) -> list[int]:
+    """Run ``mkvmerge --identify`` and return the source-side track IDs of
+    every audio stream in *path*. Used to target ``--sync`` correctly.
+
+    Why this matters: ``--sync N:DELAY`` references the source-file track ID
+    that mkvmerge prints from ``--identify``, *not* an output index. In a
+    typical addition (video + audio + subs) that's [0=video, 1=audio,
+    2=audio, …]. Hard-coding ``--sync 0:DELAY`` syncs the video track —
+    which is then dropped by ``--no-video`` — so the sync is silently
+    discarded and the audio comes out at its native offset. (This was the
+    Iron Man "ITA out of sync by 2 s after merge" bug.)
+    """
+    r = subprocess.run(
+        ["mkvmerge", "--identification-format", "json", "--identify", str(path)],
+        capture_output=True,
+        text=True,
+    )
+    if r.returncode != 0:
+        log.warning(
+            "mkvmerge.identify_failed", path=str(path), stderr=r.stderr[-300:]
+        )
+        return []
+    try:
+        info = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        log.warning("mkvmerge.identify_unparseable", path=str(path))
+        return []
+    return [
+        int(t["id"])
+        for t in info.get("tracks", [])
+        if t.get("type") == "audio"
+    ]
 
 
 def promote(source: Path, target: Path) -> None:
@@ -25,15 +60,18 @@ def build_mkvmerge_command(
     addition_audio_langs: list[str],
     output: Path,
     sync_offset_ms: int | None = None,
+    addition_audio_tids: list[int] | None = None,
 ) -> list[str]:
     """Build mkvmerge invocation that keeps `existing` (video + its audio +
     subs/chapters) and pulls in only the audio tracks from `addition`.
 
-    When *sync_offset_ms* is provided (non-None, non-zero) a ``--sync 0:MS``
-    flag is injected before the addition path to shift the addition's first
-    audio track by that many milliseconds.  Positive values delay the track;
-    negative values advance it.  The value comes from the cross-correlation
-    offset detected in :func:`merge_safety.audio_offset_ms`.
+    When *sync_offset_ms* is provided (non-None, non-zero) a ``--sync TID:MS``
+    flag is injected for every audio track in *addition_audio_tids* (the
+    track IDs as reported by ``mkvmerge --identify``). Positive MS delays
+    the track; negative advances it.
+
+    If *addition_audio_tids* is None or empty no sync is applied — caller
+    is expected to enumerate them via :func:`identify_audio_track_ids`.
     """
     cmd = [
         "mkvmerge",
@@ -46,10 +84,14 @@ def build_mkvmerge_command(
         "--no-subtitles",
         "--no-chapters",
     ]
-    if sync_offset_ms is not None and sync_offset_ms != 0:
-        # --sync TID:DELAY[,SLOWING]  — TID 0 refers to the first track of
-        # the *following* file, which is the first audio track of `addition`.
-        cmd += ["--sync", f"0:{sync_offset_ms}"]
+    if sync_offset_ms is not None and sync_offset_ms != 0 and addition_audio_tids:
+        # --sync references the SOURCE track ID printed by mkvmerge --identify.
+        # Hard-coding 0 (video in nearly every release we've seen) caused the
+        # sync to be silently discarded after --no-video; iterating the
+        # actual audio TIDs guarantees the offset is applied to the tracks
+        # we're keeping.
+        for tid in addition_audio_tids:
+            cmd += ["--sync", f"{tid}:{sync_offset_ms}"]
     cmd.append(str(addition))
     return cmd
 
@@ -72,12 +114,18 @@ def merge_audio(
     job_dir = incoming_root / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     out = job_dir / existing.name
+    audio_tids = (
+        identify_audio_track_ids(addition)
+        if sync_offset_ms is not None and sync_offset_ms != 0
+        else None
+    )
     cmd = build_mkvmerge_command(
         existing=existing,
         addition=addition,
         addition_audio_langs=addition_audio_langs,
         output=out,
         sync_offset_ms=sync_offset_ms,
+        addition_audio_tids=audio_tids,
     )
     log.info("merge.start", cmd=cmd)
     result = subprocess.run(cmd, capture_output=True, text=True)

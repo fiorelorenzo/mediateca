@@ -157,8 +157,16 @@ def audio_offset_ms(
 ) -> float | None:
     """Return the temporal offset (ms) between ``addition`` and ``existing``.
 
-    A positive value means ``addition`` starts *later* than ``existing`` at
-    the same nominal timestamp; a negative value means it starts *earlier*.
+    Sign convention (verified empirically against scipy.signal.correlate
+    with synthetic impulses — see test_audio_offset_detects_known_shift):
+
+      * **positive** → ``addition`` starts *earlier* (LEADS ``existing``)
+      * **negative** → ``addition`` starts *later* (LAGS ``existing``)
+
+    To align addition to existing, pass the value verbatim to mkvmerge as
+    ``--sync TID:OFFSET`` for each addition audio track ID — mkvmerge's
+    positive DELAY shifts a track LATER, which is exactly what we want
+    when addition currently leads.
 
     Returns ``None`` if audio extraction or correlation fails for any reason.
 
@@ -243,7 +251,8 @@ def audio_offset_ms(
         centre = len(b) - 1
         peak = int(np.argmax(np.abs(corr)))
         offset_samples = peak - centre
-        # Positive offset_samples → addition lags existing by that many samples
+        # See module docstring above: positive offset_samples means addition
+        # LEADS existing (its audio happens earlier).  Negative means it lags.
         offset_ms = (offset_samples / _SAMPLE_RATE) * 1000.0
         log.info(
             "merge_safety.audio_offset",
