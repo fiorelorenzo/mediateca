@@ -1,9 +1,17 @@
 # orchestrator/src/orchestrator/core/jellyfin_defaults.py
-"""Push the stack-wide Jellyfin user defaults: prefer Italian audio,
-fall back to the file's Default track flag (which mkvmerge keeps pointing
-at the original language), never auto-show subtitles. Idempotent — runs
-on every orchestrator startup and re-applies to any user whose
-preferences have drifted."""
+"""Push the stack-wide Jellyfin user defaults — exactly once per account.
+
+Defaults: prefer Italian audio, fall back to the file's Default track
+flag (which mkvmerge keeps pointing at the original language since our
+merge keeps existing's tracks first), never auto-show subtitles.
+
+We treat an *empty* AudioLanguagePreference (None or '') as the signal
+that the user has never touched their preferences — that's the state
+Jellyfin gives a freshly-created account. The moment the user picks
+*anything* (including "Default" in the UI, which writes through as a
+non-null sentinel on the user's first explicit save), we leave them
+alone forever. This trades full enforcement for the "don't surprise me"
+promise the user explicitly asked for."""
 
 from __future__ import annotations
 
@@ -49,18 +57,17 @@ async def push_user_defaults(jellyfin_url: str, api_key: str) -> None:
         for u in users:
             user_id = u["Id"]
             cfg = dict(u.get("Configuration") or {})
-            changed = [k for k, v in DESIRED.items() if cfg.get(k) != v]
-            if not changed:
+            # First-touch only: skip the moment AudioLanguagePreference holds
+            # any non-empty value. It's None on a fresh account; the moment a
+            # user opens the audio settings and clicks Save (even if they
+            # leave it on "Default") it becomes a non-null string.
+            if cfg.get("AudioLanguagePreference"):
                 continue
             cfg.update(DESIRED)
             try:
                 resp = await c.post(f"/Users/{user_id}/Configuration", json=cfg)
                 resp.raise_for_status()
-                log.info(
-                    "jellyfin_defaults.applied",
-                    user=u.get("Name"),
-                    changed=changed,
-                )
+                log.info("jellyfin_defaults.initialised", user=u.get("Name"))
             except httpx.HTTPError as e:
                 log.warning(
                     "jellyfin_defaults.apply_failed",
