@@ -7,14 +7,14 @@
       "implementation": "LanguageSpecification",
       "negate": false,
       "required": true,
-      "fields": [{"name": "value", "value": 7}]
+      "fields": [{"name": "value", "value": 5}]
     },
     {
       "name": "Multi/Dual marker",
       "implementation": "ReleaseTitleSpecification",
       "negate": false,
       "required": true,
-      "fields": [{"name": "value", "value": "(?i)(multi|dual.?audio|\\[ita.?(eng|en|fre|fr|spa|es|deu|de|jpn|jp|kor|ko)\\]|ita[._-](eng|en))"}]
+      "fields": [{"name": "value", "value": "(?i)(multi|dual[._\\s-]?audio|ita[._\\s-]+(eng|en|fre|fr|spa|es|deu|de|jpn|jp|kor|ko)|(eng|en|fre|fr|spa|es|deu|de|jpn|jp|kor|ko)[._\\s-]+ita|\\[ita[._\\s-]?(eng|en|fre|fr|spa|es|deu|de|jpn|jp|kor|ko)\\])"}]
     }
   ]
 }
