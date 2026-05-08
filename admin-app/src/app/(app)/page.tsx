@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { orchestrator } from "@/lib/api/orchestrator";
 import { TimeseriesChart } from "./_components/timeseries-chart";
 import { EventFeed } from "./_components/event-feed";
 import { HeroStats } from "./_components/hero-stats";
@@ -9,16 +8,11 @@ import { PendingRequestsCard } from "./_components/pending-requests-card";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
-async function safe<T>(p: Promise<T>, fallback: T): Promise<T> {
-  return p.catch(() => fallback);
-}
-
-export default async function Dashboard() {
-  // Initial server-side fetch only for the timeseries chart (chart is a client
-  // component but it accepts seeded data so the first paint is meaningful).
-  // Live widgets below fetch their own data client-side and refetch on intervals.
-  const timeseries = await safe(orchestrator.itemsTimeseries(604800), []);
-
+export default function Dashboard() {
+  // Pure-sync render — every widget fetches its own data client-side via
+  // TanStack Query. Keeping this sync means navigating *to* / never blocks
+  // on a server-side await; the page tree mounts immediately and each
+  // widget shows its own skeleton while loading.
   return (
     <div className="space-y-6">
       <div>
@@ -40,7 +34,7 @@ export default async function Dashboard() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <TimeseriesChart data={timeseries} />
+          <TimeseriesChart />
         </div>
         <div className="lg:col-span-1">
           <EventFeed />

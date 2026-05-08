@@ -1,5 +1,6 @@
 "use client";
 
+import { useQuery } from "@tanstack/react-query";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid } from "recharts";
 import {
   ChartContainer,
@@ -10,6 +11,8 @@ import {
 } from "@/components/ui/chart";
 import type { ChartConfig } from "@/components/ui/chart";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api/client";
 import type { TimeseriesPoint } from "@/lib/api/types";
 
 const CONFIG: ChartConfig = {
@@ -25,11 +28,33 @@ function formatTs(ts: string) {
 }
 
 interface TimeseriesChartProps {
-  data: TimeseriesPoint[];
+  /** Server-rendered seed used as TanStack-Query initial data so the chart
+   * paints synchronously on first navigation; client polling refreshes it. */
+  data?: TimeseriesPoint[];
 }
 
-export function TimeseriesChart({ data }: TimeseriesChartProps) {
-  const chartData = data.map((p) => ({
+export function TimeseriesChart({ data: seed }: TimeseriesChartProps = {}) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["items", "timeseries", 604800],
+    queryFn: () => api.itemsTimeseries(604800),
+    initialData: seed,
+    staleTime: 30_000,
+  });
+
+  if (isLoading && !data) {
+    return (
+      <Card className="h-full">
+        <CardHeader>
+          <CardTitle>Activity (7 days)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <Skeleton className="h-64 w-full" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const chartData = (data ?? []).map((p) => ({
     ...p,
     label: formatTs(p.ts),
   }));
