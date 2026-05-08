@@ -258,22 +258,55 @@ async def _realign_arr_path(item: Item, library_path: Path) -> None:
     """After a successful promote/replace, tell Radarr/Sonarr the file's new
     folder so their UI doesn't keep showing the title as missing (and
     re-grab it on the next RSS sweep). Best-effort — failure is logged but
-    doesn't block the pipeline."""
+    doesn't block the pipeline.
+
+    Movies vs TV need different "folder" semantics:
+      * Radarr: ``movie.path`` is the folder *holding the file*, i.e.
+        ``library_path.parent`` (``…/movies/Iron Man (2008)/``).
+      * Sonarr: ``series.path`` is the SERIES root, NOT the season folder.
+        Naively using ``library_path.parent`` would point Sonarr at
+        ``…/tv/<Series>/Season 01/`` and Sonarr would create a
+        ``Season 01/Season 01/`` mess on the next rescan. We instead query
+        the existing ``series.path`` and swap the staging prefix for the
+        media prefix — Sonarr's directory naming is canonical, so a
+        prefix swap is always safe.
+    """
+    from orchestrator.logging_setup import get_logger
+
+    log_local = get_logger(__name__)
     s = get_settings()
-    new_folder = str(library_path.parent)
     try:
         if item.source == ItemSource.RADARR:
             await RadarrClient(s.radarr_url, s.radarr_api_key).realign_path(
-                item.source_id, new_folder
+                item.source_id, str(library_path.parent)
             )
         elif item.source == ItemSource.SONARR and item.series_id is not None:
-            await SonarrClient(s.sonarr_url, s.sonarr_api_key).realign_path(
-                item.series_id, new_folder
-            )
+            client = SonarrClient(s.sonarr_url, s.sonarr_api_key)
+            series = await client.get_series(item.series_id) or {}
+            old_path = series.get("path", "") or ""
+            staging_root = str(s.staging_root).rstrip("/")
+            media_root = str(s.media_root).rstrip("/")
+            if old_path.startswith(staging_root + "/"):
+                new_folder = media_root + old_path[len(staging_root) :]
+            else:
+                # Layout deviated from /data/staging/<rest>; fall back to
+                # walking up from the episode file until we hit media_root.
+                new_folder = str(library_path)
+                while True:
+                    parent = str(Path(new_folder).parent)
+                    if parent in (media_root, "/", new_folder):
+                        break
+                    new_folder = parent
+                if new_folder == media_root:
+                    log_local.warning(
+                        "realign_arr_path.could_not_derive_series_root",
+                        item_id=item.id,
+                        library_path=str(library_path),
+                    )
+                    return
+            await client.realign_path(item.series_id, new_folder)
     except Exception:  # noqa: BLE001
-        from orchestrator.logging_setup import get_logger
-
-        get_logger(__name__).exception("realign_arr_path.failed", item_id=item.id)
+        log_local.exception("realign_arr_path.failed", item_id=item.id)
 
 
 async def _promote_or_encode(
