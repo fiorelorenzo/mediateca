@@ -908,14 +908,16 @@ everything else works.
 repo's deployment) so settings can be pushed centrally to all clients.
 
 ```sh
-# One-shot install. Repeat with new release URL when bumping versions.
+# One-shot install. Bump $ver when a new release lands. Note the leading sudo
+# on the unzip — /opt/servarr/config is root-owned by default, so without it
+# extractall fails on the first .dll write with PermissionError.
 ssh <USERNAME>@<HOST-IP> '\''
 ver=0.66.0.0
 url=https://github.com/streamyfin/jellyfin-plugin-streamyfin/releases/download/$ver/streamyfin-$ver.zip
-curl -sL "$url" -o /tmp/streamyfin.zip
 target=/opt/servarr/config/jellyfin/data/plugins/Streamyfin_$ver
+curl -sL "$url" -o /tmp/streamyfin.zip
 sudo mkdir -p "$target"
-python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" /tmp/streamyfin.zip "$target"
+sudo python3 -c "import zipfile,sys; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])" /tmp/streamyfin.zip "$target"
 sudo chown -R 1000:1000 "$target"
 docker compose -f /opt/servarr/docker-compose.yml restart jellyfin
 '\''
@@ -930,15 +932,32 @@ strings ("Enter library id(s)", "Enter optimized server url", etc.); if
 you click Save without manually clearing every one, those literals end
 up persisted in the plugin XML and the mobile app interprets them as
 real values (e.g. hides every library because `hiddenLibraries` contains
-the placeholder string). Instead, use the **YAML Editor** tab and paste
-the bundled `config/streamyfin/plugin-config.yml` from this repo —
-already curated for an Italian-defaulting stack with explicit empty /
-typed values everywhere, no placeholders.
+the placeholder string). Use the **YAML Editor** tab instead — or push
+the config via API in one shot (`config/streamyfin/plugin-config.yml`
+is already curated for an Italian-defaulting stack with explicit empty
+/ typed values everywhere, no placeholders).
 
 ```sh
-# Open it locally, replace <DOMAIN> with your real domain, then paste:
-cat config/streamyfin/plugin-config.yml | sed 's|<DOMAIN>|example.com|g'
+# API path. Substitute <DOMAIN> in the bundled YAML, wrap as JSON, POST.
+JF_KEY=...   # any admin Jellyfin API key
+DOMAIN=mediateca.example.com
+docker exec jellyfin sh -c '
+  python3 -c "
+import json,sys
+with open(\"/config/streamyfin/plugin-config.yml\") as f:
+    print(json.dumps({\"value\": f.read().replace(\"<DOMAIN>\", \"$DOMAIN\")}))
+" > /tmp/wrap.json
+  curl -s -X POST http://localhost:8096/Streamyfin/config/yaml \
+    -H "X-Emby-Token: '"$JF_KEY"'" \
+    -H "Content-Type: application/json" \
+    --data-binary @/tmp/wrap.json'
+# Expect {"Error":false}. The endpoint takes JSON {"value": "<yaml string>"} —
+# raw text/yaml, application/x-yaml etc. all return 415, this is the only
+# content-type Jellyfin's ASP.NET pipeline forwards to the plugin.
 ```
+
+If you prefer the manual route, paste the YAML in
+`Dashboard → Plugins → Streamyfin → YAML Editor`.
 
 Save. The five home sections appear in Italian (Continua a guardare,
 Prossimi episodi, Aggiunti di recente, Film, Serie TV). Some will be
