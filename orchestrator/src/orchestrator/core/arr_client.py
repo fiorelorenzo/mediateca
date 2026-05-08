@@ -155,6 +155,29 @@ class SonarrClient(_ArrClient):
             )
             r.raise_for_status()
 
+    async def realign_path(self, series_id: int, new_folder: str) -> None:
+        """See RadarrClient.realign_path — same idea for series. After the
+        orchestrator promotes an episode file out of staging, Sonarr's
+        series.path needs to follow or the UI shows missing episodes."""
+        series = await self.get_series(series_id)
+        if series is None:
+            return
+        if series.get("path") == new_folder:
+            return
+        series["path"] = new_folder
+        async with await self._client() as c:
+            r = await c.put(
+                f"/api/v3/series/{series_id}",
+                params={"moveFiles": "false"},
+                json=series,
+            )
+            r.raise_for_status()
+            r = await c.post(
+                "/api/v3/command",
+                json={"name": "RescanSeries", "seriesIds": [series_id]},
+            )
+            r.raise_for_status()
+
 
 class RadarrClient(_ArrClient):
     async def get_movie(self, movie_id: int) -> dict[str, Any] | None:
@@ -244,5 +267,36 @@ class RadarrClient(_ArrClient):
             r = await c.post(
                 "/api/v3/command",
                 json={"name": "MoviesSearch", "movieIds": movie_ids},
+            )
+            r.raise_for_status()
+
+    async def realign_path(self, movie_id: int, new_folder: str) -> None:
+        """Tell Radarr the movie's folder is now *new_folder* and rescan it.
+
+        Used after the orchestrator promotes a file out of /data/staging into
+        /data/media: without this, Radarr's tracking is left pointing at the
+        (now-empty) staging folder and the UI shows the movie as missing,
+        which in turn re-queues it on the next RSS sweep — pure waste.
+
+        ``moveFiles=false`` is critical: we tell Radarr the new path *as a
+        fact*, we don't ask it to migrate anything. The orchestrator already
+        moved the file.
+        """
+        movie = await self.get_movie(movie_id)
+        if movie is None:
+            return
+        if movie.get("path") == new_folder:
+            return  # already aligned
+        movie["path"] = new_folder
+        async with await self._client() as c:
+            r = await c.put(
+                f"/api/v3/movie/{movie_id}",
+                params={"moveFiles": "false"},
+                json=movie,
+            )
+            r.raise_for_status()
+            r = await c.post(
+                "/api/v3/command",
+                json={"name": "RescanMovie", "movieIds": [movie_id]},
             )
             r.raise_for_status()

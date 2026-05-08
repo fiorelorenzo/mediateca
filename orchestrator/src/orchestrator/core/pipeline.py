@@ -254,6 +254,28 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
         await _mark_incomplete_and_promote(session, item, source_file, verdict.missing, runtime)
 
 
+async def _realign_arr_path(item: Item, library_path: Path) -> None:
+    """After a successful promote/replace, tell Radarr/Sonarr the file's new
+    folder so their UI doesn't keep showing the title as missing (and
+    re-grab it on the next RSS sweep). Best-effort — failure is logged but
+    doesn't block the pipeline."""
+    s = get_settings()
+    new_folder = str(library_path.parent)
+    try:
+        if item.source == ItemSource.RADARR:
+            await RadarrClient(s.radarr_url, s.radarr_api_key).realign_path(
+                item.source_id, new_folder
+            )
+        elif item.source == ItemSource.SONARR and item.series_id is not None:
+            await SonarrClient(s.sonarr_url, s.sonarr_api_key).realign_path(
+                item.series_id, new_folder
+            )
+    except Exception:  # noqa: BLE001
+        from orchestrator.logging_setup import get_logger
+
+        get_logger(__name__).exception("realign_arr_path.failed", item_id=item.id)
+
+
 async def _promote_or_encode(
     session: Session, item: Item, source_file: Path, runtime: dict[str, Any]
 ) -> None:
@@ -261,6 +283,7 @@ async def _promote_or_encode(
     target = _resolve_library_path(item, source_file, settings.media_root)
     promote(source_file, target)
     item.library_path = str(target)
+    await _realign_arr_path(item, target)
     if item.status != ItemStatus.PROMOTED:
         validate_transition(item.status, ItemStatus.PROMOTING)
         item.status = ItemStatus.PROMOTING
@@ -307,6 +330,7 @@ async def _mark_incomplete_and_promote(
     target = _resolve_library_path(item, source_file, settings.media_root)
     promote(source_file, target)
     item.library_path = str(target)
+    await _realign_arr_path(item, target)
     if item.status != ItemStatus.INCOMPLETE:
         validate_transition(item.status, ItemStatus.INCOMPLETE)
     item.status = ItemStatus.INCOMPLETE
@@ -512,6 +536,7 @@ async def _merge_into_existing(
 
     # 3. Atomically replace the library file
     replace_atomically(source=merged_output, target=library_path)
+    await _realign_arr_path(item, library_path)
 
     # 4. Update audio_present to union of old library tracks + addition tracks
     merged_audio = sorted(set(old_audio) | set(addition_audio_langs))
