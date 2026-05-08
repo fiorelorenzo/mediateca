@@ -65,6 +65,43 @@ async def inbox_tick() -> None:
             log.info("inbox.tick.processed", count=n)
 
 
+async def orphan_bak_tick() -> None:
+    """Sweep any leftover ``.mkv.bak`` (and ``.mp4.bak`` etc.) under
+    ``media_root``. ``replace_atomically`` already deletes its own backup,
+    but in the past CIFS write-cache delays let the unlink slip through
+    silently and a 12 GB ghost was left orphaned. Belt-and-braces clean-up
+    so disk usage doesn't quietly balloon over time.
+
+    Files newer than two minutes are skipped to avoid racing an in-flight
+    replace_atomically (the .bak only exists while the second rename is
+    still happening — well under one minute even on the slowest CIFS
+    mounts we've measured).
+    """
+    settings = get_settings()
+    root = settings.media_root
+    if not root.exists():
+        return
+    now = datetime.utcnow().timestamp()
+    removed = 0
+    bytes_freed = 0
+    for bak in root.rglob("*.bak"):
+        try:
+            st = bak.stat()
+        except FileNotFoundError:
+            continue
+        if now - st.st_mtime < 120:
+            continue  # too fresh, leave it alone
+        size = st.st_size
+        try:
+            bak.unlink()
+            removed += 1
+            bytes_freed += size
+        except OSError:
+            log.exception("orphan_bak.unlink_failed", path=str(bak))
+    if removed:
+        log.info("orphan_bak.swept", count=removed, bytes_freed=bytes_freed)
+
+
 def start_scheduler() -> AsyncIOScheduler:
     from orchestrator.workers.job_runner import run_encode_jobs
 
@@ -75,6 +112,12 @@ def start_scheduler() -> AsyncIOScheduler:
     )
     scheduler.add_job(
         inbox_tick, IntervalTrigger(seconds=15), id="inbox_tick", replace_existing=True
+    )
+    scheduler.add_job(
+        orphan_bak_tick,
+        IntervalTrigger(hours=1),
+        id="orphan_bak_tick",
+        replace_existing=True,
     )
     scheduler.start()
     return scheduler

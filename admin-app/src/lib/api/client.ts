@@ -21,10 +21,24 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
-  listItems: (params: { status?: string; q?: string; offset?: number; limit?: number } = {}) => {
-    const qs = new URLSearchParams(
-      Object.entries(params).filter(([, v]) => v != null) as [string, string][],
-    );
+  listItems: (
+    params: {
+      status?: string;
+      status_in?: string[];
+      q?: string;
+      offset?: number;
+      limit?: number;
+    } = {},
+  ) => {
+    const qs = new URLSearchParams();
+    for (const [k, v] of Object.entries(params)) {
+      if (v == null) continue;
+      if (Array.isArray(v)) {
+        for (const x of v) qs.append(k, x);
+      } else {
+        qs.set(k, String(v));
+      }
+    }
     return call<{ total: number; items: Item[] }>(`/api/items?${qs}`);
   },
   getItem: (id: number) => call<{ item: Item; history: unknown[] }>(`/api/items/${id}`),

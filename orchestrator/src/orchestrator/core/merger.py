@@ -90,16 +90,41 @@ def merge_audio(
 
 def replace_atomically(*, source: Path, target: Path) -> None:
     """Move `source` over `target` via two renames so the target is never
-    in a partial state."""
+    in a partial state.
+
+    The .bak is unconditionally unlinked at the end (using try/FileNotFoundError
+    instead of exists()/unlink()): on CIFS the write-cache often makes
+    backup.exists() return False right after a rename, so the previous
+    exists()-then-unlink dance silently left orphan .bak files on disk
+    (observed once in the wild — a 12 GB ghost). The new path closes that
+    race.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     backup = target.with_suffix(target.suffix + ".bak")
-    if target.exists():
+    had_existing = target.exists()
+    if had_existing:
         os.rename(target, backup)
     try:
         os.rename(source, target)
     except Exception:
-        if backup.exists():
+        # Best-effort restore so we don't leave the user with a missing file.
+        try:
             os.rename(backup, target)
+        except FileNotFoundError:
+            pass
         raise
-    if backup.exists():
-        backup.unlink()
+    if had_existing:
+        try:
+            backup.unlink()
+            log.info("replace_atomically.backup_removed", path=str(backup))
+        except FileNotFoundError:
+            log.info("replace_atomically.backup_already_gone", path=str(backup))
+        except OSError as exc:
+            # Don't fail the merge for a leftover .bak — surface it loudly so
+            # an out-of-band cleanup can pick it up. The catch-up worker also
+            # sweeps these on each tick.
+            log.warning(
+                "replace_atomically.backup_unlink_failed",
+                path=str(backup),
+                error=str(exc),
+            )

@@ -1,7 +1,17 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Library, Server, Layers, Download, Settings, Inbox, Home, ScrollText } from "lucide-react";
+import {
+  Cog,
+  Download,
+  Home,
+  Inbox,
+  Layers,
+  Library,
+  ScrollText,
+  Server,
+  Settings,
+} from "lucide-react";
 import { cn } from "@/lib/utils/cn";
 import { Logo } from "@/components/icons/logo";
 
@@ -10,6 +20,7 @@ const items = [
   { href: "/library", label: "Library", icon: Library },
   { href: "/requests", label: "Requests", icon: Inbox },
   { href: "/downloads", label: "Downloads", icon: Download },
+  { href: "/processing", label: "Processing", icon: Cog },
   { href: "/server", label: "Server", icon: Server },
   { href: "/services", label: "Services", icon: Layers },
   { href: "/logs", label: "Logs", icon: ScrollText },

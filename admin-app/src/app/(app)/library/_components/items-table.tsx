@@ -119,6 +119,14 @@ export function ItemsTable() {
     queryKey: ["items", status, q],
     queryFn: () =>
       api.listItems({
+        // ALL really means "everything that's settled" — items in transient
+        // pipeline states (ANALYZING/MERGING/PROMOTING/ENCODING) live in
+        // /processing, not here, otherwise the same row would appear in two
+        // places at once.
+        status_in:
+          status === "ALL"
+            ? ["PENDING", "INCOMPLETE", "PROMOTED", "FROZEN_AS_IS", "POLICY_OVERRIDDEN", "FAILED", "LEGACY"]
+            : undefined,
         status: status === "ALL" ? undefined : status,
         q: q || undefined,
         limit: 100,

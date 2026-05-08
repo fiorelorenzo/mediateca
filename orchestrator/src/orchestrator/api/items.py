@@ -22,13 +22,19 @@ router = APIRouter(prefix="/api/items", tags=["items"], dependencies=[require_ad
 @router.get("")
 def list_items(
     status: ItemStatus | None = None,
+    status_in: list[ItemStatus] | None = Query(default=None),
     q: str | None = None,
     offset: int = 0,
     limit: int = Query(default=50, le=200),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     stmt = select(Item)
-    if status is not None:
+    if status_in:
+        # Multi-status filter for the admin app's /processing page (lists
+        # items in any of ANALYZING/MERGING/PROMOTING/ENCODING). Takes
+        # precedence over the single `status` arg if both are supplied.
+        stmt = stmt.where(Item.status.in_(status_in))  # type: ignore[attr-defined]
+    elif status is not None:
         stmt = stmt.where(Item.status == status)
     if q:
         stmt = stmt.where(Item.title.contains(q))  # type: ignore[attr-defined]
