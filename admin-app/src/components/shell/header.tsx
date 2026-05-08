@@ -4,7 +4,7 @@ import { LogOut } from "lucide-react";
 
 export function Header() {
   return (
-    <header className="flex h-14 items-center justify-end gap-2 border-b px-4">
+    <header className="bg-background/80 flex h-14 shrink-0 items-center justify-end gap-2 border-b px-4 backdrop-blur">
       <ThemeToggle />
       <form action="/api/logout" method="POST">
         <Button variant="ghost" size="icon" type="submit" aria-label="Logout">
