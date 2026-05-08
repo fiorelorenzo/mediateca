@@ -13,6 +13,7 @@ from orchestrator.api import services as svcs
 from orchestrator.api import settings as settings_api
 from orchestrator.config import get_settings
 from orchestrator.core.custom_formats import push_custom_formats
+from orchestrator.core.jellyfin_defaults import push_user_defaults
 from orchestrator.core.policy_seed import seed_settings
 from orchestrator.db.session import get_engine
 from orchestrator.logging_setup import configure as configure_logging
@@ -33,6 +34,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     except Exception:  # noqa: BLE001
         # Don't block boot on *arr being temporarily unreachable
         pass
+    if s.jellyfin_api_key:
+        try:
+            await push_user_defaults(s.jellyfin_url, s.jellyfin_api_key)
+        except Exception:  # noqa: BLE001
+            # Same rationale: Jellyfin may still be starting on a fresh boot.
+            pass
     from orchestrator.workers.catch_up import start_scheduler
 
     scheduler = start_scheduler()
