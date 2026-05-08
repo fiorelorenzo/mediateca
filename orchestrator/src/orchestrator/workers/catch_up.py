@@ -17,6 +17,63 @@ from orchestrator.logging_setup import get_logger
 log = get_logger(__name__)
 
 
+async def _clear_arr_tracking(
+    item: Item, sonarr: SonarrClient, radarr: RadarrClient
+) -> None:
+    """Tell Sonarr/Radarr to forget the file they think is tracking the item.
+
+    Why: when the orchestrator promotes a file from /data/staging to
+    /data/media, the *arr's tracked path goes stale (Sonarr/Radarr still
+    point at the now-empty staging dir). On the next grab + import, *arr
+    runs its UpgradeSpecification which can reject a higher-CF-scored but
+    "lower-revision" release — e.g. an HDTV-1080p ITA+ENG v1 grab cannot
+    upgrade an existing Bluray-1080p ENG v2 PROPER even when the CF score
+    delta is huge. Symptom: queue parked in importPending forever.
+
+    Calling delete_movie_file / delete_episode_file before kicking off a
+    search wipes that stale tracking; the file under /data/media is
+    untouched (different inode + path), so the orchestrator's merge step
+    still has the previous audio to combine. Safe because we ONLY do
+    this for INCOMPLETE items whose library_path is set (we own the
+    file) and only after we've confirmed the *arr's file id is not
+    pointing at our library_path.
+    """
+    if not item.library_path:
+        return
+    try:
+        if item.source == ItemSource.RADARR:
+            movie = await radarr.get_movie(item.source_id)
+            mf = (movie or {}).get("movieFile") or {}
+            if mf.get("id") and mf.get("path") and mf["path"] != item.library_path:
+                await radarr.delete_movie_file(mf["id"])
+                log.info(
+                    "catch_up.cleared_arr_tracking",
+                    item_id=item.id,
+                    arr="radarr",
+                    movie_file_id=mf["id"],
+                )
+        else:  # SONARR
+            episodes = await sonarr.list_episodes(item.series_id or item.source_id)
+            for ep in episodes:
+                if ep.get("id") != item.source_id:
+                    continue
+                fid = ep.get("episodeFileId")
+                if not fid:
+                    break
+                ef = await sonarr.get_episode_file(fid)
+                if ef and ef.get("path") and ef["path"] != item.library_path:
+                    await sonarr.delete_episode_file(int(fid))
+                    log.info(
+                        "catch_up.cleared_arr_tracking",
+                        item_id=item.id,
+                        arr="sonarr",
+                        episode_file_id=fid,
+                    )
+                break
+    except Exception:  # noqa: BLE001 — never block the catch-up retry on this
+        log.exception("catch_up.clear_tracking_failed", item_id=item.id)
+
+
 async def tick() -> None:
     s = get_settings()
     sonarr = SonarrClient(s.sonarr_url, s.sonarr_api_key)
@@ -33,6 +90,9 @@ async def tick() -> None:
             if item.next_retry_at and item.next_retry_at > now:
                 continue
             try:
+                # Clear stale *arr tracking before the search so the next
+                # grab's import isn't blocked by an upgrade-spec rejection.
+                await _clear_arr_tracking(item, sonarr, radarr)
                 if item.source == ItemSource.SONARR:
                     await sonarr.episode_search([item.source_id])
                 else:
