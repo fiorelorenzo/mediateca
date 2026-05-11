@@ -128,7 +128,7 @@ docker compose up -d
 | **Processing** | Items currently moving through the orchestrator pipeline — ANALYZING, MERGING, PROMOTING, ENCODING. Cards with poster, current state animated chip, audio detected so far, time-in-state, link to detail. SSE-live on `item.*` events; once a row settles it leaves this page and shows up in Library. |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
 | **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
-| **Settings** | Runtime config: HLS toggle, required audio languages, retry interval, merge safety thresholds (duration parity, offset safe, offset reject) |
+| **Settings** | Runtime config: HLS toggle, required audio languages, retry interval, quality-upgrades toggle (opt-in: replace promoted file in place when arr finds a better release with same audio), merge safety thresholds (duration parity, offset safe, offset reject) |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
 | **Logs** | Real-time SSE multiplex of Docker container logs: virtualized rows, ANSI color, filter regex, pause with drop counter, autoscroll, save-to-file, expand/collapse on long lines, per-line copy button. The orchestrator's own container is excluded to prevent a feedback loop. |
@@ -248,6 +248,7 @@ The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire i
 - **Background scheduler jobs** (apscheduler): `inbox_tick` (15 s — drains the webhook_inbox table), `catch_up_tick` (15 min — re-searches INCOMPLETE items, clearing stale *arr file tracking first so the next grab isn't blocked by an upgrade-spec rejection), `encode_jobs_tick` (1 min — dispatches HLS jobs), `orphan_bak_tick` (1 h — sweeps any leftover `*.bak` under `media_root` so a rare CIFS write-cache miss can't leave a 12 GB ghost on disk).
 - **Realign *arr path after promote/merge**: each successful `promote()` and `replace_atomically()` calls `_realign_arr_path` which does `PUT /movie/{id}?moveFiles=false` (or `/series/{id}`) + `RescanMovie`/`RescanSeries`. Without this, Sonarr/Radarr keep pointing at the (now-empty) staging folder, the UI shows the title as missing, and the next RSS sweep would re-grab it as a duplicate. Sonarr's `series.path` derivation does a staging→media prefix swap because the parent of the episode path is the *season folder*, not the series root.
 - **Jellyfin user defaults** are pushed once per fresh account (when `AudioLanguagePreference` is empty): prefer Italian audio (`AudioLanguagePreference=ita`, `PlayDefaultAudioTrack=false`), never auto-show subtitles (`SubtitleMode=None`). Once the user picks anything in the audio settings — even "Default" — the orchestrator stops touching them for the lifetime of the account.
+- **Quality upgrades on PROMOTED items** (opt-in via the runtime `quality_upgrade_enabled` setting; default off). When on, `_promote_or_encode` and the merge tail skip `_unmonitor_in_arr` so the arr keeps RSS-grabbing better releases; on the next webhook the pipeline takes the `_replace_in_library` branch (`replace_atomically` + `_realign_arr_path`, no mkvmerge) provided the new file's audio is a superset of the existing — never accept a language regression no matter how shiny the new resolution. Records an `UPGRADED` history event so the timeline doesn't conflate this with a fresh promote. Cost caveat: with the flag on, a 1080p library can churn into 4K Remuxes (~60 GB each) on the first sweep, so leave it off until storage headroom is comfortable.
 
 ### Ingestion pipeline
 
@@ -700,6 +701,45 @@ with `Multi-Audio` on startup (`TARGET_PROFILE_PREFIX` in
 variant — say a `Multi-Audio Anime` — just needs a new profile in the
 arr UI; the CF scores get applied automatically on the next orchestrator
 boot.
+
+**Max quality and ballpark storage.** Both profiles cap at Remux (the
+untouched stream from the source disc). What you actually grab depends
+on what releases exist with Italian audio.
+
+`Multi-Audio 1080p` (max = Remux-1080p):
+
+| Tier in the group | MB/min typical | 2 h film | 45 min ep | 10-ep season |
+| --- | --- | --- | --- | --- |
+| WEBDL-1080p | 8–20 | 1–2.5 GB | 0.4–0.9 GB | 4–9 GB |
+| Bluray-1080p (encode) | 50–150 | 6–18 GB | 2–7 GB | 20–70 GB |
+| Remux-1080p (top) | 200–300 | 24–36 GB | 9–14 GB | 90–135 GB |
+
+In practice most TV grabs land at **WEBDL-1080p** (~2–4 GB/ep,
+20–40 GB / 10-ep season).
+
+`Multi-Audio 4K` (max = Remux-2160p — falls back to 1080p group when
+no 4K with the right CF score exists):
+
+| Tier in the group | MB/min typical | 2 h film |
+| --- | --- | --- |
+| WEBDL-2160p (Netflix 4K) | 20–40 | 2.5–5 GB |
+| Bluray-2160p HEVC encode | 80–250 | 10–30 GB |
+| Bluray-2160p (full disc) | 250–500 | 30–60 GB |
+| Remux-2160p (top) | 500–1000 | **60–120 GB** |
+
+The realistic movie grab is a **HEVC Bluray-2160p encode** (NAHOM,
+PSA, FraMeSToR, etc. — ~15–30 GB for a 2 h film).
+
+Sizing rule of thumb: 100 movies at 4K HEVC ≈ 2–3 TB; same 100 movies
+at Remux-2160p ≈ 6–12 TB. Storage Box tiers go up to 20 TB, so the
+default config is comfortably within reach for a few hundred 4K films
+and a couple hundred 1080p series.
+
+If a future bigger-is-not-better tweak is needed, the cleanest knob is
+the per-quality `maxSize` (MB/min) in the global quality definitions —
+capping `Remux-2160p` at e.g. 200 MB/min forces Radarr to prefer the
+HEVC encodes over the 80 GB untouched Remux when both have Italian
+audio.
 
 ### Prowlarr
 
