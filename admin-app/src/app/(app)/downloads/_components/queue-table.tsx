@@ -3,17 +3,7 @@ import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { toast } from "sonner";
-import {
-  AlertTriangle,
-  ArrowDown,
-  ArrowUp,
-  ArrowUpDown,
-  Ban,
-  Download,
-  Film,
-  Trash2,
-  Tv,
-} from "lucide-react";
+import { AlertTriangle, Ban, Download, Film, Trash2, Tv } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -35,6 +25,7 @@ import {
 } from "@/components/ui/tooltip";
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { nextSort, SortableHead, type SortState } from "@/components/sortable-head";
 import {
   arrPoster,
   arrs,
@@ -85,8 +76,6 @@ function formatSpeed(b: number | undefined): string {
 }
 
 type SortKey = "title" | "type" | "indexer" | "status" | "progress" | "eta";
-type SortDir = "asc" | "desc";
-type SortState = { key: SortKey; dir: SortDir } | null;
 
 function rowEtaSeconds(q: QueueRecord): number {
   if (q.liveDlSpeed && q.liveDlSpeed > 0 && typeof q.liveSizeLeft === "number") {
@@ -127,37 +116,6 @@ function compareRows(a: QueueRecord, b: QueueRecord, key: SortKey): number {
     case "eta":
       return rowEtaSeconds(a) - rowEtaSeconds(b);
   }
-}
-
-function SortableHead({
-  label,
-  sortKey,
-  sort,
-  onSort,
-  className,
-}: {
-  label: string;
-  sortKey: SortKey;
-  sort: SortState;
-  onSort: (k: SortKey) => void;
-  className?: string;
-}) {
-  const active = sort?.key === sortKey;
-  const Icon = !active ? ArrowUpDown : sort?.dir === "asc" ? ArrowUp : ArrowDown;
-  return (
-    <TableHead className={className}>
-      <button
-        type="button"
-        onClick={() => onSort(sortKey)}
-        className={`hover:text-foreground inline-flex items-center gap-1 text-xs uppercase tracking-wide transition-colors ${
-          active ? "text-foreground" : "text-muted-foreground"
-        }`}
-      >
-        <span>{label}</span>
-        <Icon className={`size-3 ${active ? "" : "opacity-50"}`} />
-      </button>
-    </TableHead>
-  );
 }
 
 function formatEtaSeconds(eta: number | undefined): string {
@@ -262,15 +220,8 @@ export function QueueTable() {
     queryFn: () => arrs.unifiedQueue(),
     refetchInterval: 3_000,
   });
-  const [sort, setSort] = useState<SortState>({ key: "progress", dir: "desc" });
-
-  const onSort = (key: SortKey) => {
-    setSort((prev) => {
-      if (prev?.key !== key) return { key, dir: "asc" };
-      if (prev.dir === "asc") return { key, dir: "desc" };
-      return null;
-    });
-  };
+  const [sort, setSort] = useState<SortState<SortKey>>({ key: "progress", dir: "desc" });
+  const onSort = (key: SortKey) => setSort((prev) => nextSort(prev, key));
 
   const sortedData = useMemo(() => {
     if (!data) return data;

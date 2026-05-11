@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/table";
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { EmptyState } from "@/components/empty-state";
+import { nextSort, SortableHead, type SortState } from "@/components/sortable-head";
 
 import { api } from "@/lib/api/client";
 import { arrPoster, arrs, type ArrMovie, type ArrSeries } from "@/lib/api/arrs";
@@ -86,6 +87,52 @@ interface EnrichedItem extends Item {
   resolution?: string;
 }
 
+type LibSortKey = "title" | "type" | "quality" | "size" | "audio" | "status" | "retry";
+
+// Resolution-prefixed quality sort: "2160p Bluray" > "1080p WEBDL" > "720p HDTV".
+const RESOLUTION_ORDER = ["2160p", "1080p", "720p", "576p", "480p", "SD"];
+function qualityRank(it: EnrichedItem): number {
+  if (!it.quality) return -1;
+  const res = it.resolution ?? "";
+  const tier = RESOLUTION_ORDER.indexOf(res);
+  // Higher tier index = lower quality, so invert; fall back to alphabetical for tail.
+  return (tier >= 0 ? RESOLUTION_ORDER.length - tier : 0) * 100 + it.quality.length;
+}
+
+// Status sort: prioritise things that need attention.
+const STATUS_RANK: Record<ItemStatus, number> = {
+  FAILED: 0,
+  INCOMPLETE: 1,
+  PENDING: 2,
+  ANALYZING: 3,
+  MERGING: 4,
+  PROMOTING: 5,
+  ENCODING: 6,
+  POLICY_OVERRIDDEN: 7,
+  FROZEN_AS_IS: 8,
+  PROMOTED: 9,
+  LEGACY: 10,
+};
+
+function compareItems(a: EnrichedItem, b: EnrichedItem, key: LibSortKey): number {
+  switch (key) {
+    case "title":
+      return a.title.localeCompare(b.title);
+    case "type":
+      return a.source.localeCompare(b.source);
+    case "quality":
+      return qualityRank(a) - qualityRank(b);
+    case "size":
+      return (a.size ?? 0) - (b.size ?? 0);
+    case "audio":
+      return (a.audio_present ?? []).join(",").localeCompare((b.audio_present ?? []).join(","));
+    case "status":
+      return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+    case "retry":
+      return a.retry_count - b.retry_count;
+  }
+}
+
 function pickMovieMeta(it: Item, m: ArrMovie | undefined): Partial<EnrichedItem> {
   if (!m) return {};
   return {
@@ -113,6 +160,8 @@ export function ItemsTable() {
   const [status, setStatus] = useState<ItemStatus | "ALL">("ALL");
   const [q, setQ] = useState("");
   const [highlightId, setHighlightId] = useState<number | null>(null);
+  const [sort, setSort] = useState<SortState<LibSortKey>>({ key: "title", dir: "asc" });
+  const onSort = (key: LibSortKey) => setSort((prev) => nextSort(prev, key));
   const qc = useQueryClient();
 
   const { data: itemsData, isLoading } = useQuery({
@@ -159,14 +208,17 @@ export function ItemsTable() {
 
   const enriched = useMemo<EnrichedItem[]>(() => {
     if (!itemsData) return [];
-    return itemsData.items.map((it) => {
+    const rows = itemsData.items.map((it) => {
       const meta =
         it.source === "radarr"
           ? pickMovieMeta(it, moviesById.get(it.source_id))
           : pickSeriesMeta(it, seriesById.get(it.series_id ?? it.source_id));
       return { ...it, ...meta };
     });
-  }, [itemsData, moviesById, seriesById]);
+    if (!sort) return rows;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return rows.sort((a, b) => compareItems(a, b, sort.key) * dir);
+  }, [itemsData, moviesById, seriesById, sort]);
 
   useOrchestratorEvents((ev) => {
     qc.invalidateQueries({ queryKey: ["items"] });
@@ -221,17 +273,13 @@ export function ItemsTable() {
                 <TableHeader>
                   <TableRow className="bg-muted/30 hover:bg-muted/30">
                     <TableHead className="w-[60px]" />
-                    <TableHead>Title</TableHead>
-                    <TableHead className="w-20 text-xs uppercase tracking-wide">Type</TableHead>
-                    <TableHead className="w-28 text-xs uppercase tracking-wide">Quality</TableHead>
-                    <TableHead className="w-24 text-right text-xs uppercase tracking-wide">
-                      Size
-                    </TableHead>
-                    <TableHead className="text-xs uppercase tracking-wide">Audio</TableHead>
-                    <TableHead className="w-32 text-xs uppercase tracking-wide">Status</TableHead>
-                    <TableHead className="w-16 text-right text-xs uppercase tracking-wide">
-                      Retry
-                    </TableHead>
+                    <SortableHead label="Title" sortKey="title" sort={sort} onSort={onSort} />
+                    <SortableHead label="Type" sortKey="type" sort={sort} onSort={onSort} className="w-20" />
+                    <SortableHead label="Quality" sortKey="quality" sort={sort} onSort={onSort} className="w-28" />
+                    <SortableHead label="Size" sortKey="size" sort={sort} onSort={onSort} align="right" className="w-24" />
+                    <SortableHead label="Audio" sortKey="audio" sort={sort} onSort={onSort} />
+                    <SortableHead label="Status" sortKey="status" sort={sort} onSort={onSort} className="w-32" />
+                    <SortableHead label="Retry" sortKey="retry" sort={sort} onSort={onSort} align="right" className="w-16" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
