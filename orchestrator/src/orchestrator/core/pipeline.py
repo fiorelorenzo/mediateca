@@ -91,19 +91,42 @@ def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Pa
     for movies: media/movies/<title>/<file>. We mirror the staging layout
     by stripping the staging prefix and prepending media_root.
 
-    Refuses when the source is not under a staging tree — a flat fallback
-    would put the file at <media_root>/<filename> and corrupt Sonarr's
-    series.path when _realign_arr_path runs afterwards.
+    Two valid input shapes are accepted:
+
+    1. Source under a staging tree — the original flow. Strip the staging
+       prefix and prepend media_root.
+    2. Source already under media_root with a proper hierarchy (at least
+       `<type>/<title>/<file>` for movies, `<type>/<title>/<season>/<file>`
+       for TV) — Sonarr/Radarr land subsequent imports there after the
+       first promote moved series.path. promote() will then be a no-op
+       rename (source == target) and the rest of the pipeline runs
+       normally.
+
+    Anything else — including a flat `media_root/<filename>` placement —
+    raises StagingPathError. The caller marks the item FAILED instead of
+    silently producing a corrupted layout.
     """
     parts = source_file.parts
-    if "staging" not in parts:
+    if "staging" in parts:
+        idx = parts.index("staging")
+        rel = Path(*parts[idx + 1 :])
+        return media_root / rel
+    try:
+        rel = source_file.relative_to(media_root)
+    except ValueError as e:
         raise StagingPathError(
-            f"source {source_file} is not under a staging tree — "
-            f"check Sonarr/Radarr series.path / root folder configuration"
+            f"source {source_file} is neither under a staging tree nor under "
+            f"media_root {media_root}"
+        ) from e
+    # Need at least <type>/<title>/<file> = 3 parts. A 1- or 2-part rel
+    # means the file is sitting flat in or near the media root — the
+    # corrupted layout this function exists to refuse.
+    if len(rel.parts) < 3:
+        raise StagingPathError(
+            f"source {source_file} is too shallow under media_root — "
+            f"expected at least <type>/<title>/<file>"
         )
-    idx = parts.index("staging")
-    rel = Path(*parts[idx + 1 :])
-    return media_root / rel
+    return source_file
 
 
 def _get_library_audio(session: Session, item_id: int) -> list[str]:
