@@ -373,36 +373,29 @@ async def _realign_arr_path(item: Item, library_path: Path) -> None:
             )
         elif item.source == ItemSource.SONARR and item.series_id is not None:
             client = SonarrClient(s.sonarr_url, s.sonarr_api_key)
-            series = await client.get_series(item.series_id) or {}
-            old_path = series.get("path", "") or ""
-            staging_root = str(s.staging_root).rstrip("/")
-            media_root = str(s.media_root).rstrip("/")
-            if old_path.startswith(staging_root + "/"):
-                new_folder = media_root + old_path[len(staging_root) :]
-            else:
-                # Layout deviated from /data/staging/<rest>; fall back to
-                # walking up from the episode file until we hit media_root.
-                new_folder = str(library_path)
-                while True:
-                    parent = str(Path(new_folder).parent)
-                    if parent in (media_root, "/", new_folder):
-                        break
-                    new_folder = parent
-                # Refuse to write series.path back when the walk collapses
-                # to media_root itself OR when it points at the file we
-                # just promoted (means library_path lives directly in
-                # media_root, with no series folder between them — setting
-                # series.path = library_path would make Sonarr treat the
-                # file as the series folder and corrupt subsequent imports.
-                # Seen in the wild when an upstream bug landed files in
-                # the flat media root; we'd just be propagating the rot.)
-                if new_folder == media_root or new_folder == str(library_path):
-                    log_local.warning(
-                        "realign_arr_path.could_not_derive_series_root",
-                        item_id=item.id,
-                        library_path=str(library_path),
-                    )
-                    return
+            # Derive the series folder from the canonical library_path:
+            # media_root/<type>/<series>/Season N/<file> → media_root/<type>/<series>.
+            # We trust library_path to be canonical because _resolve_library_path
+            # already enforced that shape; if it isn't, log and bail rather
+            # than walk the tree and risk landing on the type folder
+            # (media_root/tv) or the file itself.
+            try:
+                rel = library_path.relative_to(s.media_root)
+            except ValueError:
+                log_local.warning(
+                    "realign_arr_path.library_outside_media_root",
+                    item_id=item.id,
+                    library_path=str(library_path),
+                )
+                return
+            if len(rel.parts) < 3:
+                log_local.warning(
+                    "realign_arr_path.library_too_shallow",
+                    item_id=item.id,
+                    library_path=str(library_path),
+                )
+                return
+            new_folder = str(s.media_root / rel.parts[0] / rel.parts[1])
             await client.realign_path(item.series_id, new_folder)
     except Exception:  # noqa: BLE001
         log_local.exception("realign_arr_path.failed", item_id=item.id)
