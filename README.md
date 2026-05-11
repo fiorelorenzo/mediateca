@@ -130,14 +130,15 @@ docker compose up -d
 | Page | Purpose |
 | --- | --- |
 | **Dashboard** | Hero stats (movies, series, library size, active downloads, pending requests), recently-added poster strip, top active downloads + pending requests cards, 7-day stacked area chart, live event feed |
-| **Library** | Each row carries a poster, year, runtime, quality, file size, audio badges, status. Search + status filter; SSE highlight pulse on new imports. Per-item action menu: search-now, accept-as-is, override per-item language policy, **delete** (movies: confirm dialog with file-on-disk + cancel-torrent toggles; series: pick-episodes mode with collapsible season tree + per-episode checkboxes). |
-| **Library detail** | Full item timeline with state icons + action toasts |
+| **Library** | One row per title (a series collapses its N episodes into a single row) with poster, year, runtime, quality, total file size, audio union, worst-case status + `N/M promoted` subline for series. Search + status filter + sortable columns (cycle asc → desc → off on every header, default title asc). Clicking a row routes to the right detail page. |
+| **Movie detail** (`/library/[id]`) | Hero with TMDB metadata, action bar (search-now, accept-as-is, override per-item language policy, delete with file-on-disk + cancel-torrent toggles), pipeline state card, full timeline with state icons + action toasts. |
+| **Series detail** (`/library/series/[seriesId]`) | Hero with Sonarr metadata + summary badges (promoted / incomplete / failed / on-disk / total size). Action bar: "Search N stuck episodes" (fan-out search-now across every INCOMPLETE/FAILED/PENDING episode) and delete (full-series confirm + partial mode with per-episode checkboxes inside a collapsible season tree). One card per season — Specials pinned last — with every episode showing SxxExx, title, air date, audio chips, and either the orchestrator status or Missing / Not aired / Untracked. |
 | **Requests** | Cards with TMDB poster, year, runtime, rating, overview clamp; request status (pending / approved / declined) + media status (pending / processing / partial / available) shown as separate colored pills, plus 4K badge. Filter chips with live counts. Approve / decline inline + deep link to Seerr. |
-| **Downloads** | Real-time qBit-overlayed Sonarr + Radarr queue. Top summary cards (in queue, downloaded, remaining, overall %, total ↓ speed). Per-row poster, indexer, protocol, download client, ETA, error message inline; quick actions: remove and remove + blocklist. Polled every 3 s with qBittorrent's live progress (avoids the *arr-side ~60 s repoll lag). |
+| **Downloads** | Real-time qBit-overlayed Sonarr + Radarr queue. Top summary cards (in queue, downloaded, remaining, overall %, total ↓ speed). Per-row poster, indexer, protocol, download client, ETA, error message inline; series rows carry a `SxxExx` chip (or range / "N episodes" for season packs) so multi-episode grabs don't look identical. Sortable columns (title, type, indexer, status, progress, ETA) with asc → desc → off cycle, default progress desc. Quick actions: remove and remove + blocklist. Polled every 3 s with qBittorrent's live progress (avoids the *arr-side ~60 s repoll lag). |
 | **Processing** | Items currently moving through the orchestrator pipeline — ANALYZING, MERGING, PROMOTING, ENCODING. Cards with poster, current state animated chip, audio detected so far, time-in-state, link to detail. SSE-live on `item.*` events; once a row settles it leaves this page and shows up in Library. |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
 | **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
-| **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). |
+| **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio), auto-scan-on-promote toggle (nudge Jellyfin + Seerr the moment a file lands instead of waiting for their scheduled jobs). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
 | **Logs** | Real-time SSE multiplex of Docker container logs: virtualized rows, ANSI color, filter regex, pause with drop counter, autoscroll, save-to-file, expand/collapse on long lines, per-line copy button. The orchestrator's own container is excluded to prevent a feedback loop. |
@@ -272,10 +273,18 @@ When Sonarr / Radarr fire the `OnImport` webhook, the orchestrator:
    duration difference, and audio cross-correlation offset. Items failing
    the checks are held for manual review.
 4. Once policy is satisfied, promotes the file from `staging/` to `media/`
-   (hardlink or atomic move).
+   (hardlink or atomic move). If the policy isn't satisfied even after a
+   merge, the file is still promoted so the user can watch what we have,
+   and the item stays `INCOMPLETE` for the catch-up worker to retry later.
 5. Optionally dispatches to `hls-encoder` via `POST /jobs` if the HLS
    profile is active (see [HLS encoding mode](#hls-encoding-mode) below).
-6. Tells Sonarr / Radarr to set `monitored=false` for the item.
+6. Tells Sonarr / Radarr to set `monitored=false` for the item (unless
+   the quality-upgrade toggle is on, in which case monitoring stays so
+   a better release can come in later).
+7. Nudges **Jellyfin** to refresh its library, polls until the refresh
+   task finishes, then nudges **Seerr** to sync recently-added media.
+   Without this chain the new file would only show up after Jellyfin's
+   hourly scan and Seerr's periodic sync.
 
 ### HLS encoding mode
 
