@@ -77,16 +77,32 @@ def _settings_dict(session: Session) -> dict[str, object]:
     return {s.key: json.loads(s.value) for s in session.exec(select(Setting)).all()}
 
 
+class StagingPathError(RuntimeError):
+    """Raised when the inbox source file is not under a staging tree —
+    something upstream (typically Sonarr/Radarr) imported directly into
+    the media library instead of through staging. Promoting from that
+    path would produce a flat layout that breaks discovery. The caller
+    should mark the item FAILED with this exception's message as reason.
+    """
+
+
 def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Path:
     """Compute final library path. For TV: media/tv/<series>/<season>/<file>;
     for movies: media/movies/<title>/<file>. We mirror the staging layout
-    by stripping the staging prefix and prepending media_root."""
+    by stripping the staging prefix and prepending media_root.
+
+    Refuses when the source is not under a staging tree — a flat fallback
+    would put the file at <media_root>/<filename> and corrupt Sonarr's
+    series.path when _realign_arr_path runs afterwards.
+    """
     parts = source_file.parts
-    if "staging" in parts:
-        idx = parts.index("staging")
-        rel = Path(*parts[idx + 1 :])
-    else:
-        rel = Path(source_file.name)
+    if "staging" not in parts:
+        raise StagingPathError(
+            f"source {source_file} is not under a staging tree — "
+            f"check Sonarr/Radarr series.path / root folder configuration"
+        )
+    idx = parts.index("staging")
+    rel = Path(*parts[idx + 1 :])
     return media_root / rel
 
 
@@ -280,10 +296,30 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
         required=verdict.resolved_required,
     )
 
-    if verdict.complete:
-        await _promote_or_encode(session, item, source_file, runtime)
-    else:
-        await _mark_incomplete_and_promote(session, item, source_file, verdict.missing, runtime)
+    try:
+        if verdict.complete:
+            await _promote_or_encode(session, item, source_file, runtime)
+        else:
+            await _mark_incomplete_and_promote(
+                session, item, source_file, verdict.missing, runtime
+            )
+    except StagingPathError as exc:
+        # Source landed outside the staging tree (typically because
+        # Sonarr/Radarr series.path got corrupted and they imported
+        # directly into media_root). Refuse to propagate the corruption.
+        log.warning("promote.refused_non_staging_source", item_id=item.id, error=str(exc))
+        item.status = ItemStatus.FAILED
+        item.status_reason = str(exc)
+        session.add(item)
+        session.add(
+            History(
+                item_id=item.id,
+                event="FAILED",
+                detail={"reason": str(exc), "source_path": str(source_file)},
+            )
+        )
+        session.commit()
+        publish("item.status_changed", {"item_id": item.id, "status": item.status})
 
 
 async def _realign_arr_path(item: Item, library_path: Path) -> None:
@@ -329,7 +365,15 @@ async def _realign_arr_path(item: Item, library_path: Path) -> None:
                     if parent in (media_root, "/", new_folder):
                         break
                     new_folder = parent
-                if new_folder == media_root:
+                # Refuse to write series.path back when the walk collapses
+                # to media_root itself OR when it points at the file we
+                # just promoted (means library_path lives directly in
+                # media_root, with no series folder between them — setting
+                # series.path = library_path would make Sonarr treat the
+                # file as the series folder and corrupt subsequent imports.
+                # Seen in the wild when an upstream bug landed files in
+                # the flat media root; we'd just be propagating the rot.)
+                if new_folder == media_root or new_folder == str(library_path):
                     log_local.warning(
                         "realign_arr_path.could_not_derive_series_root",
                         item_id=item.id,

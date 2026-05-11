@@ -20,15 +20,28 @@ def reconcile() -> list[tuple[int, str, str]]:
     media = Path(s.media_root)
     newly_failed: list[tuple[int, str, str]] = []
     with Session(get_engine()) as session:
-        # 1. Items in PROMOTED whose library_path no longer exists → mark FAILED
-        rows = session.exec(select(Item).where(Item.status == ItemStatus.PROMOTED)).all()
+        # 1. Items whose library file vanished → mark FAILED. We check both
+        # PROMOTED (the obvious one) and INCOMPLETE — an item can be
+        # INCOMPLETE while its file is still in the library (audio policy
+        # not yet satisfied), and if that file is removed out of band the
+        # DB row becomes a zombie pointing at nothing.
+        rows = session.exec(
+            select(Item).where(
+                Item.status.in_(  # type: ignore[attr-defined]
+                    (ItemStatus.PROMOTED, ItemStatus.INCOMPLETE)
+                )
+            )
+        ).all()
         for it in rows:
             if it.library_path and not Path(it.library_path).exists():
+                prev_status = it.status
                 it.status = ItemStatus.FAILED
                 it.status_reason = "library file vanished"
                 session.add(it)
                 if it.id is not None:
-                    newly_failed.append((it.id, it.title, it.status_reason))
+                    newly_failed.append(
+                        (it.id, f"{it.title} (was {prev_status.value})", it.status_reason)
+                    )
         # 2. Files in media/ not tracked → mark as LEGACY
         if media.exists():
             tracked = {
