@@ -86,6 +86,24 @@ class StagingPathError(RuntimeError):
     """
 
 
+# Canonical library subtrees. Anything else under media_root is rejected
+# as a corrupt layout — historically the orchestrator has trusted Sonarr's
+# webhook paths blindly and ended up moving files into media_root/<file>
+# or media_root/<bogus_file>/<season>/<file> when series.path was already
+# corrupt. Pin the type segment to a known-good set.
+_LIBRARY_KINDS = ("tv", "movies")
+
+
+def _check_canonical_under_media(rel: Path, source_file: Path) -> None:
+    """Raise StagingPathError if *rel* (a path relative to media_root)
+    does not look like <type>/<title>/.../<file>."""
+    if len(rel.parts) < 3 or rel.parts[0] not in _LIBRARY_KINDS:
+        raise StagingPathError(
+            f"source {source_file} doesn't fit the canonical layout "
+            f"media_root/<{'|'.join(_LIBRARY_KINDS)}>/<title>/.../<file>"
+        )
+
+
 def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Path:
     """Compute final library path. For TV: media/tv/<series>/<season>/<file>;
     for movies: media/movies/<title>/<file>. We mirror the staging layout
@@ -94,22 +112,23 @@ def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Pa
     Two valid input shapes are accepted:
 
     1. Source under a staging tree — the original flow. Strip the staging
-       prefix and prepend media_root.
-    2. Source already under media_root with a proper hierarchy (at least
-       `<type>/<title>/<file>` for movies, `<type>/<title>/<season>/<file>`
-       for TV) — Sonarr/Radarr land subsequent imports there after the
-       first promote moved series.path. promote() will then be a no-op
-       rename (source == target) and the rest of the pipeline runs
-       normally.
+       prefix and prepend media_root. The remaining tail must start with
+       a known library type (tv|movies), otherwise the staging side is
+       itself misconfigured.
+    2. Source already under media_root with the same canonical hierarchy
+       — Sonarr/Radarr land subsequent imports there after the first
+       promote moved series.path. promote() collapses to a no-op rename
+       and the rest of the pipeline runs normally.
 
-    Anything else — including a flat `media_root/<filename>` placement —
-    raises StagingPathError. The caller marks the item FAILED instead of
-    silently producing a corrupted layout.
+    Anything else — flat placement, wrong type segment, or paths
+    completely outside both trees — raises StagingPathError. The caller
+    marks the item FAILED instead of silently producing rot.
     """
     parts = source_file.parts
     if "staging" in parts:
         idx = parts.index("staging")
         rel = Path(*parts[idx + 1 :])
+        _check_canonical_under_media(rel, source_file)
         return media_root / rel
     try:
         rel = source_file.relative_to(media_root)
@@ -118,14 +137,7 @@ def _resolve_library_path(item: Item, source_file: Path, media_root: Path) -> Pa
             f"source {source_file} is neither under a staging tree nor under "
             f"media_root {media_root}"
         ) from e
-    # Need at least <type>/<title>/<file> = 3 parts. A 1- or 2-part rel
-    # means the file is sitting flat in or near the media root — the
-    # corrupted layout this function exists to refuse.
-    if len(rel.parts) < 3:
-        raise StagingPathError(
-            f"source {source_file} is too shallow under media_root — "
-            f"expected at least <type>/<title>/<file>"
-        )
+    _check_canonical_under_media(rel, source_file)
     return source_file
 
 
@@ -388,9 +400,9 @@ async def _realign_arr_path(item: Item, library_path: Path) -> None:
                     library_path=str(library_path),
                 )
                 return
-            if len(rel.parts) < 3:
+            if len(rel.parts) < 3 or rel.parts[0] not in _LIBRARY_KINDS:
                 log_local.warning(
-                    "realign_arr_path.library_too_shallow",
+                    "realign_arr_path.library_not_canonical",
                     item_id=item.id,
                     library_path=str(library_path),
                 )
