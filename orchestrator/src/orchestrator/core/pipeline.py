@@ -22,6 +22,7 @@ from orchestrator.core.merge_safety import (
 )
 from orchestrator.core.merger import merge_audio, promote, replace_atomically
 from orchestrator.core.policy import PolicyEngine, PolicyVerdict
+from orchestrator.core.scanners import notify_library_added
 from orchestrator.core.state import validate_transition
 from orchestrator.db.models import (
     History,
@@ -377,6 +378,7 @@ async def _promote_or_encode(
         session.add(item)
         session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
+        notify_library_added(session)
         # Keep the item monitored in the *arr when quality_upgrade is on so
         # the RSS sweep can find a better release later (e.g. 1080p → 4K
         # Remux with same audio). Default off: unmonitor as before so the
@@ -432,6 +434,7 @@ async def _replace_in_library(
     session.add(item)
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
+    notify_library_added(session)
 
 
 async def _mark_incomplete_and_promote(
@@ -715,6 +718,7 @@ async def _merge_into_existing(
         session.add(item)
         session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
+        notify_library_added(session)
         # Same logic as _promote_or_encode: keep monitored when quality
         # upgrades are on so the *arr can grab a better release later.
         if not runtime.get("quality_upgrade_enabled", False):

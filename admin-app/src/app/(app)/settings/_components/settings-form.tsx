@@ -224,6 +224,7 @@ function SettingsFormInner({ initial }: FormProps) {
   const [retry, setRetry] = useState(initial.retry_interval_hours);
   const [hls, setHls] = useState(initial.hls_enabled);
   const [qualityUpgrade, setQualityUpgrade] = useState(initial.quality_upgrade_enabled);
+  const [autoScan, setAutoScan] = useState(initial.auto_scan_on_promote);
   const [notifyFailed, setNotifyFailed] = useState(initial.notify_failed_enabled);
   const [notifyFrozen, setNotifyFrozen] = useState(initial.notify_frozen_enabled);
   const [channels, setChannels] = useState<NotificationChannel[]>(
@@ -268,6 +269,7 @@ function SettingsFormInner({ initial }: FormProps) {
           accept_as_is_after_attempts: Number(acceptAfter),
           hls_enabled: hls,
           quality_upgrade_enabled: qualityUpgrade,
+          auto_scan_on_promote: autoScan,
           notify_failed_enabled: notifyFailed,
           notify_frozen_enabled: notifyFrozen,
           notification_channels: channels,
@@ -382,6 +384,13 @@ function SettingsFormInner({ initial }: FormProps) {
                 description="When on, Sonarr/Radarr keep monitoring after a promote and any better release that comes later replaces the file in place, as long as the new audio is a superset. Off by default — 4K Remux churn can be expensive."
                 checked={qualityUpgrade}
                 onCheckedChange={setQualityUpgrade}
+              />
+              <ToggleRow
+                id="autoScan"
+                label="Trigger Jellyfin + Seerr scans on promote"
+                description="Nudge Jellyfin to rescan the library and Seerr to sync recently-added the instant a file lands, instead of waiting for their scheduled jobs."
+                checked={autoScan}
+                onCheckedChange={setAutoScan}
               />
             </CardContent>
           </Card>

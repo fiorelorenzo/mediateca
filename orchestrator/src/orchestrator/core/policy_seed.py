@@ -30,6 +30,9 @@ DEFAULTS: dict[str, object] = {
     # List of {name, url, enabled} entries. URL syntax is Apprise's:
     # mailto://, tgram://, ntfy://, discord://, pover://, ...
     "notification_channels": [],
+    # Trigger Jellyfin + Seerr scans the instant a file lands in the library
+    # instead of waiting for their scheduled jobs. See core/scanners.py.
+    "auto_scan_on_promote": True,
 }
 
 

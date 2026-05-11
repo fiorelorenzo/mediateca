@@ -39,6 +39,7 @@ class SettingsPayload(BaseModel):
     notify_failed_enabled: bool | None = None
     notify_frozen_enabled: bool | None = None
     notification_channels: list[NotificationChannel] | None = None
+    auto_scan_on_promote: bool | None = None
 
     @field_validator("retry_interval_hours")
     @classmethod

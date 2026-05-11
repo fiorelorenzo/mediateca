@@ -43,6 +43,7 @@ export interface Settings {
   notify_failed_enabled: boolean;
   notify_frozen_enabled: boolean;
   notification_channels: NotificationChannel[];
+  auto_scan_on_promote: boolean;
 }
 
 export interface NotificationChannel {
