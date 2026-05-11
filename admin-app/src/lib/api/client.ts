@@ -26,6 +26,7 @@ export const api = {
       status?: string;
       status_in?: string[];
       q?: string;
+      series_id?: number;
       offset?: number;
       limit?: number;
     } = {},

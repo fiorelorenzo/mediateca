@@ -25,8 +25,9 @@ def list_items(
     status: ItemStatus | None = None,
     status_in: list[ItemStatus] | None = Query(default=None),
     q: str | None = None,
+    series_id: int | None = None,
     offset: int = 0,
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, le=5000),
     session: Session = Depends(get_session),
 ) -> dict[str, Any]:
     stmt = select(Item)
@@ -37,6 +38,8 @@ def list_items(
         stmt = stmt.where(Item.status.in_(status_in))  # type: ignore[attr-defined]
     elif status is not None:
         stmt = stmt.where(Item.status == status)
+    if series_id is not None:
+        stmt = stmt.where(Item.series_id == series_id)
     if q:
         stmt = stmt.where(Item.title.contains(q))  # type: ignore[attr-defined]
     total = len(session.exec(stmt).all())

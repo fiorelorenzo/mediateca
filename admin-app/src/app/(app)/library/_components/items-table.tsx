@@ -78,28 +78,42 @@ function formatRuntime(min: number | undefined): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
-interface EnrichedItem extends Item {
+// A single row in the Library table is either a movie (one orchestrator Item)
+// or an entire series (N orchestrator Items, one per episode). Clicking a series
+// row deep-links to a dedicated series view; movies still go to /library/[id].
+type LibRow = {
+  kind: "movie" | "series";
+  /** Click target id. Item.id for movies, Sonarr series id for series. */
+  linkId: number;
+  /** Stable key per row. */
+  key: string;
+  title: string;
   poster?: string | null;
   year?: number;
   runtime?: number;
   size?: number;
   quality?: string;
   resolution?: string;
-}
+  audioUnion: string[];
+  /** All distinct statuses across the underlying items. */
+  statusCounts: Partial<Record<ItemStatus, number>>;
+  /** Most attention-worthy status; drives the badge + status sort. */
+  worstStatus: ItemStatus;
+  retryMax: number;
+  /** For series: total / promoted / incomplete counts for the breakdown text. */
+  totalEpisodes?: number;
+  promotedEpisodes?: number;
+};
 
 type LibSortKey = "title" | "type" | "quality" | "size" | "audio" | "status" | "retry";
 
-// Resolution-prefixed quality sort: "2160p Bluray" > "1080p WEBDL" > "720p HDTV".
 const RESOLUTION_ORDER = ["2160p", "1080p", "720p", "576p", "480p", "SD"];
-function qualityRank(it: EnrichedItem): number {
-  if (!it.quality) return -1;
-  const res = it.resolution ?? "";
-  const tier = RESOLUTION_ORDER.indexOf(res);
-  // Higher tier index = lower quality, so invert; fall back to alphabetical for tail.
-  return (tier >= 0 ? RESOLUTION_ORDER.length - tier : 0) * 100 + it.quality.length;
+function qualityRank(row: LibRow): number {
+  if (!row.quality) return -1;
+  const tier = RESOLUTION_ORDER.indexOf(row.resolution ?? "");
+  return (tier >= 0 ? RESOLUTION_ORDER.length - tier : 0) * 100 + row.quality.length;
 }
 
-// Status sort: prioritise things that need attention.
 const STATUS_RANK: Record<ItemStatus, number> = {
   FAILED: 0,
   INCOMPLETE: 1,
@@ -114,45 +128,72 @@ const STATUS_RANK: Record<ItemStatus, number> = {
   LEGACY: 10,
 };
 
-function compareItems(a: EnrichedItem, b: EnrichedItem, key: LibSortKey): number {
+function compareRows(a: LibRow, b: LibRow, key: LibSortKey): number {
   switch (key) {
     case "title":
       return a.title.localeCompare(b.title);
     case "type":
-      return a.source.localeCompare(b.source);
+      return a.kind.localeCompare(b.kind);
     case "quality":
       return qualityRank(a) - qualityRank(b);
     case "size":
       return (a.size ?? 0) - (b.size ?? 0);
     case "audio":
-      return (a.audio_present ?? []).join(",").localeCompare((b.audio_present ?? []).join(","));
+      return a.audioUnion.join(",").localeCompare(b.audioUnion.join(","));
     case "status":
-      return STATUS_RANK[a.status] - STATUS_RANK[b.status];
+      return STATUS_RANK[a.worstStatus] - STATUS_RANK[b.worstStatus];
     case "retry":
-      return a.retry_count - b.retry_count;
+      return a.retryMax - b.retryMax;
   }
 }
 
-function pickMovieMeta(it: Item, m: ArrMovie | undefined): Partial<EnrichedItem> {
-  if (!m) return {};
+function rowFromMovie(it: Item, m: ArrMovie | undefined): LibRow {
   return {
-    poster: arrPoster(m.images),
-    year: m.year,
-    runtime: m.runtime,
-    size: m.movieFile?.size ?? m.sizeOnDisk,
-    quality: m.movieFile?.quality?.quality?.name,
-    resolution: m.movieFile?.mediaInfo?.resolution,
+    kind: "movie",
+    linkId: it.id,
+    key: `movie:${it.id}`,
+    title: m?.title ?? it.title,
+    poster: m ? arrPoster(m.images) : null,
+    year: m?.year,
+    runtime: m?.runtime,
+    size: m?.movieFile?.size ?? m?.sizeOnDisk,
+    quality: m?.movieFile?.quality?.quality?.name,
+    resolution: m?.movieFile?.mediaInfo?.resolution,
+    audioUnion: it.audio_present ?? [],
+    statusCounts: { [it.status]: 1 },
+    worstStatus: it.status,
+    retryMax: it.retry_count,
   };
 }
-function pickSeriesMeta(it: Item, s: ArrSeries | undefined): Partial<EnrichedItem> {
-  if (!s) return {};
+
+function rowFromSeries(items: Item[], s: ArrSeries | undefined, seriesId: number): LibRow {
+  const counts: Partial<Record<ItemStatus, number>> = {};
+  const audio = new Set<string>();
+  let worst: ItemStatus = items[0].status;
+  let retryMax = 0;
+  for (const it of items) {
+    counts[it.status] = (counts[it.status] ?? 0) + 1;
+    (it.audio_present ?? []).forEach((l) => audio.add(l));
+    if (STATUS_RANK[it.status] < STATUS_RANK[worst]) worst = it.status;
+    if (it.retry_count > retryMax) retryMax = it.retry_count;
+  }
   return {
-    poster: arrPoster(s.images),
-    year: s.year,
-    runtime: s.runtime,
-    size: s.statistics?.sizeOnDisk,
+    kind: "series",
+    linkId: seriesId,
+    key: `series:${seriesId}`,
+    title: s?.title ?? items[0].title.split(" - S")[0],
+    poster: s ? arrPoster(s.images) : null,
+    year: s?.year,
+    runtime: s?.runtime,
+    size: s?.statistics?.sizeOnDisk,
     quality: undefined,
     resolution: undefined,
+    audioUnion: Array.from(audio).sort(),
+    statusCounts: counts,
+    worstStatus: worst,
+    retryMax,
+    totalEpisodes: s?.statistics?.episodeCount ?? items.length,
+    promotedEpisodes: counts.PROMOTED ?? 0,
   };
 }
 
@@ -171,14 +212,16 @@ export function ItemsTable() {
         // ALL really means "everything that's settled" — items in transient
         // pipeline states (ANALYZING/MERGING/PROMOTING/ENCODING) live in
         // /processing, not here, otherwise the same row would appear in two
-        // places at once.
+        // places at once. Limit is bumped because series rows aggregate
+        // across all their episodes; a 50-show library with 8 episodes each
+        // is already 400 items pre-aggregation.
         status_in:
           status === "ALL"
             ? ["PENDING", "INCOMPLETE", "PROMOTED", "FROZEN_AS_IS", "POLICY_OVERRIDDEN", "FAILED", "LEGACY"]
             : undefined,
         status: status === "ALL" ? undefined : status,
         q: q || undefined,
-        limit: 100,
+        limit: 2000,
       }),
   });
 
@@ -206,18 +249,27 @@ export function ItemsTable() {
     return out;
   }, [series]);
 
-  const enriched = useMemo<EnrichedItem[]>(() => {
+  const rows = useMemo<LibRow[]>(() => {
     if (!itemsData) return [];
-    const rows = itemsData.items.map((it) => {
-      const meta =
-        it.source === "radarr"
-          ? pickMovieMeta(it, moviesById.get(it.source_id))
-          : pickSeriesMeta(it, seriesById.get(it.series_id ?? it.source_id));
-      return { ...it, ...meta };
-    });
-    if (!sort) return rows;
+    const out: LibRow[] = [];
+    const seriesGroups = new Map<number, Item[]>();
+    for (const it of itemsData.items) {
+      if (it.source === "radarr") {
+        out.push(rowFromMovie(it, moviesById.get(it.source_id)));
+      } else {
+        const sid = it.series_id ?? it.source_id;
+        if (sid == null) continue;
+        const bucket = seriesGroups.get(sid);
+        if (bucket) bucket.push(it);
+        else seriesGroups.set(sid, [it]);
+      }
+    }
+    for (const [sid, items] of seriesGroups) {
+      out.push(rowFromSeries(items, seriesById.get(sid), sid));
+    }
+    if (!sort) return out;
     const dir = sort.dir === "asc" ? 1 : -1;
-    return rows.sort((a, b) => compareItems(a, b, sort.key) * dir);
+    return out.sort((a, b) => compareRows(a, b, sort.key) * dir);
   }, [itemsData, moviesById, seriesById, sort]);
 
   useOrchestratorEvents((ev) => {
@@ -261,7 +313,7 @@ export function ItemsTable() {
         >
           {isLoading ? (
             <TableSkeleton rows={8} columns={7} />
-          ) : enriched.length === 0 ? (
+          ) : rows.length === 0 ? (
             <EmptyState
               icon={Library}
               title="No items yet"
@@ -278,97 +330,102 @@ export function ItemsTable() {
                     <SortableHead label="Quality" sortKey="quality" sort={sort} onSort={onSort} className="w-28" />
                     <SortableHead label="Size" sortKey="size" sort={sort} onSort={onSort} align="right" className="w-24" />
                     <SortableHead label="Audio" sortKey="audio" sort={sort} onSort={onSort} />
-                    <SortableHead label="Status" sortKey="status" sort={sort} onSort={onSort} className="w-32" />
+                    <SortableHead label="Status" sortKey="status" sort={sort} onSort={onSort} className="w-40" />
                     <SortableHead label="Retry" sortKey="retry" sort={sort} onSort={onSort} align="right" className="w-16" />
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   <AnimatePresence initial={false}>
-                    {enriched.map((it) => (
-                      <motion.tr
-                        layout
-                        key={it.id}
-                        initial={{ opacity: 0 }}
-                        animate={{
-                          opacity: 1,
-                          backgroundColor:
-                            highlightId === it.id ? "hsl(var(--primary) / 0.10)" : "transparent",
-                        }}
-                        exit={{ opacity: 0 }}
-                        transition={{ duration: 0.4 }}
-                        className="hover:bg-accent/40 border-b"
-                      >
-                        <TableCell className="py-2">
-                          <Link
-                            href={`/library/${it.id}`}
-                            className="block h-[64px] w-[44px] overflow-hidden rounded-sm bg-muted/50"
-                          >
-                            {it.poster ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={it.poster}
-                                alt=""
-                                loading="lazy"
-                                className="h-full w-full object-cover"
-                              />
-                            ) : (
-                              <div className="text-muted-foreground flex h-full items-center justify-center">
-                                {it.source === "radarr" ? (
-                                  <Film className="size-4" />
-                                ) : (
-                                  <Tv className="size-4" />
-                                )}
+                    {rows.map((r) => {
+                      const href =
+                        r.kind === "series" ? `/library/series/${r.linkId}` : `/library/${r.linkId}`;
+                      return (
+                        <motion.tr
+                          layout
+                          key={r.key}
+                          initial={{ opacity: 0 }}
+                          animate={{
+                            opacity: 1,
+                            backgroundColor:
+                              r.kind === "movie" && highlightId === r.linkId
+                                ? "hsl(var(--primary) / 0.10)"
+                                : "transparent",
+                          }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.4 }}
+                          className="hover:bg-accent/40 border-b"
+                        >
+                          <TableCell className="py-2">
+                            <Link
+                              href={href}
+                              className="bg-muted/50 block h-[64px] w-[44px] overflow-hidden rounded-sm"
+                            >
+                              {r.poster ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={r.poster}
+                                  alt=""
+                                  loading="lazy"
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="text-muted-foreground flex h-full items-center justify-center">
+                                  {r.kind === "movie" ? <Film className="size-4" /> : <Tv className="size-4" />}
+                                </div>
+                              )}
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <Link href={href} className="hover:underline">
+                              <div className="font-medium leading-tight">{r.title}</div>
+                              <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-xs">
+                                {r.year && <span>{r.year}</span>}
+                                {r.year && r.runtime && <span aria-hidden>·</span>}
+                                {r.runtime && <span>{formatRuntime(r.runtime)}</span>}
                               </div>
-                            )}
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Link href={`/library/${it.id}`} className="hover:underline">
-                            <div className="font-medium leading-tight">{it.title}</div>
-                            <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-xs">
-                              {it.year && <span>{it.year}</span>}
-                              {it.year && it.runtime && <span aria-hidden>·</span>}
-                              {it.runtime && <span>{formatRuntime(it.runtime)}</span>}
-                            </div>
-                          </Link>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="gap-1 font-normal">
-                            {it.source === "radarr" ? (
-                              <Film className="size-3" />
+                            </Link>
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className="gap-1 font-normal">
+                              {r.kind === "movie" ? <Film className="size-3" /> : <Tv className="size-3" />}
+                              {r.kind === "movie" ? "Movie" : "TV"}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {r.quality ? (
+                              <span className="font-mono text-xs">
+                                {r.resolution ? `${r.resolution} ` : ""}
+                                {r.quality}
+                              </span>
                             ) : (
-                              <Tv className="size-3" />
+                              <span className="text-muted-foreground text-xs">—</span>
                             )}
-                            {it.source === "radarr" ? "Movie" : "TV"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {it.quality ? (
-                            <span className="font-mono text-xs">
-                              {it.resolution ? `${it.resolution} ` : ""}
-                              {it.quality}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-xs">—</span>
-                          )}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-xs tabular-nums">
-                          {formatBytes(it.size)}
-                        </TableCell>
-                        <TableCell>
-                          <AudioBadges
-                            present={it.audio_present}
-                            required={it.audio_required}
-                          />
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant={STATUS_VARIANT[it.status]}>{it.status}</Badge>
-                        </TableCell>
-                        <TableCell className="text-muted-foreground text-right tabular-nums">
-                          {it.retry_count > 0 ? it.retry_count : "—"}
-                        </TableCell>
-                      </motion.tr>
-                    ))}
+                          </TableCell>
+                          <TableCell className="text-right font-mono text-xs tabular-nums">
+                            {formatBytes(r.size)}
+                          </TableCell>
+                          <TableCell>
+                            <AudioBadges present={r.audioUnion} required={null} />
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col items-start gap-0.5">
+                              <Badge variant={STATUS_VARIANT[r.worstStatus]}>
+                                {r.worstStatus}
+                              </Badge>
+                              {r.kind === "series" && (
+                                <div className="text-muted-foreground text-[11px] leading-tight">
+                                  {r.promotedEpisodes ?? 0}
+                                  {r.totalEpisodes ? `/${r.totalEpisodes}` : ""} promoted
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell className="text-muted-foreground text-right tabular-nums">
+                            {r.retryMax > 0 ? r.retryMax : "—"}
+                          </TableCell>
+                        </motion.tr>
+                      );
+                    })}
                   </AnimatePresence>
                 </TableBody>
               </Table>
