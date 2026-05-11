@@ -670,11 +670,36 @@ Settings → General → Security and put it in `.env` (`SONARR_API_KEY`,
 `RADARR_API_KEY`) — the orchestrator uses these to flip `monitored=false`
 after promotion.
 
-**Quality profiles** — for each profile you intend to use:
-- Cap quality at **1080p** (uncheck 2160p tiers; cutoff = Bluray-1080p
-  Remux or whatever 1080p tier you prefer).
-- Set **`Upgrades Allowed = OFF`**. The HLS pipeline deletes the source
-  after encoding, so re-download attempts would just fight the encoder.
+**Quality profiles.** This repo ships two Italian-first profiles on each arr.
+
+| Profile | Allowed | Cutoff | Default for |
+| --- | --- | --- | --- |
+| `Multi-Audio 1080p` | 720p group, 1080p group | 1080p group | Seerr → Sonarr (series requests) |
+| `Multi-Audio 4K` | 1080p group, 2160p group | 2160p group | Seerr → Radarr (movie requests) |
+
+Both profiles **group all sources together** at the same resolution
+(HDTV / WEBRip / WEBDL / Bluray / Remux are interchangeable). That
+makes the **Custom Format score the actual differentiator** — within a
+resolution tier, "any Italian dual-audio release" wins over "any
+English-only release" because:
+- `Dual Audio (ITA + Original)` CF = 500 (regex matches `ita eng`,
+  `ITA.ENG`, `Multi`, `Multi-Subs`, etc. — verified against 7 real
+  scene/p2p titles)
+- `Italian Only` CF = 50
+- English-only / no-Italian releases = 0
+
+Why two profiles: 4K dual-audio releases of catalogue movies are
+common enough that defaulting to 4K for films is worth it; 4K series
+releases are rarer and the files are big enough that defaulting to
+1080p for TV avoids surprises. Each user can override per-request from
+Seerr.
+
+The orchestrator pushes the two CFs to every profile whose name starts
+with `Multi-Audio` on startup (`TARGET_PROFILE_PREFIX` in
+`orchestrator/src/orchestrator/core/custom_formats.py`). Adding a third
+variant — say a `Multi-Audio Anime` — just needs a new profile in the
+arr UI; the CF scores get applied automatically on the next orchestrator
+boot.
 
 ### Prowlarr
 
