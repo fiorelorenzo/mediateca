@@ -131,6 +131,7 @@ function SeriesActions({
           variant="default"
           disabled={pending || busy || stuckItems.length === 0}
           onClick={() => start(searchStuck)}
+          className="gap-2"
         >
           <Search className="size-4" />
           {stuckItems.length === 0
