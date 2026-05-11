@@ -469,6 +469,8 @@ async def _mark_incomplete_and_promote(
     )
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
+    # File is in the library even though audio policy isn't satisfied yet.
+    notify_library_added(session)
 
 
 def _reject_merge(
@@ -699,6 +701,10 @@ async def _merge_into_existing(
         session.add(item)
         session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
+        # Library file was just replaced with the merged version — even
+        # though we're still missing langs, Jellyfin needs to re-probe so
+        # the new audio set shows up correctly.
+        notify_library_added(session)
         return
 
     # Fully satisfied — transition to PROMOTED (or ENCODING)
