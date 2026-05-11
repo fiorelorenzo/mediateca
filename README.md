@@ -1288,11 +1288,90 @@ ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose pull && docker compo
 # Rebuild the encoder after editing hls-encoder/encoder.py:
 ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder'
 
-# Backup config (small, ~600 MB):
-ssh <USERNAME>@<HOST-IP> 'sudo tar czf /tmp/servarr-backup-$(date +%F).tgz \
-  -C /opt/servarr config caddy/Caddyfile docker-compose.yml .env hls-encoder'
-scp <USERNAME>@<HOST-IP>:/tmp/servarr-backup-*.tgz ~/Backups/
+# Backup runs nightly via ofelia (see Backup section below).
+# To trigger one on demand:
+ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose run --rm backup'
 ```
+
+### Backup
+
+Nightly encrypted backup of all container configs + orchestrator state to the
+Hetzner Storage Box via SFTP (restic). Runs at 04:00 (TZ-local) inside the
+`backup` container, scheduled by ofelia. Retention defaults to **7 daily + 4 weekly + 6 monthly** snapshots.
+
+**What it includes** — everything under `./config/` plus `.env`:
+
+- Orchestrator SQLite DB (state machine, history, settings, custom-format state)
+- Sonarr / Radarr / Prowlarr / Bazarr DBs + config XML
+- Jellyseerr DB (users, request history)
+- Jellyfin DB (users, watch state, playlists)
+- qBittorrent state (categories, torrents on-disk metadata)
+- Headscale data (preauth keys, node registry)
+- `.env` (all secrets needed to rebuild the stack)
+
+**What it excludes** (regenerable, see `backup/excludes.txt`):
+
+- Transcodes, caches, MediaCover, log files, `*.db-wal`/`*.db-shm` hot files
+
+Every SQLite DB is captured via `sqlite3 .backup` first (consistent dump, safe
+on live WAL-mode DBs); the live `*.db` files themselves are excluded so restic
+only stores the clean snapshots.
+
+**One-time setup**
+
+```sh
+# 1. Generate an SSH keypair dedicated to the backup container
+cd /opt/servarr
+ssh-keygen -t ed25519 -f backup/ssh/id_ed25519 -N '' -C "mediateca-backup"
+
+# 2. Push the public key to the Storage Box (Hetzner robot UI → Storage Box
+#    → "SSH Keys" tab, paste the contents of backup/ssh/id_ed25519.pub).
+#    Or via SSH (replace u123456 + host):
+cat backup/ssh/id_ed25519.pub | \
+  ssh -p 23 u123456@u123456.your-storagebox.de install-ssh-key
+
+# 3. Pin the host key (StrictHostKeyChecking will then enforce it):
+ssh-keyscan -p 23 -t ed25519 u123456.your-storagebox.de \
+  > backup/ssh/known_hosts
+
+# 4. Fill in .env (BACKUP_RESTIC_PASSWORD, BACKUP_SFTP_HOST, BACKUP_SFTP_USER).
+#    The password encrypts the repo client-side — STORE IT OFFLINE. Without
+#    it the backups are unrecoverable even with full Storage Box access.
+
+# 5. Build the image and run the first backup (auto-inits the repo):
+docker compose build backup
+docker compose run --rm backup
+```
+
+**Verify a backup is restorable**
+
+```sh
+docker compose run --rm --entrypoint /usr/local/bin/restore-check.sh backup
+```
+
+This runs `restic check --read-data-subset=1%`, restores the latest snapshot's
+SQLite dumps into a tmp dir, and runs `PRAGMA integrity_check` on each.
+
+**Manual restore** — pull a single file or the whole tree:
+
+```sh
+# List snapshots
+docker compose run --rm --entrypoint restic backup snapshots
+
+# Restore everything from the latest snapshot to ./restored/
+docker compose run --rm \
+  -v "$PWD/restored:/restore" \
+  --entrypoint restic backup restore latest --target /restore
+
+# Restore just the orchestrator DB
+docker compose run --rm \
+  -v "$PWD/restored:/restore" \
+  --entrypoint restic backup restore latest \
+  --target /restore --include /snapshots/orchestrator/orchestrator.db
+```
+
+After restoring SQLite dumps, drop them into place under `./config/<service>/`
+*while the service is stopped*, then bring the stack back up.
 
 ### Health checks
 

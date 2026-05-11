@@ -1,0 +1,27 @@
+# Caches and transcodes — regenerable
+**/cache/**
+**/Cache/**
+**/metadata/cache/**
+**/transcodes/**
+**/Transcodes/**
+**/transcoding-temp/**
+**/MediaCover/**
+
+# Logs
+**/log/**
+**/logs/**
+*.log
+*.log.*
+
+# Arr internal backups (we have our own)
+**/Backups/**
+
+# SQLite hot files — we capture clean snapshots via .backup
+*.db-shm
+*.db-wal
+*.db-journal
+
+# Temp / lock
+*.tmp
+*.pid
+*.lock

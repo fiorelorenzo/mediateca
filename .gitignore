@@ -68,3 +68,7 @@ admin-app/.playwright/
 
 # Tooling
 .claude/
+
+# Backup SSH keys — never commit
+backup/ssh/*
+!backup/ssh/.gitkeep
