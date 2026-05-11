@@ -1,9 +1,19 @@
 "use client";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { motion } from "motion/react";
 import { toast } from "sonner";
-import { AlertTriangle, Ban, Download, Film, Trash2, Tv } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  Ban,
+  Download,
+  Film,
+  Trash2,
+  Tv,
+} from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -72,6 +82,82 @@ function formatSpeed(b: number | undefined): string {
     i++;
   }
   return `${v.toFixed(v >= 10 || i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+type SortKey = "title" | "type" | "indexer" | "status" | "progress" | "eta";
+type SortDir = "asc" | "desc";
+type SortState = { key: SortKey; dir: SortDir } | null;
+
+function rowEtaSeconds(q: QueueRecord): number {
+  if (q.liveDlSpeed && q.liveDlSpeed > 0 && typeof q.liveSizeLeft === "number") {
+    return Math.floor(q.liveSizeLeft / q.liveDlSpeed);
+  }
+  // Parse Sonarr/Radarr's "HH:MM:SS" or "D.HH:MM:SS" form.
+  const tl = q.timeleft;
+  if (!tl) return Number.POSITIVE_INFINITY;
+  const parts = tl.split(/[.:]/).map(Number);
+  if (parts.some(Number.isNaN)) return Number.POSITIVE_INFINITY;
+  let secs = 0;
+  if (parts.length === 4) {
+    secs = parts[0] * 86400 + parts[1] * 3600 + parts[2] * 60 + parts[3];
+  } else if (parts.length === 3) {
+    secs = parts[0] * 3600 + parts[1] * 60 + parts[2];
+  } else if (parts.length === 2) {
+    secs = parts[0] * 60 + parts[1];
+  }
+  return secs > 0 ? secs : Number.POSITIVE_INFINITY;
+}
+
+function rowTitle(q: QueueRecord): string {
+  return (q.movie?.title ?? q.series?.title ?? q.title ?? "").toLowerCase();
+}
+
+function compareRows(a: QueueRecord, b: QueueRecord, key: SortKey): number {
+  switch (key) {
+    case "title":
+      return rowTitle(a).localeCompare(rowTitle(b));
+    case "type":
+      return (a.kind ?? "").localeCompare(b.kind ?? "");
+    case "indexer":
+      return (a.indexer ?? "").localeCompare(b.indexer ?? "");
+    case "status":
+      return (a.status ?? "").localeCompare(b.status ?? "");
+    case "progress":
+      return effectiveProgress(a) - effectiveProgress(b);
+    case "eta":
+      return rowEtaSeconds(a) - rowEtaSeconds(b);
+  }
+}
+
+function SortableHead({
+  label,
+  sortKey,
+  sort,
+  onSort,
+  className,
+}: {
+  label: string;
+  sortKey: SortKey;
+  sort: SortState;
+  onSort: (k: SortKey) => void;
+  className?: string;
+}) {
+  const active = sort?.key === sortKey;
+  const Icon = !active ? ArrowUpDown : sort?.dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead className={className}>
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={`hover:text-foreground inline-flex items-center gap-1 text-xs uppercase tracking-wide transition-colors ${
+          active ? "text-foreground" : "text-muted-foreground"
+        }`}
+      >
+        <span>{label}</span>
+        <Icon className={`size-3 ${active ? "" : "opacity-50"}`} />
+      </button>
+    </TableHead>
+  );
 }
 
 function formatEtaSeconds(eta: number | undefined): string {
@@ -176,6 +262,22 @@ export function QueueTable() {
     queryFn: () => arrs.unifiedQueue(),
     refetchInterval: 3_000,
   });
+  const [sort, setSort] = useState<SortState>({ key: "progress", dir: "desc" });
+
+  const onSort = (key: SortKey) => {
+    setSort((prev) => {
+      if (prev?.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  };
+
+  const sortedData = useMemo(() => {
+    if (!data) return data;
+    if (!sort) return data;
+    const dir = sort.dir === "asc" ? 1 : -1;
+    return [...data].sort((a, b) => compareRows(a, b, sort.key) * dir);
+  }, [data, sort]);
 
   const removeItem = useMutation({
     mutationFn: ({ q, blocklist }: { q: QueueRecord; blocklist: boolean }) =>
@@ -209,19 +311,19 @@ export function QueueTable() {
           <TableHeader>
             <TableRow className="bg-muted/30 hover:bg-muted/30">
               <TableHead className="w-[60px]" />
-              <TableHead>Title</TableHead>
-              <TableHead className="w-20 text-xs uppercase tracking-wide">Type</TableHead>
-              <TableHead className="w-28 text-xs uppercase tracking-wide">Indexer</TableHead>
-              <TableHead className="w-24 text-xs uppercase tracking-wide">Status</TableHead>
-              <TableHead className="w-[280px] text-xs uppercase tracking-wide">Progress</TableHead>
-              <TableHead className="w-20 text-xs uppercase tracking-wide">ETA</TableHead>
+              <SortableHead label="Title" sortKey="title" sort={sort} onSort={onSort} />
+              <SortableHead label="Type" sortKey="type" sort={sort} onSort={onSort} className="w-20" />
+              <SortableHead label="Indexer" sortKey="indexer" sort={sort} onSort={onSort} className="w-28" />
+              <SortableHead label="Status" sortKey="status" sort={sort} onSort={onSort} className="w-24" />
+              <SortableHead label="Progress" sortKey="progress" sort={sort} onSort={onSort} className="w-[280px]" />
+              <SortableHead label="ETA" sortKey="eta" sort={sort} onSort={onSort} className="w-20" />
               <TableHead className="w-[88px] text-right text-xs uppercase tracking-wide">
                 Actions
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((q) => {
+            {(sortedData ?? data).map((q) => {
               const p = effectiveProgress(q);
               const poster = arrPoster(q.movie?.images ?? q.series?.images);
               const title = q.movie?.title ?? q.series?.title ?? q.title;
