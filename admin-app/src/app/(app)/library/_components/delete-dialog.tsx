@@ -24,7 +24,16 @@ import type { Item } from "@/lib/api/types";
 
 type Mode = "full" | "partial";
 
-export function DeleteDialog({ item }: { item: Item }) {
+export function DeleteDialog({
+  item,
+  displayTitle,
+}: {
+  item: Item;
+  /** Override the title shown in the dialog. Useful when the caller has a
+   * series-level title (e.g. "Severance") but the underlying item is one
+   * of its episodes ("Severance - S01E01"). */
+  displayTitle?: string;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const isSeries = item.source === "sonarr";
@@ -94,8 +103,9 @@ export function DeleteDialog({ item }: { item: Item }) {
     });
   }
 
+  const shownTitle = (displayTitle ?? item.title).trim();
   const titleNeedsTyping = mode === "full" && deleteFiles;
-  const confirmOk = !titleNeedsTyping || confirmText.trim() === item.title.trim();
+  const confirmOk = !titleNeedsTyping || confirmText.trim() === shownTitle;
   const partialEmpty = mode === "partial" && selectedEpisodes.size === 0;
   const canSubmit = confirmOk && !partialEmpty;
 
@@ -162,7 +172,7 @@ export function DeleteDialog({ item }: { item: Item }) {
 
         <div className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            <span className="text-foreground font-medium">{item.title}</span> — this acts on{" "}
+            <span className="text-foreground font-medium">{shownTitle}</span> — this acts on{" "}
             {item.source} (#{item.source_id}), the active torrent (if any), and the orchestrator
             item DB. Files on disk are unlinked when &apos;Delete files&apos; is on.
           </p>
@@ -227,13 +237,13 @@ export function DeleteDialog({ item }: { item: Item }) {
                 <div className="border-destructive/40 bg-destructive/5 space-y-1.5 rounded-md border p-3">
                   <Label htmlFor="confirm-title" className="text-xs">
                     Type the title to confirm:{" "}
-                    <span className="text-foreground font-mono font-medium">{item.title}</span>
+                    <span className="text-foreground font-mono font-medium">{shownTitle}</span>
                   </Label>
                   <Input
                     id="confirm-title"
                     value={confirmText}
                     onChange={(e) => setConfirmText(e.target.value)}
-                    placeholder={item.title}
+                    placeholder={shownTitle}
                     className="font-mono text-sm"
                   />
                 </div>

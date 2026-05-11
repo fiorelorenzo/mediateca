@@ -1,12 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronLeft, Film, Tv } from "lucide-react";
+import { useMemo, useState, useTransition } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ChevronLeft, Film, Search, Tv } from "lucide-react";
+import { toast } from "sonner";
 
 import { AudioBadges } from "@/app/(app)/library/_components/audio-badges";
+import { DeleteDialog } from "@/app/(app)/library/_components/delete-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { EmptyState } from "@/components/empty-state";
@@ -73,6 +76,74 @@ function groupEpisodesBySeason(episodes: SonarrEpisode[], itemsByEpId: Map<numbe
     if (b === 0) return -1;
     return a - b;
   });
+}
+
+function SeriesActions({
+  items,
+  seriesTitle,
+}: {
+  items: Item[];
+  seriesTitle: string;
+}) {
+  const qc = useQueryClient();
+  const [pending, start] = useTransition();
+  const [busy, setBusy] = useState(false);
+
+  const stuckItems = useMemo(
+    () =>
+      items.filter(
+        (it) => it.status === "INCOMPLETE" || it.status === "FAILED" || it.status === "PENDING",
+      ),
+    [items],
+  );
+
+  if (items.length === 0) {
+    return (
+      <Card>
+        <CardContent className="text-muted-foreground p-4 text-sm">
+          No tracked episodes yet — actions appear once at least one episode is imported.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  async function searchStuck() {
+    setBusy(true);
+    try {
+      await Promise.all(stuckItems.map((it) => api.searchNow(it.id)));
+      toast.success(`Search queued for ${stuckItems.length} episode${stuckItems.length === 1 ? "" : "s"}`);
+      qc.invalidateQueries({ queryKey: ["items"] });
+    } catch (e) {
+      toast.error(`Search failed: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // The orchestrator's delete endpoint is per-Item; for series we pass any
+  // item belonging to the series and DeleteDialog routes through Sonarr.
+  const proxy = items[0];
+
+  return (
+    <Card>
+      <CardContent className="flex flex-wrap items-center gap-2 p-3">
+        <Button
+          variant="default"
+          disabled={pending || busy || stuckItems.length === 0}
+          onClick={() => start(searchStuck)}
+        >
+          <Search className="size-4" />
+          {stuckItems.length === 0
+            ? "Nothing to search"
+            : `Search ${stuckItems.length} stuck episode${stuckItems.length === 1 ? "" : "s"}`}
+        </Button>
+        <DeleteDialog item={proxy} displayTitle={seriesTitle} />
+        {/* Per-episode actions (accept-as-is, override-policy) stay reachable
+            by clicking an episode row → /library/[id]. They're per-file
+            decisions and shouldn't be applied series-wide blindly. */}
+      </CardContent>
+    </Card>
+  );
 }
 
 export function SeriesDetail({ seriesId }: { seriesId: number }) {
@@ -183,6 +254,8 @@ export function SeriesDetail({ seriesId }: { seriesId: number }) {
           </div>
         </CardContent>
       </Card>
+
+      <SeriesActions items={itemsData?.items ?? []} seriesTitle={series.title} />
 
       {seasons.length === 0 ? (
         <EmptyState
