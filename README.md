@@ -1391,16 +1391,14 @@ ntfy, Discord, Pushover, 100+ targets). The orchestrator POSTs to it on:
 Each event can be toggled in the admin app (Settings → Notifications). Empty
 `APPRISE_URLS` short-circuits everything — no requests sent.
 
-**Adding channels** — edit `.env` and restart the orchestrator. Multiple channels
-fan out by comma-joining:
+**Managing channels** — admin app → Settings → Notifications. Add as many as
+you want, each with a name, an Apprise URL, and an on/off toggle. Use the
+paper-plane button next to a channel to send it a test notification before
+saving.
 
-```sh
-# .env
-APPRISE_URLS=mailtos://user:apppass@gmail.com?to=you@x.com,tgram://<bot-token>/<chat-id>
-```
-
-Each URL syntax is documented at https://github.com/caronc/apprise/wiki. Common
-options:
+Channel state lives in the orchestrator DB (the `notification_channels` setting),
+which is included in nightly backups so credentials roll forward across
+restores. URL syntax follows Apprise:
 
 | Service  | URL format                                                    |
 |----------|---------------------------------------------------------------|
@@ -1411,11 +1409,11 @@ options:
 | Discord  | `discord://<webhook-id>/<webhook-token>`                      |
 | Pushover | `pover://<user-key>@<app-token>`                              |
 
-**Test the channel from the host** (without involving the orchestrator):
+**Test from the host** (without going through the orchestrator):
 
 ```sh
 docker compose exec apprise apprise \
-  -t "test" -b "it works" "$APPRISE_URLS"
+  -t "test" -b "it works" "mailtos://user:apppass@gmail.com?to=you@x.com"
 ```
 
 ### Health checks

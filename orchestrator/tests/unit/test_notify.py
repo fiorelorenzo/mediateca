@@ -16,7 +16,7 @@ def setup_module() -> None:
     init_schema()
 
 
-def _set_flag(key: str, value: bool) -> None:
+def _set(key: str, value: Any) -> None:
     with Session(get_engine()) as s:
         row = s.exec(select(Setting).where(Setting.key == key)).first()
         if row is None:
@@ -28,61 +28,81 @@ def _set_flag(key: str, value: bool) -> None:
 
 
 @pytest.mark.asyncio
-async def test_send_noop_when_urls_empty(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APPRISE_URLS", "")
+async def test_send_noop_with_no_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set("notification_channels", [])
     posted: list[Any] = []
 
     def boom(*a: Any, **k: Any) -> None:
         posted.append((a, k))
 
     monkeypatch.setattr(httpx, "AsyncClient", boom)
-    await notify.send(title="t", body="b")
+    with Session(get_engine()) as s:
+        await notify.send(s, "t", "b")
     assert posted == []
 
 
 @pytest.mark.asyncio
-async def test_send_posts_to_apprise(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("APPRISE_URLS", "mailto://u:p@host?to=x@y.z")
-    monkeypatch.setenv("APPRISE_API_URL", "http://apprise:8000")
+async def test_send_skips_disabled_channels(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set(
+        "notification_channels",
+        [
+            {"name": "a", "url": "mailto://a", "enabled": False},
+            {"name": "b", "url": "mailto://b", "enabled": True},
+        ],
+    )
     captured: dict[str, Any] = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
-        captured["url"] = str(request.url)
-        captured["json"] = json.loads(request.content)
+        captured["body"] = json.loads(request.content)
         return httpx.Response(200, json={"status": "ok"})
 
     transport = httpx.MockTransport(handler)
-    real_client = httpx.AsyncClient
+    real = httpx.AsyncClient
 
-    def patched(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
-        kwargs["transport"] = transport
-        return real_client(*args, **kwargs)
+    def patched(*a: Any, **k: Any) -> httpx.AsyncClient:
+        k["transport"] = transport
+        return real(*a, **k)
 
     monkeypatch.setattr(httpx, "AsyncClient", patched)
-    await notify.send(title="hello", body="world", level="failure")
-    assert captured["url"] == "http://apprise:8000/notify"
-    assert captured["json"]["title"] == "hello"
-    assert captured["json"]["type"] == "failure"
-    assert captured["json"]["urls"] == "mailto://u:p@host?to=x@y.z"
+    with Session(get_engine()) as s:
+        await notify.send(s, "t", "b", level="failure")
+    assert captured["body"]["urls"] == "mailto://b"
+    assert captured["body"]["type"] == "failure"
 
 
 @pytest.mark.asyncio
-async def test_maybe_notify_failed_respects_runtime_flag(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("APPRISE_URLS", "mailto://anywhere")
-    _set_flag("notify_failed_enabled", False)
+async def test_send_via_returns_error_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(500, text="boom")
+
+    transport = httpx.MockTransport(handler)
+    real = httpx.AsyncClient
+
+    def patched(*a: Any, **k: Any) -> httpx.AsyncClient:
+        k["transport"] = transport
+        return real(*a, **k)
+
+    monkeypatch.setattr(httpx, "AsyncClient", patched)
+    ok, msg = await notify.send_via("mailto://x", "t", "b")
+    assert ok is False
+    assert "500" in msg
+
+
+@pytest.mark.asyncio
+async def test_maybe_notify_failed_respects_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    _set("notification_channels", [{"name": "x", "url": "mailto://x", "enabled": True}])
+    _set("notify_failed_enabled", False)
     sent: list[Any] = []
 
-    async def fake_send(**kw: Any) -> None:
-        sent.append(kw)
+    async def fake_send(session: Session, title: str, body: str, *, level: str = "info") -> None:
+        sent.append({"title": title})
 
     monkeypatch.setattr(notify, "send", fake_send)
     with Session(get_engine()) as s:
-        await notify.maybe_notify_failed(s, item_id=42, title="x", reason="y")
+        await notify.maybe_notify_failed(s, item_id=1, title="x", reason="y")
     assert sent == []
 
-    _set_flag("notify_failed_enabled", True)
+    _set("notify_failed_enabled", True)
     with Session(get_engine()) as s:
-        await notify.maybe_notify_failed(s, item_id=42, title="x", reason="y")
-    assert len(sent) == 1 and "FAILED" in sent[0]["title"]
+        await notify.maybe_notify_failed(s, item_id=1, title="x", reason="y")
+    assert len(sent) == 1

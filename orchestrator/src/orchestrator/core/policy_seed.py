@@ -27,6 +27,9 @@ DEFAULTS: dict[str, object] = {
     # transport layer; these flags only decide which events fire.
     "notify_failed_enabled": True,
     "notify_frozen_enabled": True,
+    # List of {name, url, enabled} entries. URL syntax is Apprise's:
+    # mailto://, tgram://, ntfy://, discord://, pover://, ...
+    "notification_channels": [],
 }
 
 

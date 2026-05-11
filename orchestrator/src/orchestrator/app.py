@@ -7,7 +7,7 @@ from sqlmodel import Session
 
 from orchestrator.api import custom_formats as custom_formats_api
 from orchestrator.api import events as events_api
-from orchestrator.api import health, items, metrics, recyclarr, webhooks
+from orchestrator.api import health, items, metrics, notifications, recyclarr, webhooks
 from orchestrator.api import logs as logs_api
 from orchestrator.api import services as svcs
 from orchestrator.api import settings as settings_api
@@ -67,3 +67,4 @@ app.include_router(metrics.router)
 app.include_router(svcs.router)
 app.include_router(custom_formats_api.router)
 app.include_router(logs_api.router)
+app.include_router(notifications.router)

@@ -14,6 +14,19 @@ from orchestrator.db.session import get_session
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+class NotificationChannel(BaseModel):
+    name: str
+    url: str
+    enabled: bool = True
+
+    @field_validator("name", "url")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must not be empty")
+        return v.strip()
+
+
 class SettingsPayload(BaseModel):
     required_audio_langs: list[str] | None = None
     retry_interval_hours: int | None = None
@@ -25,6 +38,7 @@ class SettingsPayload(BaseModel):
     merge_offset_reject_ms: float | None = None
     notify_failed_enabled: bool | None = None
     notify_frozen_enabled: bool | None = None
+    notification_channels: list[NotificationChannel] | None = None
 
     @field_validator("retry_interval_hours")
     @classmethod

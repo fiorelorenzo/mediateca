@@ -42,6 +42,13 @@ export interface Settings {
   merge_offset_reject_ms: number;
   notify_failed_enabled: boolean;
   notify_frozen_enabled: boolean;
+  notification_channels: NotificationChannel[];
+}
+
+export interface NotificationChannel {
+  name: string;
+  url: string;
+  enabled: boolean;
 }
 
 export interface LoadHistoryPoint {

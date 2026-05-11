@@ -46,11 +46,9 @@ class Settings(BaseSettings):
     dispatcharr_url: str = "http://dispatcharr:9191"
     headscale_url: str = "http://headscale:8080"
 
-    # Notifications (Apprise dispatcher)
-    # APPRISE_URLS is a comma-separated list of Apprise URLs (mailto://,
-    # tgram://, ntfy://, etc.). Empty string = notifications disabled.
+    # Notifications — Apprise HTTP dispatcher. Channel URLs themselves live
+    # in the `notification_channels` setting (managed via the admin app).
     apprise_api_url: str = "http://apprise:8000"
-    apprise_urls: str = ""
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

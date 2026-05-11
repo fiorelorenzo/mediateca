@@ -63,6 +63,11 @@ export const api = {
   recyclarrSync: () => call<{ status: string }>("/api/recyclarr/sync", { method: "POST" }),
   itemsTimeseries: (sinceSeconds = 604800) =>
     call<TimeseriesPoint[]>(`/api/items/timeseries?since_seconds=${sinceSeconds}`),
+  testNotification: (url: string) =>
+    call<{ ok: boolean; message: string }>("/api/notifications/test", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
 };
 
 export interface DeleteItemPayload {

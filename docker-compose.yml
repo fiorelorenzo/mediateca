@@ -200,7 +200,6 @@ services:
       - QBIT_USER=${QBIT_USER}
       - QBIT_PASS=${QBIT_PASS}
       - APPRISE_API_URL=http://apprise:8000
-      - APPRISE_URLS=${APPRISE_URLS:-}
       - LOG_LEVEL=INFO
       - TZ=${TZ:-UTC}
     volumes:
