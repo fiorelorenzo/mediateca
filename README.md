@@ -968,6 +968,16 @@ empty until viewing history accumulates — expected.
 [Play Store](https://play.google.com/store/apps/details?id=com.fredrikburmester.streamyfin),
 or [GitHub releases](https://github.com/streamyfin/streamyfin/releases/latest)
 (also available via Obtainium for Android). Server URL: `https://streaming.<DOMAIN>`.
+
+> ⚠ **Caching gotcha.** The mobile app fetches the plugin config at login
+> and stashes it locally; subsequent logins re-use the cached copy
+> rather than re-reading the server. So if you push or change the
+> Streamyfin plugin YAML *after* a device has already logged in once,
+> that device will keep running with the old/empty config (Discover
+> tab black, Seerr requests silently failing). Fix on each affected
+> device: long-press the app icon → App info → Storage → Clear
+> storage (iOS: delete + reinstall), then log in again. Easier to
+> avoid: push the YAML *before* the first login.
 Login with the user's Jellyfin credentials. Seerr SSO + Live TV + library
 streaming all flow through this single app.
 
