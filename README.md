@@ -46,6 +46,10 @@ required**, smooth playback even from mobile networks.
 - [Live TV via Dispatcharr](#live-tv-via-dispatcharr)
 - [Indexer proxy on a home node](#indexer-proxy-on-a-home-node)
 - [Maintenance](#maintenance)
+  - [Routine](#routine)
+  - [Backup](#backup)
+  - [Notifications](#notifications)
+  - [Health checks](#health-checks)
 - [Troubleshooting](#troubleshooting)
 - [Security model](#security-model)
 - [Provider notes](#provider-notes)
@@ -75,6 +79,11 @@ your `DOMAIN`:
 | `headscale.<DOMAIN>` | Headscale | Self-hosted Tailscale coordination server |
 | `hls.<DOMAIN>` | static file server | Public read-only CDN for HLS segments + master playlists (only active when HLS profile enabled) |
 | `encoder-status.<DOMAIN>` | static file server | Encoder live dashboard + `status.json` (only active when HLS profile enabled) |
+
+Two services run without public URLs:
+
+- **apprise** — multi-channel notification dispatcher (email / Telegram / ntfy / Discord / Pushover / 100+ targets). The orchestrator POSTs to it on FAILED / FROZEN_AS_IS events. Channels are managed from the admin app, see [Notifications](#notifications).
+- **backup** — one-shot restic container fired by the host crontab at 03:30 daily. Encrypted snapshots of all configs + SQLite DBs to a Hetzner Storage Box via SFTP. See [Backup](#backup).
 
 Authentication is each app's own (Forms login on *arr, native login on
 Jellyfin / qBit). Rationale: simpler than running a separate
@@ -128,7 +137,7 @@ docker compose up -d
 | **Processing** | Items currently moving through the orchestrator pipeline — ANALYZING, MERGING, PROMOTING, ENCODING. Cards with poster, current state animated chip, audio detected so far, time-in-state, link to detail. SSE-live on `item.*` events; once a row settles it leaves this page and shows up in Library. |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
 | **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
-| **Settings** | Runtime config: HLS toggle, required audio languages, retry interval, quality-upgrades toggle (opt-in: replace promoted file in place when arr finds a better release with same audio), merge safety thresholds (duration parity, offset safe, offset reject) |
+| **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
 | **Logs** | Real-time SSE multiplex of Docker container logs: virtualized rows, ANSI color, filter regex, pause with drop counter, autoscroll, save-to-file, expand/collapse on long lines, per-line copy button. The orchestrator's own container is excluded to prevent a feedback loop. |
@@ -339,6 +348,11 @@ reference.
 - Storage backends that work: local disk, NFS export, SMB/CIFS share
   (e.g. Synology, TrueNAS, Hetzner Storage Box), iSCSI, S3FS-fuse.
   The stack doesn't care; it only sees POSIX paths.
+- Optional: a separate **off-site target for backups** (Hetzner Storage Box
+  works, any SFTP server does). Encrypted snapshots via restic — see
+  [Backup](#backup). A single SMB share that holds both media (`MEDIA_DIR`)
+  and backups is fine; the backup container talks SFTP, not CIFS, so the
+  two paths stay isolated.
 
 ### Network services
 
@@ -560,6 +574,7 @@ each section. The minimum to start:
 | `VPN_SERVER_COUNTRIES` | yes | P2P-friendly: `Switzerland`, `Netherlands`, `Iceland`, `Sweden`. |
 | `SONARR_API_KEY` / `RADARR_API_KEY` | post-deploy | Filled in after Phase 6 below. |
 | `QBIT_USER` / `QBIT_PASS` | post-deploy | qBit WebUI credentials. |
+| `BACKUP_RESTIC_PASSWORD` + `BACKUP_SFTP_*` | optional | Enables nightly encrypted backups; see [Backup](#backup) for the full setup. Without these the `backup` service is harmless but a no-op. |
 
 The encoder block (`ENCODER_CPUS`, `ENCODER_WORKERS`, etc.) and the
 bitrate ladder (`BITRATE_*_KBPS`) are optional — defaults match a 4c/8t
@@ -1288,9 +1303,13 @@ ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose pull && docker compo
 # Rebuild the encoder after editing hls-encoder/encoder.py:
 ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose build hls-encoder && docker compose up -d --force-recreate hls-encoder'
 
-# Backup runs nightly via ofelia (see Backup section below).
+# Backup runs nightly at 03:30 via host crontab (see Backup section below).
 # To trigger one on demand:
 ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose run --rm backup'
+
+# Verify the latest snapshot is restorable:
+ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose run --rm \
+  --entrypoint /usr/local/bin/restore-check.sh backup'
 ```
 
 ### Backup
@@ -1374,11 +1393,14 @@ docker compose run --rm \
 docker compose run --rm \
   -v "$PWD/restored:/restore" \
   --entrypoint restic backup restore latest \
-  --target /restore --include /snapshots/orchestrator/orchestrator.db
+  --target /restore --include /snapshots/config/orchestrator/orchestrator.db
 ```
 
-After restoring SQLite dumps, drop them into place under `./config/<service>/`
-*while the service is stopped*, then bring the stack back up.
+The repo holds two parallel trees: `/source/config/<service>/...` (live config
+files, **without** the live `*.db` files) and `/snapshots/config/<service>/...`
+(consistent SQLite dumps via `sqlite3 .backup`). To rebuild a service: drop the
+snapshot DB into `./config/<service>/` *while the service is stopped*, then
+bring the stack back up.
 
 ### Notifications
 
@@ -1388,28 +1410,45 @@ ntfy, Discord, Pushover, 100+ targets). The orchestrator POSTs to it on:
 - An item transitions to **FAILED** (encode error, library file vanished, etc.)
 - An item transitions to **FROZEN_AS_IS** (audio policy gave up / manual accept)
 
-Each event can be toggled in the admin app (Settings → Notifications). Empty
-`APPRISE_URLS` short-circuits everything — no requests sent.
+Each event has its own toggle in the admin app (Settings → Notifications →
+*Events*). Zero enabled channels short-circuits the dispatcher — no HTTP
+requests fired.
 
-**Managing channels** — admin app → Settings → Notifications. Add as many as
-you want, each with a name, an Apprise URL, and an on/off toggle. Use the
-paper-plane button next to a channel to send it a test notification before
-saving.
+**Managing channels** — admin app → Settings → Notifications → *Channels*.
 
-Channel state lives in the orchestrator DB (the `notification_channels` setting),
-which is included in nightly backups so credentials roll forward across
-restores. URL syntax follows Apprise:
+- **Add a channel**: name + Apprise URL → "Add". The URL field accepts any
+  Apprise scheme (see table below).
+- **Test before saving**: click the paper-plane icon next to a channel — a one-shot
+  message goes through `POST /api/notifications/test`. The toast shows the
+  upstream error verbatim if the SMTP server / Telegram bot / etc. rejects.
+- **Reveal credentials**: passwords and tokens are masked by default; click the
+  eye icon to unmask and edit.
+- **Disable without deleting**: per-channel toggle on the right of the name field.
+
+Channel state lives in the orchestrator DB (the `notification_channels`
+setting), included in nightly backups — credentials survive a restore.
+
+**URL syntax** (Apprise, full reference at <https://github.com/caronc/apprise/wiki>):
 
 | Service  | URL format                                                    |
 |----------|---------------------------------------------------------------|
-| Gmail    | `mailtos://user:APP-PASSWORD@gmail.com?to=foo@bar`            |
-| SMTP     | `mailto://user:pass@smtp.example.com:587?from=alert@x&to=foo@bar` |
+| Gmail    | `mailtos://USER:APP-PASSWORD@gmail.com?to=foo@bar`            |
+| SMTP     | `mailtos://USER:PASS@smtp.example.com:587?from=alert@x&to=foo@bar` |
 | Telegram | `tgram://<bot-token>/<chat-id>`                               |
 | ntfy     | `ntfy://<topic>@ntfy.sh`                                      |
 | Discord  | `discord://<webhook-id>/<webhook-token>`                      |
 | Pushover | `pover://<user-key>@<app-token>`                              |
 
-**Test from the host** (without going through the orchestrator):
+For Gmail specifically:
+
+1. Enable 2-Step Verification on the Google account.
+2. Generate an *App Password* at <https://myaccount.google.com/apppasswords>
+   (16 chars, **remove spaces** when pasting).
+3. Use `mailtos://` (the trailing `s` enables TLS). Gmail will rewrite the
+   `From` to the authenticated user unless you've added a verified custom
+   address under Gmail → *Settings → Accounts → Send mail as*.
+
+**Test from the host** without going through the orchestrator:
 
 ```sh
 docker compose exec apprise apprise \
@@ -1638,6 +1677,12 @@ of the above. Total for the reference setup: ~€63/mo.
 │   │   └── custom-formats/           # stack-managed CF JSON files (pushed by orchestrator at boot)
 │   └── streamyfin/
 │       └── plugin-config.yml         # paste into plugin's YAML Editor tab
+├── backup/                           # nightly encrypted backup container
+│   ├── Dockerfile                    # alpine + restic + sqlite3 + openssh-client
+│   ├── backup.sh                     # sqlite3 .backup → restic backup → forget --prune
+│   ├── restore-check.sh              # restic check + PRAGMA integrity_check on dumps
+│   ├── excludes.txt                  # cache / log / transcoded / WAL exclusions
+│   └── ssh/                          # generated key + known_hosts (gitignored)
 ├── admin-app/
 │   ├── Dockerfile                    # multi-stage Next.js standalone build
 │   ├── src/app/
@@ -1655,8 +1700,8 @@ of the above. Total for the reference setup: ~€63/mo.
 │   ├── src/orchestrator/
 │   │   ├── app.py                    # FastAPI application factory
 │   │   ├── config.py                 # settings loaded from env
-│   │   ├── api/                      # REST endpoints (webhooks, items, settings, events, logs, …)
-│   │   ├── core/                     # policy engine, probe, merger, merge_safety, arr_client, …
+│   │   ├── api/                      # REST endpoints (webhooks, items, settings, notifications, events, logs, …)
+│   │   ├── core/                     # policy engine, probe, merger, merge_safety, arr_client, notify, …
 │   │   └── workers/                  # APScheduler jobs (inbox, catch-up, reconcile)
 │   └── tests/
 └── scripts/
