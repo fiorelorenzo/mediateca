@@ -444,10 +444,6 @@ services:
     networks:
       - servarr
     command: ["sync"]
-    labels:
-      ofelia.enabled: "true"
-      ofelia.job-run.recyclarr-sync.schedule: "0 4 * * 0"
-      ofelia.job-run.recyclarr-sync.container: "recyclarr"
 
   apprise:
     image: caronc/apprise:latest
@@ -477,22 +473,5 @@ services:
       - ./config:/source/config:ro
       - ./.env:/source/.env:ro
       - ./backup/ssh:/ssh:ro
-    networks:
-      - servarr
-    labels:
-      ofelia.enabled: "true"
-      ofelia.job-run.backup-nightly.schedule: "0 4 * * *"
-      ofelia.job-run.backup-nightly.container: "backup"
-
-  ofelia:
-    image: mcuadros/ofelia:latest
-    container_name: ofelia
-    restart: unless-stopped
-    command: daemon --docker
-    depends_on:
-      - recyclarr
-      - backup
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
     networks:
       - servarr

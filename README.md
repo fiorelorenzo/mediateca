@@ -1276,18 +1276,25 @@ everything else hosted there.
 
 ## Maintenance
 
-### Recyclarr sync scheduling
+### Scheduled jobs (host crontab)
 
-The `recyclarr` service in `docker-compose.yml` is configured as a one-shot container (`restart: "no"`) with ofelia labels that schedule a weekly sync (Sunday 04:00). The `ofelia` container reads those labels and fires the job. However, ofelia has a known limitation: it cannot discover labels on containers it didn't start alongside — if you start only the `recyclarr` container (e.g. `docker compose run recyclarr sync`) without ofelia running, the schedule won't be picked up until both are cycling together.
-
-For reliable weekly syncs the reference deployment uses a **host crontab** instead:
+Both the periodic `recyclarr` sync and the nightly `backup` are one-shot
+containers (`restart: "no"`) fired by the **host's crontab**, not by a
+dedicated in-cluster scheduler. The reference deployment looks like this:
 
 ```sh
-# Run on the host as the stack user:
-0 4 * * 0  cd /opt/servarr && docker compose run --rm recyclarr sync >> /var/log/recyclarr.log 2>&1
+# As the stack user:
+0  4 * * 0  cd /opt/servarr && docker compose run --rm recyclarr sync >> /var/log/recyclarr.log 2>&1
+30 3 * * *  cd /opt/servarr && docker compose run --rm backup          >> /var/log/mediateca-backup.log 2>&1
 ```
 
-You can also trigger a sync on demand from the admin app (Settings → TRaSH → Sync) or via the API:
+Why not ofelia or similar? ofelia only discovers label-based jobs on
+containers it started alongside itself. Combined with `restart: "no"` it
+ends up looping on "empty scheduler" and never fires anything reliably.
+The host crontab is one line of system config and always works.
+
+To trigger a sync on demand from the admin app (Settings → TRaSH → Sync) or
+via the API:
 
 ```sh
 curl -X POST https://orchestrator.<DOMAIN>/api/recyclarr/sync \
@@ -1315,11 +1322,9 @@ ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose run --rm \
 ### Backup
 
 Nightly encrypted backup of all container configs + orchestrator state to the
-Hetzner Storage Box via SFTP (restic). Runs at 03:30 (TZ-local) inside the
-`backup` container, fired by the host crontab (ofelia has the same labels in
-`docker-compose.yml` but doesn't discover them reliably across `restart: "no"`
-containers — same caveat as Recyclarr). Retention defaults to **7 daily + 4
-weekly + 6 monthly** snapshots.
+Hetzner Storage Box via SFTP (restic). The `backup` container is one-shot
+(`restart: "no"`) and is fired by the host crontab at 03:30 (TZ-local).
+Retention defaults to **7 daily + 4 weekly + 6 monthly** snapshots.
 
 **What it includes** — everything under `./config/` plus `.env`:
 
