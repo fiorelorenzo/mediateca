@@ -21,6 +21,7 @@ function SettingsFormInner({ initial }: FormProps) {
   const [langs, setLangs] = useState(initial.required_audio_langs.join(","));
   const [retry, setRetry] = useState(initial.retry_interval_hours);
   const [hls, setHls] = useState(initial.hls_enabled);
+  const [qualityUpgrade, setQualityUpgrade] = useState(initial.quality_upgrade_enabled);
   const [acceptAfter, setAcceptAfter] = useState(initial.accept_as_is_after_attempts);
   const [durationThreshold, setDurationThreshold] = useState(
     initial.merge_duration_reject_threshold_s,
@@ -56,6 +57,7 @@ function SettingsFormInner({ initial }: FormProps) {
           retry_interval_hours: Number(retry),
           accept_as_is_after_attempts: Number(acceptAfter),
           hls_enabled: hls,
+          quality_upgrade_enabled: qualityUpgrade,
           merge_duration_reject_threshold_s: Number(durationThreshold),
           merge_offset_safe_ms: Number(offsetSafe),
           merge_offset_reject_ms: Number(offsetReject),
@@ -103,6 +105,23 @@ function SettingsFormInner({ initial }: FormProps) {
           <Label htmlFor="hls">HLS encoding</Label>
           <p className="text-muted-foreground text-sm">
             When off, files are promoted as-is. Container must be running.
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-3 rounded-lg border p-3">
+        <Switch
+          id="qualityUpgrade"
+          checked={qualityUpgrade}
+          onCheckedChange={setQualityUpgrade}
+        />
+        <div>
+          <Label htmlFor="qualityUpgrade">Quality upgrades on PROMOTED items</Label>
+          <p className="text-muted-foreground text-sm">
+            When on, the orchestrator stops un-monitoring after promote — Sonarr/Radarr can
+            grab a better release later and the pipeline replaces the library file in place
+            (no merge) as long as the new audio is a superset (no language regression). Off
+            by default: 4K Remux churn can be expensive in storage and bandwidth.
           </p>
         </div>
       </div>

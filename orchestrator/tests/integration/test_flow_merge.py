@@ -441,3 +441,95 @@ def test_happy_merge_sonarr_episode(tmp_path: Path, monkeypatch) -> None:
             select(History).where(History.item_id == item.id, History.event == "MERGED")
         ).all()
         assert len(merged) == 1, "expected exactly one MERGED history row"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scenario 4 — Quality upgrade: same audio, better release replaces in place
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@respx.mock
+def test_quality_upgrade_replaces_in_place(tmp_path: Path, monkeypatch) -> None:
+    """With quality_upgrade_enabled, a second dual-audio grab for a PROMOTED
+    movie replaces the library file in place (no mkvmerge), keeps audio
+    unchanged, and writes an UPGRADED history row. Without the flag, the same
+    flow falls through to the merge.no_new_tracks discard path."""
+    monkeypatch.setenv("MEDIA_ROOT", str(tmp_path / "media"))
+    monkeypatch.setenv("INCOMING_ROOT", str(tmp_path / "incoming"))
+
+    # Flip the runtime setting on in the DB (overrides policy.yml defaults).
+    from orchestrator.db.models import Setting
+    import json as _json
+
+    with Session(get_engine()) as s:
+        existing = s.get(Setting, "quality_upgrade_enabled")
+        if existing is None:
+            s.add(Setting(key="quality_upgrade_enabled", value=_json.dumps(True)))
+        else:
+            existing.value = _json.dumps(True)
+            s.add(existing)
+        s.commit()
+
+    movie_id = 700
+
+    # ── First webhook: ita+eng dual audio (PROMOTED on first import) ────────
+    staging1 = tmp_path / "staging" / "movies" / "Quality (2024)"
+    staging1.mkdir(parents=True)
+    src1 = staging1 / "Quality.2024.1080p.mkv"
+    src1.write_bytes(b"\x00" * 16)
+
+    _radarr_mock(movie_id)
+    payload1 = _make_radarr_payload(src1, movie_id)
+    with Session(get_engine()) as s:
+        _add_inbox(s, payload1)
+
+    fake_dual = MediaInfo(
+        audio_tracks=[AudioTrack(1, "ac3", 6, "ita"), AudioTrack(2, "ac3", 6, "eng")]
+    )
+    with patch("orchestrator.workers.webhook_inbox.ffprobe", return_value=fake_dual):
+        with Session(get_engine()) as s:
+            process_inbox(s)
+
+    with Session(get_engine()) as s:
+        item = s.exec(
+            select(Item).where(Item.source == ItemSource.RADARR, Item.source_id == movie_id)
+        ).one()
+        assert item.status == ItemStatus.PROMOTED, f"got {item.status}"
+        library_path = item.library_path
+        # Library file must exist for replace_atomically to swap it
+        Path(library_path).parent.mkdir(parents=True, exist_ok=True)  # type: ignore[arg-type]
+        Path(library_path).write_bytes(b"\x00" * 16)  # type: ignore[arg-type]
+
+    # ── Second webhook: bigger file, same dual audio ─────────────────────────
+    staging2 = tmp_path / "staging2" / "movies" / "Quality (2024)"
+    staging2.mkdir(parents=True)
+    src2 = staging2 / "Quality.2024.2160p.mkv"
+    src2.write_bytes(b"\x00" * 99)  # pretend it's a 4K Remux
+
+    _radarr_mock(movie_id)
+    payload2 = _make_radarr_payload(src2, movie_id)
+    with Session(get_engine()) as s:
+        _add_inbox(s, payload2)
+
+    # mkvmerge MUST NOT be called: upgrade path uses replace_atomically only.
+    with (
+        patch("orchestrator.workers.webhook_inbox.ffprobe", return_value=fake_dual),
+        patch("orchestrator.core.pipeline.merge_audio") as mock_merge,
+        patch("orchestrator.core.pipeline.replace_atomically") as mock_replace,
+    ):
+        with Session(get_engine()) as s:
+            process_inbox(s)
+
+    mock_merge.assert_not_called()
+    mock_replace.assert_called_once()
+
+    with Session(get_engine()) as s:
+        item = s.exec(
+            select(Item).where(Item.source == ItemSource.RADARR, Item.source_id == movie_id)
+        ).one()
+        assert item.status == ItemStatus.PROMOTED
+        assert set(item.audio_present) == {"ita", "eng"}
+        upgraded = s.exec(
+            select(History).where(History.item_id == item.id, History.event == "UPGRADED")
+        ).all()
+        assert len(upgraded) == 1, "expected one UPGRADED history row"

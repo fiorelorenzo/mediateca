@@ -212,12 +212,43 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
                     new_scene_name=new_scene_name,
                 )
                 return
+            # No new languages — does this still qualify as a *quality*
+            # upgrade?  Conditions (all must hold):
+            #   1. The runtime flag is on.
+            #   2. The new audio is a superset of the old (no language
+            #      regression — losing ita would be a downgrade no matter
+            #      how shiny the resolution).
+            #   3. The old verdict was complete (we don't second-guess a
+            #      still-incomplete item with a same-audio file).
+            # Radarr/Sonarr already grabbed it because their CF score said
+            # so, so we trust the arr's decision on "is this better".
+            quality_upgrade = bool(runtime.get("quality_upgrade_enabled", False))
+            new_set, old_set = set(new_audio), set(old_audio)
+            audio_is_superset = new_set >= old_set
+            if (
+                quality_upgrade
+                and audio_is_superset
+                and old_verdict.complete
+            ):
+                log.info(
+                    "quality_upgrade.detected",
+                    item_id=item.id,
+                    old_audio=old_audio,
+                    new_audio=new_audio,
+                )
+                await _replace_in_library(
+                    session, item, source_file, new_audio, old_audio, runtime
+                )
+                return
+
             log.warning(
                 "merge.no_new_tracks",
                 item_id=item.id,
                 old_audio=old_audio,
                 new_audio=new_audio,
                 previously_missing=list(previously_missing),
+                audio_is_superset=audio_is_superset,
+                quality_upgrade_enabled=quality_upgrade,
             )
             # New file adds nothing — discard it and keep item as-is.
             # Restore audio_present and status to what they were before
@@ -346,7 +377,61 @@ async def _promote_or_encode(
         session.add(item)
         session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
-        await _unmonitor_in_arr(item)
+        # Keep the item monitored in the *arr when quality_upgrade is on so
+        # the RSS sweep can find a better release later (e.g. 1080p → 4K
+        # Remux with same audio). Default off: unmonitor as before so the
+        # arr stops fighting the orchestrator for already-satisfied items.
+        if not runtime.get("quality_upgrade_enabled", False):
+            await _unmonitor_in_arr(item)
+
+
+async def _replace_in_library(
+    session: Session,
+    item: Item,
+    source_file: Path,
+    new_audio: list[str],
+    old_audio: list[str],
+    runtime: dict[str, Any],
+) -> None:
+    """Same-audio quality upgrade. The new file's audio set is a superset
+    of the existing library file's; Sonarr/Radarr have already decided it's
+    a quality upgrade (CF score ≥ ours), so we just swap the file in place
+    via the same atomic rename + .bak cleanup the merge tail uses.
+
+    No mkvmerge step — we never need to combine tracks; the new file is
+    self-sufficient. After the swap we realign the arr's tracked path
+    (same as promote/merge) and record an UPGRADED history event.
+    """
+    library_path = Path(item.library_path)  # type: ignore[arg-type]
+    validate_transition(item.status, ItemStatus.PROMOTING)
+    item.status = ItemStatus.PROMOTING
+    session.add(item)
+    session.commit()
+    publish("item.status_changed", {"item_id": item.id, "status": item.status})
+
+    replace_atomically(source=source_file, target=library_path)
+    await _realign_arr_path(item, library_path)
+
+    item.audio_present = sorted(set(new_audio))  # superset, may have gained a 3rd lang
+    item.updated_at = datetime.utcnow()
+    session.add(item)
+    session.add(
+        History(
+            item_id=item.id,
+            event="UPGRADED",
+            detail={
+                "old_audio": old_audio,
+                "new_audio": new_audio,
+                "library_path": str(library_path),
+            },
+        )
+    )
+
+    validate_transition(item.status, ItemStatus.PROMOTED)
+    item.status = ItemStatus.PROMOTED
+    session.add(item)
+    session.commit()
+    publish("item.status_changed", {"item_id": item.id, "status": item.status})
 
 
 async def _mark_incomplete_and_promote(
@@ -630,7 +715,10 @@ async def _merge_into_existing(
         session.add(item)
         session.commit()
         publish("item.status_changed", {"item_id": item.id, "status": item.status})
-        await _unmonitor_in_arr(item)
+        # Same logic as _promote_or_encode: keep monitored when quality
+        # upgrades are on so the *arr can grab a better release later.
+        if not runtime.get("quality_upgrade_enabled", False):
+            await _unmonitor_in_arr(item)
 
 
 async def _unmonitor_in_arr(item: Item) -> None:

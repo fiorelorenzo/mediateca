@@ -19,6 +19,7 @@ class SettingsPayload(BaseModel):
     retry_interval_hours: int | None = None
     accept_as_is_after_attempts: int | None = None
     hls_enabled: bool | None = None
+    quality_upgrade_enabled: bool | None = None
     merge_duration_reject_threshold_s: float | None = None
     merge_offset_safe_ms: float | None = None
     merge_offset_reject_ms: float | None = None

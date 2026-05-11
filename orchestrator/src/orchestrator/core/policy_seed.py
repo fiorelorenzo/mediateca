@@ -14,6 +14,12 @@ DEFAULTS: dict[str, object] = {
     "retry_interval_hours": 24,
     "accept_as_is_after_attempts": 0,
     "hls_enabled": False,
+    # When True, an item that's already PROMOTED stays monitored in
+    # Sonarr/Radarr; any RSS-grab that imports a *better* release with
+    # an audio superset of what we already have triggers a straight
+    # replace (no mkvmerge). Default off because 4K Remux churn can
+    # easily fill a Storage Box.
+    "quality_upgrade_enabled": False,
     "merge_duration_reject_threshold_s": 3.0,
     "merge_offset_safe_ms": 100.0,
     "merge_offset_reject_ms": 2000.0,
