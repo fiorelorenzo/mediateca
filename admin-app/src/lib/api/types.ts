@@ -40,6 +40,8 @@ export interface Settings {
   merge_duration_reject_threshold_s: number;
   merge_offset_safe_ms: number;
   merge_offset_reject_ms: number;
+  notify_failed_enabled: boolean;
+  notify_frozen_enabled: boolean;
 }
 
 export interface LoadHistoryPoint {

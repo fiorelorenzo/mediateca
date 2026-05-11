@@ -1380,6 +1380,44 @@ docker compose run --rm \
 After restoring SQLite dumps, drop them into place under `./config/<service>/`
 *while the service is stopped*, then bring the stack back up.
 
+### Notifications
+
+The `apprise` service is a stateless multi-channel dispatcher (email, Telegram,
+ntfy, Discord, Pushover, 100+ targets). The orchestrator POSTs to it on:
+
+- An item transitions to **FAILED** (encode error, library file vanished, etc.)
+- An item transitions to **FROZEN_AS_IS** (audio policy gave up / manual accept)
+
+Each event can be toggled in the admin app (Settings → Notifications). Empty
+`APPRISE_URLS` short-circuits everything — no requests sent.
+
+**Adding channels** — edit `.env` and restart the orchestrator. Multiple channels
+fan out by comma-joining:
+
+```sh
+# .env
+APPRISE_URLS=mailtos://user:apppass@gmail.com?to=you@x.com,tgram://<bot-token>/<chat-id>
+```
+
+Each URL syntax is documented at https://github.com/caronc/apprise/wiki. Common
+options:
+
+| Service  | URL format                                                    |
+|----------|---------------------------------------------------------------|
+| Gmail    | `mailtos://user:APP-PASSWORD@gmail.com?to=foo@bar`            |
+| SMTP     | `mailto://user:pass@smtp.example.com:587?from=alert@x&to=foo@bar` |
+| Telegram | `tgram://<bot-token>/<chat-id>`                               |
+| ntfy     | `ntfy://<topic>@ntfy.sh`                                      |
+| Discord  | `discord://<webhook-id>/<webhook-token>`                      |
+| Pushover | `pover://<user-key>@<app-token>`                              |
+
+**Test the channel from the host** (without involving the orchestrator):
+
+```sh
+docker compose exec apprise apprise \
+  -t "test" -b "it works" "$APPRISE_URLS"
+```
+
 ### Health checks
 
 ```sh

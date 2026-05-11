@@ -23,6 +23,8 @@ class SettingsPayload(BaseModel):
     merge_duration_reject_threshold_s: float | None = None
     merge_offset_safe_ms: float | None = None
     merge_offset_reject_ms: float | None = None
+    notify_failed_enabled: bool | None = None
+    notify_frozen_enabled: bool | None = None
 
     @field_validator("retry_interval_hours")
     @classmethod

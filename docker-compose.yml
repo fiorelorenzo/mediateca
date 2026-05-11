@@ -199,6 +199,8 @@ services:
       - QBIT_URL=http://gluetun:8080
       - QBIT_USER=${QBIT_USER}
       - QBIT_PASS=${QBIT_PASS}
+      - APPRISE_API_URL=http://apprise:8000
+      - APPRISE_URLS=${APPRISE_URLS:-}
       - LOG_LEVEL=INFO
       - TZ=${TZ:-UTC}
     volumes:
@@ -447,6 +449,15 @@ services:
       ofelia.enabled: "true"
       ofelia.job-run.recyclarr-sync.schedule: "0 4 * * 0"
       ofelia.job-run.recyclarr-sync.container: "recyclarr"
+
+  apprise:
+    image: caronc/apprise:latest
+    container_name: apprise
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-UTC}
+    networks:
+      - servarr
 
   backup:
     build: ./backup

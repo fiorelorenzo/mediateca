@@ -22,6 +22,8 @@ function SettingsFormInner({ initial }: FormProps) {
   const [retry, setRetry] = useState(initial.retry_interval_hours);
   const [hls, setHls] = useState(initial.hls_enabled);
   const [qualityUpgrade, setQualityUpgrade] = useState(initial.quality_upgrade_enabled);
+  const [notifyFailed, setNotifyFailed] = useState(initial.notify_failed_enabled);
+  const [notifyFrozen, setNotifyFrozen] = useState(initial.notify_frozen_enabled);
   const [acceptAfter, setAcceptAfter] = useState(initial.accept_as_is_after_attempts);
   const [durationThreshold, setDurationThreshold] = useState(
     initial.merge_duration_reject_threshold_s,
@@ -58,6 +60,8 @@ function SettingsFormInner({ initial }: FormProps) {
           accept_as_is_after_attempts: Number(acceptAfter),
           hls_enabled: hls,
           quality_upgrade_enabled: qualityUpgrade,
+          notify_failed_enabled: notifyFailed,
+          notify_frozen_enabled: notifyFrozen,
           merge_duration_reject_threshold_s: Number(durationThreshold),
           merge_offset_safe_ms: Number(offsetSafe),
           merge_offset_reject_ms: Number(offsetReject),
@@ -123,6 +127,36 @@ function SettingsFormInner({ initial }: FormProps) {
             (no merge) as long as the new audio is a superset (no language regression). Off
             by default: 4K Remux churn can be expensive in storage and bandwidth.
           </p>
+        </div>
+      </div>
+
+      {/* ── Notifications ───────────────────────────────────────────────── */}
+      <div className="space-y-4 rounded-lg border p-4">
+        <div>
+          <p className="text-sm font-semibold">Notifications</p>
+          <p className="text-muted-foreground text-xs">
+            Channels are configured via <code>APPRISE_URLS</code> in <code>.env</code>{" "}
+            (email, Telegram, ntfy, etc.). These toggles decide which events fire.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <Switch id="notifyFailed" checked={notifyFailed} onCheckedChange={setNotifyFailed} />
+          <div>
+            <Label htmlFor="notifyFailed">Item entered FAILED</Label>
+            <p className="text-muted-foreground text-sm">
+              Encode failed, library file vanished, or other unrecoverable pipeline error.
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-3 rounded-lg border p-3">
+          <Switch id="notifyFrozen" checked={notifyFrozen} onCheckedChange={setNotifyFrozen} />
+          <div>
+            <Label htmlFor="notifyFrozen">Item moved to FROZEN_AS_IS</Label>
+            <p className="text-muted-foreground text-sm">
+              Audio policy couldn&apos;t be satisfied and the file was accepted as-is (manual
+              click in the item view, or auto-freeze if enabled).
+            </p>
+          </div>
         </div>
       </div>
 

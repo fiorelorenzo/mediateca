@@ -13,9 +13,12 @@ from orchestrator.logging_setup import get_logger
 log = get_logger(__name__)
 
 
-def reconcile() -> None:
+def reconcile() -> list[tuple[int, str, str]]:
+    """Returns the (id, title, reason) of items it just moved to FAILED so the
+    caller can fire notifications asynchronously."""
     s = get_settings()
     media = Path(s.media_root)
+    newly_failed: list[tuple[int, str, str]] = []
     with Session(get_engine()) as session:
         # 1. Items in PROMOTED whose library_path no longer exists → mark FAILED
         rows = session.exec(select(Item).where(Item.status == ItemStatus.PROMOTED)).all()
@@ -24,6 +27,8 @@ def reconcile() -> None:
                 it.status = ItemStatus.FAILED
                 it.status_reason = "library file vanished"
                 session.add(it)
+                if it.id is not None:
+                    newly_failed.append((it.id, it.title, it.status_reason))
         # 2. Files in media/ not tracked → mark as LEGACY
         if media.exists():
             tracked = {
@@ -42,3 +47,4 @@ def reconcile() -> None:
                     )
         session.commit()
     log.info("reconcile.done")
+    return newly_failed

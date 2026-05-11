@@ -9,6 +9,7 @@ from sqlmodel import Session, select
 from orchestrator.config import get_settings
 from orchestrator.core.encoder_client import HlsEncoderClient
 from orchestrator.core.event_bus import publish
+from orchestrator.core.notify import maybe_notify_failed
 from orchestrator.db.models import History, Item, ItemStatus, Job, JobKind, JobStatus
 from orchestrator.db.session import get_engine
 from orchestrator.logging_setup import get_logger
@@ -76,3 +77,10 @@ async def run_encode_jobs() -> None:
                 session.add(job)
                 session.add(item)
                 session.commit()
+                if item.id is not None:
+                    await maybe_notify_failed(
+                        session,
+                        item_id=item.id,
+                        title=item.title,
+                        reason=item.status_reason,
+                    )

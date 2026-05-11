@@ -12,6 +12,7 @@ from sqlmodel import Session, select
 from orchestrator.api.auth import require_admin_token
 from orchestrator.config import get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
+from orchestrator.core.notify import maybe_notify_frozen
 from orchestrator.core.state import validate_transition
 from orchestrator.db.models import History, Item, ItemStatus
 from orchestrator.db.session import get_session
@@ -84,7 +85,7 @@ def _record(
 
 
 @router.post("/{item_id}/accept-as-is")
-def accept_as_is(item_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
+async def accept_as_is(item_id: int, session: Session = Depends(get_session)) -> dict[str, Any]:
     item = session.get(Item, item_id)
     if item is None:
         raise HTTPException(404)
@@ -95,6 +96,12 @@ def accept_as_is(item_id: int, session: Session = Depends(get_session)) -> dict[
     _record(session, item_id, "FROZEN_AS_IS")
     session.commit()
     session.refresh(item)
+    await maybe_notify_frozen(
+        session,
+        item_id=item_id,
+        title=item.title,
+        reason=item.status_reason or "manually accepted as-is",
+    )
     return item.model_dump()
 
 

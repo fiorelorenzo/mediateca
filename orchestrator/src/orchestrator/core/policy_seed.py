@@ -23,6 +23,10 @@ DEFAULTS: dict[str, object] = {
     "merge_duration_reject_threshold_s": 3.0,
     "merge_offset_safe_ms": 100.0,
     "merge_offset_reject_ms": 2000.0,
+    # Notifications — gated by APPRISE_URLS being non-empty at the
+    # transport layer; these flags only decide which events fire.
+    "notify_failed_enabled": True,
+    "notify_frozen_enabled": True,
 }
 
 
