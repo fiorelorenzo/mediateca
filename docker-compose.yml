@@ -464,7 +464,7 @@ services:
       - BACKUP_KEEP_MONTHLY=${BACKUP_KEEP_MONTHLY:-6}
       - TZ=${TZ:-UTC}
     volumes:
-      - ./config:/source:ro
+      - ./config:/source/config:ro
       - ./.env:/source/.env:ro
       - ./backup/ssh:/ssh:ro
     networks:

@@ -1296,8 +1296,11 @@ ssh <USERNAME>@<HOST-IP> 'cd /opt/servarr && docker compose run --rm backup'
 ### Backup
 
 Nightly encrypted backup of all container configs + orchestrator state to the
-Hetzner Storage Box via SFTP (restic). Runs at 04:00 (TZ-local) inside the
-`backup` container, scheduled by ofelia. Retention defaults to **7 daily + 4 weekly + 6 monthly** snapshots.
+Hetzner Storage Box via SFTP (restic). Runs at 03:30 (TZ-local) inside the
+`backup` container, fired by the host crontab (ofelia has the same labels in
+`docker-compose.yml` but doesn't discover them reliably across `restart: "no"`
+containers — same caveat as Recyclarr). Retention defaults to **7 daily + 4
+weekly + 6 monthly** snapshots.
 
 **What it includes** — everything under `./config/` plus `.env`:
 
@@ -1341,6 +1344,10 @@ ssh-keyscan -p 23 -t ed25519 u123456.your-storagebox.de \
 # 5. Build the image and run the first backup (auto-inits the repo):
 docker compose build backup
 docker compose run --rm backup
+
+# 6. Wire the host crontab to fire it nightly at 03:30:
+(crontab -l; echo "30 3 * * * cd /opt/servarr && docker compose run --rm backup >> /var/log/mediateca-backup.log 2>&1") | crontab -
+sudo touch /var/log/mediateca-backup.log && sudo chown $USER:$USER /var/log/mediateca-backup.log
 ```
 
 **Verify a backup is restorable**

@@ -34,23 +34,36 @@ R snapshots --compact
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-log "Restoring latest into $TMP"
-R restore latest --target "$TMP" --include /snapshots
+log "Restoring latest snapshot into $TMP"
+R restore latest --target "$TMP"
+
+SNAP_ROOT="$TMP/snapshots"
+if [ ! -d "$SNAP_ROOT" ]; then
+  log "FAIL: no /snapshots subtree in restored backup — SQLite dumps missing"
+  exit 1
+fi
 
 log "Running PRAGMA integrity_check on every restored SQLite snapshot"
 fail=0
+count=0
 while IFS= read -r -d '' db; do
+  count=$((count + 1))
   out="$(sqlite3 "$db" 'PRAGMA integrity_check;' 2>&1 || true)"
   if [ "$out" != "ok" ]; then
     echo "  CORRUPT: $db -> $out"
     fail=1
   else
-    echo "  ok: ${db#$TMP/snapshots/}"
+    echo "  ok: ${db#$SNAP_ROOT/}"
   fi
-done < <(find "$TMP/snapshots" -type f -print0)
+done < <(find "$SNAP_ROOT" -type f -print0)
 
-if [ "$fail" -ne 0 ]; then
-  log "== restore-check FAILED"
+if [ "$count" -eq 0 ]; then
+  log "FAIL: zero SQLite dumps found under $SNAP_ROOT"
   exit 1
 fi
-log "== restore-check OK"
+
+if [ "$fail" -ne 0 ]; then
+  log "== restore-check FAILED ($count DBs, some corrupt)"
+  exit 1
+fi
+log "== restore-check OK ($count DBs verified)"

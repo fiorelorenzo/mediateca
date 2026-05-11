@@ -86,9 +86,9 @@ log "Running restic backup"
 restic -o "sftp.command=$SFTP_COMMAND" backup \
   --tag "$TAG" \
   --exclude-file=/etc/backup/excludes.txt \
-  --exclude '*.db' \
-  --exclude '*.sqlite' \
-  --exclude '*.sqlite3' \
+  --exclude "$SOURCE_DIR/**/*.db" \
+  --exclude "$SOURCE_DIR/**/*.sqlite" \
+  --exclude "$SOURCE_DIR/**/*.sqlite3" \
   "$SOURCE_DIR" "$SNAP_DIR"
 
 log "Applying retention (d=$KEEP_DAILY w=$KEEP_WEEKLY m=$KEEP_MONTHLY)"
