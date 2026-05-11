@@ -2,13 +2,25 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check, Eye, EyeOff, Trash2, Send, Plus } from "lucide-react";
+import {
+  Bell,
+  Check,
+  Eye,
+  EyeOff,
+  GitMerge,
+  Plus,
+  Send,
+  Sliders,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { api } from "@/lib/api/client";
 import type { NotificationChannel, Settings } from "@/lib/api/types";
 
@@ -17,11 +29,63 @@ interface FormProps {
 }
 
 function maskUrl(url: string): string {
-  // Hide passwords/tokens between :// and @ (mailto://user:PASS@host) and any
-  // trailing /<token> for tgram://, discord://, etc.
   return url
     .replace(/(:\/\/[^:/@]+:)([^@]+)(@)/, (_m, a, _b, c) => `${a}••••${c}`)
     .replace(/(\/)([A-Za-z0-9_-]{20,})/g, (_m, a) => `${a}••••`);
+}
+
+function FieldRow({
+  label,
+  description,
+  children,
+  htmlFor,
+}: {
+  label: string;
+  description?: React.ReactNode;
+  children: React.ReactNode;
+  htmlFor?: string;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-[1fr_minmax(0,16rem)] sm:items-start sm:gap-6">
+      <div className="space-y-1">
+        <Label htmlFor={htmlFor} className="text-sm font-medium">
+          {label}
+        </Label>
+        {description && (
+          <p className="text-muted-foreground text-sm leading-snug">{description}</p>
+        )}
+      </div>
+      <div className="sm:justify-self-end">{children}</div>
+    </div>
+  );
+}
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onCheckedChange,
+  id,
+}: {
+  label: string;
+  description?: React.ReactNode;
+  checked: boolean;
+  onCheckedChange: (b: boolean) => void;
+  id: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-6">
+      <div className="space-y-1">
+        <Label htmlFor={id} className="text-sm font-medium">
+          {label}
+        </Label>
+        {description && (
+          <p className="text-muted-foreground text-sm leading-snug">{description}</p>
+        )}
+      </div>
+      <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
 }
 
 function ChannelsEditor({
@@ -68,66 +132,66 @@ function ChannelsEditor({
 
   return (
     <div className="space-y-3">
-      <p className="text-sm font-medium">Channels</p>
-      {value.length === 0 && (
-        <p className="text-muted-foreground rounded-md border border-dashed p-3 text-sm">
-          No channels configured. Add one below to start receiving notifications.
+      {value.length === 0 ? (
+        <p className="text-muted-foreground rounded-md border border-dashed p-4 text-center text-sm">
+          No channels yet. Add one below to start receiving notifications.
         </p>
+      ) : (
+        value.map((c, i) => (
+          <div key={i} className="space-y-2 rounded-md border p-3">
+            <div className="flex items-center gap-2">
+              <Input
+                className="flex-1"
+                value={c.name}
+                onChange={(e) => updateAt(i, { name: e.target.value })}
+                placeholder="Name (e.g. Personal Email)"
+              />
+              <Switch
+                checked={c.enabled}
+                onCheckedChange={(checked) => updateAt(i, { enabled: checked })}
+                aria-label="Enable channel"
+              />
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Input
+                className="flex-1 font-mono text-xs"
+                value={reveal[i] ? c.url : maskUrl(c.url)}
+                onChange={(e) => updateAt(i, { url: e.target.value })}
+                disabled={!reveal[i]}
+                placeholder="mailto://... or tgram://... or ntfy://..."
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => setReveal({ ...reveal, [i]: !reveal[i] })}
+                aria-label={reveal[i] ? "Hide URL" : "Reveal URL"}
+              >
+                {reveal[i] ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => test(i)}
+                disabled={busyIdx === i || !c.url.trim()}
+                aria-label="Send test notification"
+              >
+                <Send className="size-4" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={() => remove(i)}
+                aria-label="Delete channel"
+              >
+                <Trash2 className="text-destructive size-4" />
+              </Button>
+            </div>
+          </div>
+        ))
       )}
-      {value.map((c, i) => (
-        <div key={i} className="space-y-2 rounded-md border p-3">
-          <div className="flex items-center gap-2">
-            <Input
-              className="flex-1"
-              value={c.name}
-              onChange={(e) => updateAt(i, { name: e.target.value })}
-              placeholder="Name (e.g. Personal Email)"
-            />
-            <Switch
-              checked={c.enabled}
-              onCheckedChange={(checked) => updateAt(i, { enabled: checked })}
-              aria-label="Enable channel"
-            />
-          </div>
-          <div className="flex items-center gap-2">
-            <Input
-              className="flex-1 font-mono text-xs"
-              value={reveal[i] ? c.url : maskUrl(c.url)}
-              onChange={(e) => updateAt(i, { url: e.target.value })}
-              disabled={!reveal[i]}
-              placeholder="mailto://... or tgram://... or ntfy://..."
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setReveal({ ...reveal, [i]: !reveal[i] })}
-              aria-label={reveal[i] ? "Hide URL" : "Reveal URL"}
-            >
-              {reveal[i] ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => test(i)}
-              disabled={busyIdx === i || !c.url.trim()}
-              aria-label="Send test notification"
-            >
-              <Send className="size-4" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => remove(i)}
-              aria-label="Delete channel"
-            >
-              <Trash2 className="text-destructive size-4" />
-            </Button>
-          </div>
-        </div>
-      ))}
       <div className="space-y-2 rounded-md border border-dashed p-3">
         <p className="text-sm font-medium">Add a channel</p>
         <Input
@@ -148,8 +212,7 @@ function ChannelsEditor({
         </div>
       </div>
       <p className="text-muted-foreground text-xs">
-        Changes save together with the rest of the form. Use the paper-plane button to verify a
-        channel before saving.
+        Use the paper-plane button to verify a channel. Changes save with the rest of the form.
       </p>
     </div>
   );
@@ -189,10 +252,13 @@ function SettingsFormInner({ initial }: FormProps) {
 
   return (
     <form
-      className="max-w-xl space-y-6"
+      className="space-y-6"
       onSubmit={(e) => {
         e.preventDefault();
-        if (offsetError) return;
+        if (offsetError) {
+          toast.error(offsetError);
+          return;
+        }
         save.mutate({
           required_audio_langs: langs
             .split(",")
@@ -211,176 +277,256 @@ function SettingsFormInner({ initial }: FormProps) {
         });
       }}
     >
-      <div className="space-y-2">
-        <Label htmlFor="langs">Required audio languages</Label>
-        <Input
-          id="langs"
-          value={langs}
-          onChange={(e) => setLangs(e.target.value)}
-          placeholder="ita, @original"
-        />
-        <p className="text-muted-foreground text-sm">
-          ISO-639-2 codes; <code>@original</code> resolves per-item.
-        </p>
+      <Tabs defaultValue="pipeline" className="space-y-6">
+        <TabsList className="grid w-full grid-cols-3 sm:inline-grid sm:w-auto">
+          <TabsTrigger value="pipeline" className="gap-2">
+            <Sliders className="size-4" />
+            <span>Pipeline</span>
+          </TabsTrigger>
+          <TabsTrigger value="merge" className="gap-2">
+            <GitMerge className="size-4" />
+            <span>Merge safety</span>
+          </TabsTrigger>
+          <TabsTrigger value="notifications" className="gap-2">
+            <Bell className="size-4" />
+            <span>Notifications</span>
+          </TabsTrigger>
+        </TabsList>
+
+        {/* ── PIPELINE ───────────────────────────────────────────────────── */}
+        <TabsContent value="pipeline" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Audio policy</CardTitle>
+              <CardDescription>
+                Required audio languages drive whether an import is promoted directly or held
+                for merge.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FieldRow
+                label="Required audio languages"
+                htmlFor="langs"
+                description={
+                  <>
+                    ISO-639-2 codes, comma-separated. <code>@original</code> resolves per-item.
+                  </>
+                }
+              >
+                <Input
+                  id="langs"
+                  value={langs}
+                  onChange={(e) => setLangs(e.target.value)}
+                  placeholder="ita, @original"
+                  className="sm:w-64"
+                />
+              </FieldRow>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Retry &amp; auto-freeze</CardTitle>
+              <CardDescription>
+                When an item stays INCOMPLETE the orchestrator re-searches periodically. After N
+                attempts it can give up and promote the file as-is.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FieldRow
+                label="Retry interval (hours)"
+                htmlFor="retry"
+                description="How often catch-up searches run for INCOMPLETE items."
+              >
+                <Input
+                  id="retry"
+                  type="number"
+                  min={1}
+                  value={retry}
+                  onChange={(e) => setRetry(Number(e.target.value))}
+                  className="sm:w-32"
+                />
+              </FieldRow>
+              <FieldRow
+                label="Auto-freeze after N retries"
+                htmlFor="acceptAfter"
+                description="Set to 0 to never auto-freeze. The item must be promoted manually."
+              >
+                <Input
+                  id="acceptAfter"
+                  type="number"
+                  min={0}
+                  value={acceptAfter}
+                  onChange={(e) => setAcceptAfter(Number(e.target.value))}
+                  className="sm:w-32"
+                />
+              </FieldRow>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Encoding &amp; upgrades</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <ToggleRow
+                id="hls"
+                label="HLS encoding"
+                description="When off, files are promoted as-is. Container must be running."
+                checked={hls}
+                onCheckedChange={setHls}
+              />
+              <ToggleRow
+                id="qualityUpgrade"
+                label="Quality upgrades on PROMOTED items"
+                description="When on, Sonarr/Radarr keep monitoring after a promote and any better release that comes later replaces the file in place, as long as the new audio is a superset. Off by default — 4K Remux churn can be expensive."
+                checked={qualityUpgrade}
+                onCheckedChange={setQualityUpgrade}
+              />
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── MERGE SAFETY ───────────────────────────────────────────────── */}
+        <TabsContent value="merge" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Duration &amp; offset thresholds</CardTitle>
+              <CardDescription>
+                Guard rails for mkvmerge — mismatched files are rejected before they corrupt the
+                library copy.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <FieldRow
+                label="Duration reject threshold (seconds)"
+                htmlFor="durationThreshold"
+                description="Merge is rejected if the two files differ in total duration by more than this value."
+              >
+                <Input
+                  id="durationThreshold"
+                  type="number"
+                  min={0.1}
+                  step={0.5}
+                  value={durationThreshold}
+                  onChange={(e) => setDurationThreshold(Number(e.target.value))}
+                  className="sm:w-32"
+                />
+              </FieldRow>
+              <FieldRow
+                label="Audio offset safe limit (ms)"
+                htmlFor="offsetSafe"
+                description="Tracks are considered perfectly aligned when the detected offset is below this value."
+              >
+                <Input
+                  id="offsetSafe"
+                  type="number"
+                  min={0}
+                  step={10}
+                  value={offsetSafe}
+                  onChange={(e) => setOffsetSafe(Number(e.target.value))}
+                  className="sm:w-32"
+                />
+              </FieldRow>
+              <FieldRow
+                label="Audio offset reject threshold (ms)"
+                htmlFor="offsetReject"
+                description={
+                  <>
+                    Merge is rejected when the detected audio drift exceeds this value (must
+                    be &gt; safe limit).
+                    {offsetError && (
+                      <span className="text-destructive mt-1 block">{offsetError}</span>
+                    )}
+                  </>
+                }
+              >
+                <Input
+                  id="offsetReject"
+                  type="number"
+                  min={1}
+                  step={100}
+                  value={offsetReject}
+                  onChange={(e) => setOffsetReject(Number(e.target.value))}
+                  className="sm:w-32"
+                  aria-invalid={!!offsetError}
+                />
+              </FieldRow>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* ── NOTIFICATIONS ──────────────────────────────────────────────── */}
+        <TabsContent value="notifications" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Events</CardTitle>
+              <CardDescription>Which orchestrator events fire a notification.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <ToggleRow
+                id="notifyFailed"
+                label="Item entered FAILED"
+                description="Encode failed, library file vanished, or other unrecoverable pipeline error."
+                checked={notifyFailed}
+                onCheckedChange={setNotifyFailed}
+              />
+              <ToggleRow
+                id="notifyFrozen"
+                label="Item moved to FROZEN_AS_IS"
+                description="Audio policy could not be satisfied and the file was accepted as-is."
+                checked={notifyFrozen}
+                onCheckedChange={setNotifyFrozen}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Channels</CardTitle>
+              <CardDescription>
+                Add as many channels as you want. URL syntax follows{" "}
+                <a
+                  className="underline"
+                  href="https://github.com/caronc/apprise/wiki"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Apprise
+                </a>
+                : email, Telegram, ntfy, Discord, Pushover, and 100+ more.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ChannelsEditor value={channels} onChange={setChannels} />
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      <div className="bg-background/80 sticky bottom-0 -mx-4 flex items-center justify-end gap-3 border-t px-4 py-3 backdrop-blur sm:-mx-6 sm:px-6">
+        {offsetError && (
+          <p className="text-destructive mr-auto text-sm">Fix errors before saving.</p>
+        )}
+        <Button type="submit" disabled={save.isPending || !!offsetError}>
+          <AnimatePresence mode="wait">
+            {save.isSuccess ? (
+              <motion.span
+                key="ok"
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="flex items-center gap-1"
+              >
+                <Check className="size-4" /> Saved
+              </motion.span>
+            ) : save.isPending ? (
+              <motion.span key="loading">Saving…</motion.span>
+            ) : (
+              <motion.span key="idle">Save</motion.span>
+            )}
+          </AnimatePresence>
+        </Button>
       </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="retry">Retry interval (hours)</Label>
-        <Input
-          id="retry"
-          type="number"
-          min={1}
-          value={retry}
-          onChange={(e) => setRetry(Number(e.target.value))}
-        />
-      </div>
-
-      <div className="space-y-2">
-        <Label htmlFor="acceptAfter">Auto-freeze after N retries (0 = never)</Label>
-        <Input
-          id="acceptAfter"
-          type="number"
-          min={0}
-          value={acceptAfter}
-          onChange={(e) => setAcceptAfter(Number(e.target.value))}
-        />
-      </div>
-
-      <div className="flex items-center gap-3 rounded-lg border p-3">
-        <Switch id="hls" checked={hls} onCheckedChange={setHls} />
-        <div>
-          <Label htmlFor="hls">HLS encoding</Label>
-          <p className="text-muted-foreground text-sm">
-            When off, files are promoted as-is. Container must be running.
-          </p>
-        </div>
-      </div>
-
-      <div className="flex items-center gap-3 rounded-lg border p-3">
-        <Switch
-          id="qualityUpgrade"
-          checked={qualityUpgrade}
-          onCheckedChange={setQualityUpgrade}
-        />
-        <div>
-          <Label htmlFor="qualityUpgrade">Quality upgrades on PROMOTED items</Label>
-          <p className="text-muted-foreground text-sm">
-            When on, the orchestrator stops un-monitoring after promote — Sonarr/Radarr can
-            grab a better release later and the pipeline replaces the library file in place
-            (no merge) as long as the new audio is a superset (no language regression). Off
-            by default: 4K Remux churn can be expensive in storage and bandwidth.
-          </p>
-        </div>
-      </div>
-
-      {/* ── Notifications ───────────────────────────────────────────────── */}
-      <div className="space-y-4 rounded-lg border p-4">
-        <div>
-          <p className="text-sm font-semibold">Notifications</p>
-          <p className="text-muted-foreground text-xs">
-            Add channels (email, Telegram, ntfy, Discord…) using{" "}
-            <a
-              className="underline"
-              href="https://github.com/caronc/apprise/wiki"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Apprise URL syntax
-            </a>
-            . Toggles below decide which events fire.
-          </p>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border p-3">
-          <Switch id="notifyFailed" checked={notifyFailed} onCheckedChange={setNotifyFailed} />
-          <div>
-            <Label htmlFor="notifyFailed">Item entered FAILED</Label>
-            <p className="text-muted-foreground text-sm">
-              Encode failed, library file vanished, or other unrecoverable pipeline error.
-            </p>
-          </div>
-        </div>
-        <div className="flex items-center gap-3 rounded-lg border p-3">
-          <Switch id="notifyFrozen" checked={notifyFrozen} onCheckedChange={setNotifyFrozen} />
-          <div>
-            <Label htmlFor="notifyFrozen">Item moved to FROZEN_AS_IS</Label>
-            <p className="text-muted-foreground text-sm">
-              Audio policy couldn&apos;t be satisfied and the file was accepted as-is.
-            </p>
-          </div>
-        </div>
-        <ChannelsEditor value={channels} onChange={setChannels} />
-      </div>
-
-      {/* ── Merge safety ─────────────────────────────────────────────────── */}
-      <div className="space-y-4 rounded-lg border p-4">
-        <p className="text-sm font-semibold">Merge safety</p>
-
-        <div className="space-y-2">
-          <Label htmlFor="durationThreshold">Duration reject threshold (seconds)</Label>
-          <Input
-            id="durationThreshold"
-            type="number"
-            min={0.1}
-            step={0.5}
-            value={durationThreshold}
-            onChange={(e) => setDurationThreshold(Number(e.target.value))}
-          />
-          <p className="text-muted-foreground text-sm">
-            Merge is rejected if the two files differ in duration by more than this value.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="offsetSafe">Audio offset safe limit (ms)</Label>
-          <Input
-            id="offsetSafe"
-            type="number"
-            min={0}
-            step={10}
-            value={offsetSafe}
-            onChange={(e) => setOffsetSafe(Number(e.target.value))}
-          />
-          <p className="text-muted-foreground text-sm">
-            Tracks are considered perfectly aligned when the detected offset is below this value.
-          </p>
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="offsetReject">Audio offset reject threshold (ms)</Label>
-          <Input
-            id="offsetReject"
-            type="number"
-            min={1}
-            step={100}
-            value={offsetReject}
-            onChange={(e) => setOffsetReject(Number(e.target.value))}
-          />
-          <p className="text-muted-foreground text-sm">
-            Merge is rejected when the detected audio drift exceeds this value (must be &gt; safe
-            limit).
-          </p>
-          {offsetError && <p className="text-destructive text-sm">{offsetError}</p>}
-        </div>
-      </div>
-
-      <Button type="submit" disabled={save.isPending || !!offsetError}>
-        <AnimatePresence mode="wait">
-          {save.isSuccess ? (
-            <motion.span
-              key="ok"
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              className="flex items-center gap-1"
-            >
-              <Check className="size-4" /> Saved
-            </motion.span>
-          ) : save.isPending ? (
-            <motion.span key="loading">Saving…</motion.span>
-          ) : (
-            <motion.span key="idle">Save</motion.span>
-          )}
-        </AnimatePresence>
-      </Button>
     </form>
   );
 }
