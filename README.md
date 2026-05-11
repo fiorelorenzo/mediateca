@@ -276,6 +276,14 @@ When Sonarr / Radarr fire the `OnImport` webhook, the orchestrator:
    (hardlink or atomic move). If the policy isn't satisfied even after a
    merge, the file is still promoted so the user can watch what we have,
    and the item stays `INCOMPLETE` for the catch-up worker to retry later.
+
+   The orchestrator validates that both the source and the resolved
+   target sit inside the canonical layout — `<root>/tv/<series>/Season N/<file>`
+   or `<root>/movies/<title>/<file>`. If the source comes from anywhere
+   else (e.g. flat in the media root, or with a non-`tv`/`movies` type
+   segment) it refuses to promote and the item is marked `FAILED` with
+   a clear reason — better than silently propagating a corrupt
+   `series.path` back to Sonarr/Radarr via the realign step.
 5. Optionally dispatches to `hls-encoder` via `POST /jobs` if the HLS
    profile is active (see [HLS encoding mode](#hls-encoding-mode) below).
 6. Tells Sonarr / Radarr to set `monitored=false` for the item (unless
