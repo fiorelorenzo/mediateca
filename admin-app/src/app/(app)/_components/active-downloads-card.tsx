@@ -6,7 +6,13 @@ import { Download, ExternalLink, Film, Tv } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { arrPoster, arrs, formatTimeleft, type QueueRecord } from "@/lib/api/arrs";
+import {
+  arrPoster,
+  arrs,
+  formatTimeleft,
+  queueEpisodeTag,
+  type QueueRecord,
+} from "@/lib/api/arrs";
 
 function pct(total: number, left: number) {
   if (total <= 0) return 0;
@@ -98,8 +104,15 @@ export function ActiveDownloadsCard() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2">
-                      <div className="truncate text-sm font-medium" title={title}>
-                        {title}
+                      <div className="flex min-w-0 items-baseline gap-1.5">
+                        <span className="truncate text-sm font-medium" title={title}>
+                          {title}
+                        </span>
+                        {queueEpisodeTag(q) && (
+                          <span className="text-muted-foreground bg-muted/60 shrink-0 rounded px-1 py-0.5 font-mono text-[9px] tabular-nums">
+                            {queueEpisodeTag(q)}
+                          </span>
+                        )}
                       </div>
                       <div className="text-muted-foreground shrink-0 font-mono text-[11px] tabular-nums">
                         {formatTimeleft(q.timeleft)}

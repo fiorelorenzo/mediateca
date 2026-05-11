@@ -97,6 +97,12 @@ export interface QueueRecord {
   episodeId?: number;
   movie?: ArrMovie;
   series?: ArrSeries;
+  // Sonarr returns this when ?includeEpisode=true. For season-pack torrents
+  // Sonarr emits one queue row per episode; for single-episode grabs there's
+  // exactly one row and `episode` is set. `episodes` is the season-pack shape
+  // used by some Sonarr versions.
+  episode?: SonarrEpisode;
+  episodes?: SonarrEpisode[];
   // attached client-side:
   kind?: "tv" | "movie";
   // live qBit overlay (filled by unifiedQueue when the hash matches):
@@ -142,6 +148,38 @@ export interface SonarrEpisode {
   hasFile: boolean;
   monitored: boolean;
   episodeFileId: number; // 0 when no file
+}
+
+function pad2(n: number): string {
+  return n < 10 ? `0${n}` : `${n}`;
+}
+
+/** S05E12 / S05E12–E15 / "8 episodes" / null if not a TV queue row. */
+export function queueEpisodeTag(q: QueueRecord): string | null {
+  if (q.kind !== "tv") return null;
+  const eps = q.episodes && q.episodes.length > 0 ? q.episodes : q.episode ? [q.episode] : [];
+  if (eps.length === 0) return null;
+  if (eps.length === 1) return `S${pad2(eps[0].seasonNumber)}E${pad2(eps[0].episodeNumber)}`;
+  const sameSeason = eps.every((e) => e.seasonNumber === eps[0].seasonNumber);
+  if (sameSeason) {
+    const nums = eps.map((e) => e.episodeNumber).sort((a, b) => a - b);
+    const first = nums[0];
+    const last = nums[nums.length - 1];
+    const contiguous = nums.every((n, i) => n === first + i);
+    if (contiguous && first !== last) {
+      return `S${pad2(eps[0].seasonNumber)}E${pad2(first)}–E${pad2(last)}`;
+    }
+    if (first === last) return `S${pad2(eps[0].seasonNumber)}E${pad2(first)}`;
+  }
+  return `${eps.length} episodes`;
+}
+
+/** Episode title when the row is a single episode (no useful title for packs). */
+export function queueEpisodeTitle(q: QueueRecord): string | null {
+  if (q.kind !== "tv") return null;
+  if (q.episode?.title) return q.episode.title;
+  if (q.episodes?.length === 1 && q.episodes[0].title) return q.episodes[0].title;
+  return null;
 }
 
 export const arrs = {

@@ -25,7 +25,14 @@ import {
 } from "@/components/ui/tooltip";
 import { TableSkeleton } from "@/components/skeletons/table-skeleton";
 import { EmptyState } from "@/components/empty-state";
-import { arrPoster, arrs, formatTimeleft, type QueueRecord } from "@/lib/api/arrs";
+import {
+  arrPoster,
+  arrs,
+  formatTimeleft,
+  queueEpisodeTag,
+  queueEpisodeTitle,
+  type QueueRecord,
+} from "@/lib/api/arrs";
 
 function formatBytes(b: number): string {
   if (!b) return "0 B";
@@ -246,7 +253,19 @@ export function QueueTable() {
                     </div>
                   </TableCell>
                   <TableCell>
-                    <div className="font-medium leading-tight">{title}</div>
+                    <div className="flex items-baseline gap-2">
+                      <span className="font-medium leading-tight">{title}</span>
+                      {queueEpisodeTag(q) && (
+                        <span className="text-muted-foreground bg-muted/60 rounded px-1.5 py-0.5 font-mono text-[10px] tabular-nums">
+                          {queueEpisodeTag(q)}
+                        </span>
+                      )}
+                    </div>
+                    {queueEpisodeTitle(q) && (
+                      <div className="text-muted-foreground/90 mt-0.5 line-clamp-1 text-xs italic">
+                        {queueEpisodeTitle(q)}
+                      </div>
+                    )}
                     <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-xs">
                       {year && <span>{year}</span>}
                       {year && q.protocol && <span aria-hidden>·</span>}
