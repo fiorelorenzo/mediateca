@@ -75,10 +75,13 @@ Single tree, single root. Encoder works in-place:
       …                                   ← one per source audio track
 ```
 
-Source `.mkv` is deleted by the encoder after sanity check. `.srt` sidecar
-files (when present, e.g. from Bazarr or manual) live alongside the
-`.strm` and Jellyfin attaches them as separate subtitle tracks during
-playback.
+Source `.mkv` is kept on disk — the encoder doesn't delete it. Lifecycle
+management belongs to the orchestrator, which only removes the source as
+part of a `DELETE /api/items/{id}` (and that delete also cancels any
+in-flight HLS job and wipes the `.hls/` bundle along with the source
+folder). `.srt` sidecar files (when present, e.g. from Bazarr or manual)
+live alongside the `.strm` and Jellyfin attaches them as separate
+subtitle tracks during playback.
 
 ## Bitrate ladder
 
@@ -118,11 +121,18 @@ Custom Python service (FastAPI). See `hls-encoder/encoder.py`.
 - Accept `POST /jobs` requests from the orchestrator: receive source path,
   run ffprobe, build dynamic FFmpeg command (3 video variants + N audio
   renditions, or 2 + N if copy_1080p mode), encode to `/cache/<uuid>/`,
-  atomically move to `<source_dir>/.<basename>.hls/`, write `.strm`,
-  delete source.
-- Expose `GET /jobs/{id}` for status polling.
-- SIGTERM handler that terminates in-flight ffmpeg subprocesses and
-  drains workers; container restart is clean, no orphan ffmpeg.
+  atomically move to `<source_dir>/.<basename>.hls/`, write `.strm`.
+- Cap concurrency at `WORKERS` (asyncio semaphore); excess jobs queue.
+- Expose `GET /jobs/{id}` for status polling (`queued`, `running`,
+  `done`, `failed`, `cancelled`).
+- Expose `DELETE /jobs/{id}` for cancellation. The orchestrator calls
+  this from its own delete endpoint so a title removed mid-encode
+  unblocks the encoder cleanly instead of letting it write output to a
+  path that's about to vanish. SIGTERM → `SystemExit` in the worker →
+  `encode_to_hls`'s `finally` block tears down ffmpeg; SIGKILL fallback
+  after 10 s.
+- Per-job SIGTERM handler that terminates in-flight ffmpeg subprocesses
+  and drains workers; container restart is clean, no orphan ffmpeg.
 
 **What it does NOT do** (previously done, now removed):
 - Watch the filesystem for new imports — the orchestrator handles that
@@ -259,12 +269,16 @@ the encoder is essentially always idle.
 ## Storage cost
 
 Per 1080p H.264 source file with the current ladder:
-- Source: 1× (deleted after encode)
+- Source: 1× (kept on disk; deleted only via `DELETE /api/items/{id}`)
 - HLS bundle: ~1.5× of source size (5 + 2.5 + 1 = 8.5 Mbps total vs
   ~5 Mbps single-bitrate source)
 
-Net storage = 1.5× source, with 1× source deleted = **~1.5× of source
-size** vs ~1× without the pipeline. For BX11 (1 TB): ~660 GB of
+Net storage = source + bundle = **~2.5× source size** vs ~1× without
+the pipeline. Earlier versions of this service deleted the source after
+encode (which would have made the answer ~1.5×) but that behaviour was
+removed: keeping the source means Bazarr can still scan for subtitles
+and the orchestrator's reconcile loop has something to compare against.
+For BX11 (1 TB): ~660 GB of
 effective content max — about 150 movies @ 4 GB each, or ~500 episodes
 @ 1.3 GB each.
 

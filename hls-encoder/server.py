@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import multiprocessing as mp
+import os
 import signal
 import sys
 import uuid
@@ -30,6 +31,19 @@ app = FastAPI(title="HLS Encoder")
 
 # job_id -> {status, source, proc, queue, strm_path?, error?}
 _jobs: dict[str, dict[str, Any]] = {}
+
+# Cap concurrent ffmpeg workers. Without this we'd spawn one Process per
+# /jobs call and trash CPU. Configurable via WORKERS env, matching the
+# documented knob in hls-encoder/README.md.
+_MAX_WORKERS = max(1, int(os.environ.get("WORKERS", "2")))
+_slots: asyncio.Semaphore | None = None
+
+
+def _get_slots() -> asyncio.Semaphore:
+    global _slots
+    if _slots is None:
+        _slots = asyncio.Semaphore(_MAX_WORKERS)
+    return _slots
 
 
 class JobRequest(BaseModel):
@@ -61,31 +75,36 @@ async def healthz() -> dict[str, str]:
 async def create_job(req: JobRequest) -> dict[str, str]:
     job_id = uuid.uuid4().hex
     q: "mp.Queue[Any]" = mp.Queue()
-    proc = mp.Process(target=_worker, args=(req.source_path, q), daemon=False)
-    proc.start()
     _jobs[job_id] = {
-        "status": "running",
+        "status": "queued",
         "source": req.source_path,
-        "proc": proc,
+        "proc": None,
         "queue": q,
     }
 
-    async def watch() -> None:
-        while proc.is_alive():
-            await asyncio.sleep(2)
-        # Worker exited. If we already marked it cancelled, leave that.
-        if _jobs[job_id].get("status") == "cancelled":
-            return
-        try:
-            result = q.get_nowait()
-            _jobs[job_id].update(result)
-        except Exception:  # noqa: BLE001 — empty queue or other
-            _jobs[job_id].update(
-                status="failed",
-                error=f"worker exited (code {proc.exitcode}) without result",
-            )
+    async def run() -> None:
+        async with _get_slots():
+            # Skip the actual spawn if the job was cancelled while queued.
+            if _jobs[job_id].get("status") == "cancelled":
+                return
+            proc = mp.Process(target=_worker, args=(req.source_path, q), daemon=False)
+            proc.start()
+            _jobs[job_id]["proc"] = proc
+            _jobs[job_id]["status"] = "running"
+            while proc.is_alive():
+                await asyncio.sleep(2)
+            if _jobs[job_id].get("status") == "cancelled":
+                return
+            try:
+                result = q.get_nowait()
+                _jobs[job_id].update(result)
+            except Exception:  # noqa: BLE001 — empty queue or other
+                _jobs[job_id].update(
+                    status="failed",
+                    error=f"worker exited (code {proc.exitcode}) without result",
+                )
 
-    asyncio.create_task(watch())
+    asyncio.create_task(run())
     return {"job_id": job_id}
 
 
@@ -103,8 +122,9 @@ async def cancel_job(job_id: str) -> dict[str, str]:
     job = _jobs.get(job_id)
     if job is None:
         raise HTTPException(404)
-    proc: mp.Process = job["proc"]
-    if proc.is_alive():
+    job["status"] = "cancelled"
+    proc: mp.Process | None = job.get("proc")
+    if proc is not None and proc.is_alive():
         proc.terminate()
         await asyncio.to_thread(proc.join, 10)
         if proc.is_alive():
@@ -113,5 +133,4 @@ async def cancel_job(job_id: str) -> dict[str, str]:
             # exchange for guaranteed unblocking on the orchestrator side.
             proc.kill()
             await asyncio.to_thread(proc.join, 5)
-    job["status"] = "cancelled"
     return {"status": "cancelled"}

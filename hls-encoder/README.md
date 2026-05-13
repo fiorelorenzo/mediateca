@@ -21,10 +21,13 @@ HLS dispatch is effectively a no-op even if the runtime toggle is enabled.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `POST` | `/jobs` | Submit an encode job. Body: `{"source": "/data/media/tv/…/episode.mkv"}`. Returns `{"job_id": "…"}` immediately. |
-| `GET` | `/jobs/{job_id}` | Poll job status: `pending`, `running`, `done`, `failed`. |
+| `POST` | `/jobs` | Submit an encode job. Body: `{"source_path": "/data/media/tv/…/episode.mkv"}`. Returns `{"job_id": "…"}` immediately (`202 Accepted`). |
+| `GET` | `/jobs/{job_id}` | Poll job status: `queued`, `running`, `done`, `failed`, `cancelled`. |
+| `DELETE` | `/jobs/{job_id}` | Cancel a queued or running job. Sends SIGTERM to the worker (the worker turns it into `SystemExit` so `encode_to_hls`'s `finally` block tears down ffmpeg cleanly); falls back to `SIGKILL` after 10 s if the worker hasn't exited. Idempotent — 404 means the job is already gone. |
 
 All requests are internal (Docker network only) — no auth token required.
+
+The orchestrator calls `DELETE /jobs/{id}` from its own `DELETE /api/items/{id}` handler so deleting a title mid-encode unblocks the encoder instead of letting it write output to a path that's about to vanish.
 
 ## Volumes (set by docker-compose)
 
@@ -63,10 +66,16 @@ All requests are internal (Docker network only) — no auth token required.
 - Encode to `/cache/<uuid>/`, then atomically move the finished bundle to
   `<source_dir>/.<basename>.hls/`.
 - Write a `.strm` sidecar pointing at `HLS_CDN_BASE/…/master.m3u8`.
-- Delete the source `.mkv` after sanity-checking the output.
-- Expose `GET /jobs/{id}` for status polling.
-- Handle SIGTERM cleanly: terminate in-flight ffmpeg subprocesses, stop
-  accepting new jobs, join worker threads.
+- Run each job in its own `multiprocessing.Process`, capped at `WORKERS`
+  concurrent slots via an asyncio semaphore — extra jobs sit at status
+  `queued` until a slot frees up.
+- Expose `GET /jobs/{id}` for status polling and `DELETE /jobs/{id}` for
+  cancellation. Cancel sends `SIGTERM` to the worker; the worker's signal
+  handler raises `SystemExit` so `encode_to_hls`'s `finally` block tears
+  down the ffmpeg subprocess cleanly. `SIGKILL` is the fallback after
+  10 s; in that path the ffmpeg child (started with `start_new_session`)
+  is left to exit on its own — rare and only matters when the worker
+  refuses to honour SIGTERM.
 
 **Does not:**
 - Watch the filesystem. New imports are signalled via `POST /jobs`.
@@ -74,6 +83,8 @@ All requests are internal (Docker network only) — no auth token required.
   orchestrator tracks overall item state in its own SQLite DB.
 - Call Sonarr/Radarr to set `monitored=false`. The orchestrator does
   this during the promotion step, before dispatching the HLS job.
+- Delete the source `.mkv` after encoding. That's the orchestrator's
+  responsibility (and only happens via `DELETE /api/items/{id}`).
 
 ## Tuning rule of thumb
 
