@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from sqlalchemy import JSON, Column
+from sqlalchemy import JSON, Column, ForeignKey, Integer
 from sqlmodel import Field, SQLModel
 
 
@@ -70,7 +70,13 @@ class Item(SQLModel, table=True):
 class History(SQLModel, table=True):
     __tablename__ = "history"
     id: int | None = Field(default=None, primary_key=True)
-    item_id: int = Field(foreign_key="items.id")
+    item_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("items.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
     event: str
     detail: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
     created_at: datetime = Field(default_factory=datetime.utcnow)
@@ -79,7 +85,13 @@ class History(SQLModel, table=True):
 class Job(SQLModel, table=True):
     __tablename__ = "jobs"
     id: int | None = Field(default=None, primary_key=True)
-    item_id: int = Field(foreign_key="items.id")
+    item_id: int = Field(
+        sa_column=Column(
+            Integer,
+            ForeignKey("items.id", ondelete="CASCADE"),
+            nullable=False,
+        )
+    )
     kind: JobKind
     status: JobStatus = JobStatus.QUEUED
     payload: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))

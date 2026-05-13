@@ -1,8 +1,10 @@
 # orchestrator/src/orchestrator/api/items.py
 from __future__ import annotations
 
+import shutil
 from collections import defaultdict
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -10,12 +12,16 @@ from pydantic import BaseModel
 from sqlmodel import Session, select
 
 from orchestrator.api.auth import require_admin_token
-from orchestrator.config import get_settings
+from orchestrator.config import Settings, get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
+from orchestrator.core.encoder_client import HlsEncoderClient
 from orchestrator.core.notify import maybe_notify_frozen
 from orchestrator.core.state import validate_transition
-from orchestrator.db.models import History, Item, ItemStatus
+from orchestrator.db.models import History, Item, ItemStatus, Job, JobKind, JobStatus
 from orchestrator.db.session import get_session
+from orchestrator.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 router = APIRouter(prefix="/api/items", tags=["items"], dependencies=[require_admin_token])
 
@@ -158,6 +164,50 @@ async def _purge_sonarr_queue(sonarr: SonarrClient, series_id: int) -> int:
     return len(queued)
 
 
+async def _cancel_inflight_encodes(
+    session: Session, item_id: int, encoder: HlsEncoderClient
+) -> list[dict[str, Any]]:
+    """Tell the encoder to terminate any RUNNING/QUEUED encode for this
+    item. We never raise — best-effort; the cascade will drop the rows
+    when the item is deleted regardless."""
+    jobs = session.exec(
+        select(Job).where(
+            Job.item_id == item_id,
+            Job.kind == JobKind.ENCODE,
+            Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]),  # type: ignore[attr-defined]
+        )
+    ).all()
+    errors: list[dict[str, Any]] = []
+    for j in jobs:
+        external_id = (j.payload or {}).get("external_id")
+        if not external_id:
+            continue
+        try:
+            await encoder.cancel_job(external_id)
+        except Exception as e:  # noqa: BLE001
+            errors.append({"job_id": j.id, "external_id": external_id, "err": str(e)})
+    return errors
+
+
+def _staging_title_dir(item: Item, settings: Settings) -> Path | None:
+    """Map item.library_path → corresponding /data/staging/<type>/<title>.
+
+    Returns None if the item has no library_path, or if the path doesn't
+    sit under media_root with the canonical layout. Callers rmtree this
+    directory on full delete so leftover unpromoted episodes/movies don't
+    survive a delete.
+    """
+    if not item.library_path:
+        return None
+    try:
+        rel = Path(item.library_path).relative_to(settings.media_root)
+    except ValueError:
+        return None
+    if len(rel.parts) < 2 or rel.parts[0] not in ("tv", "movies"):
+        return None
+    return settings.staging_root / rel.parts[0] / rel.parts[1]
+
+
 @router.delete("/{item_id}")
 async def delete_item(
     item_id: int,
@@ -183,10 +233,14 @@ async def delete_item(
         raise HTTPException(404, "item not found")
 
     s = get_settings()
+    encoder = HlsEncoderClient(s.hls_encoder_url)
     summary: dict[str, Any] = {"item_id": item_id, "kind": item.source}
 
     if item.source == "radarr":
         radarr = RadarrClient(s.radarr_url, s.radarr_api_key)
+        errors = await _cancel_inflight_encodes(session, item_id, encoder)
+        if errors:
+            summary["encoder_cancel_errors"] = errors
         if payload.purge_torrent:
             summary["queue_removed"] = await _purge_radarr_queue(radarr, item.source_id)
         try:
@@ -198,6 +252,15 @@ async def delete_item(
             summary["radarr_deleted"] = True
         except Exception as e:  # noqa: BLE001 — surface but don't abort cascade
             summary["radarr_error"] = str(e)
+        if payload.delete_files:
+            staging = _staging_title_dir(item, s)
+            if staging and staging.exists():
+                try:
+                    shutil.rmtree(staging)
+                    summary["staging_removed"] = str(staging)
+                except OSError as e:
+                    summary["staging_error"] = str(e)
+                    log.warning("delete.staging_rmtree_failed", path=str(staging), error=str(e))
         _record(session, item_id, "DELETED", {"delete_files": payload.delete_files})
         session.delete(item)
         session.commit()
@@ -249,6 +312,9 @@ async def delete_item(
         return summary
 
     # full series wipe
+    errors = await _cancel_inflight_encodes(session, item_id, encoder)
+    if errors:
+        summary["encoder_cancel_errors"] = errors
     if payload.purge_torrent:
         summary["queue_removed"] = await _purge_sonarr_queue(sonarr, series_id)
     try:
@@ -260,6 +326,15 @@ async def delete_item(
         summary["sonarr_deleted"] = True
     except Exception as e:  # noqa: BLE001
         summary["sonarr_error"] = str(e)
+    if payload.delete_files:
+        staging = _staging_title_dir(item, s)
+        if staging and staging.exists():
+            try:
+                shutil.rmtree(staging)
+                summary["staging_removed"] = str(staging)
+            except OSError as e:
+                summary["staging_error"] = str(e)
+                log.warning("delete.staging_rmtree_failed", path=str(staging), error=str(e))
     _record(session, item_id, "DELETED", {"delete_files": payload.delete_files})
     session.delete(item)
     session.commit()

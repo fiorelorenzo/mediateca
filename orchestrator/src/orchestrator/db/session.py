@@ -1,6 +1,7 @@
 from collections.abc import Iterator
 from typing import Any
 
+from sqlalchemy import event
 from sqlmodel import Session, SQLModel, create_engine
 
 from orchestrator.config import get_settings
@@ -17,6 +18,13 @@ def get_engine() -> Any:
             connect_args={"check_same_thread": False},
             echo=False,
         )
+
+        @event.listens_for(_engine, "connect")
+        def _enable_sqlite_fks(dbapi_connection: Any, _connection_record: Any) -> None:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     return _engine
 
 

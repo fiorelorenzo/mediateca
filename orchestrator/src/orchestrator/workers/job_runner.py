@@ -51,6 +51,9 @@ async def run_encode_jobs() -> None:
                 session.add(job)
                 session.commit()
                 external_id = await client.submit_job(item.library_path)
+                job.payload = {**(job.payload or {}), "external_id": external_id}
+                session.add(job)
+                session.commit()
                 while True:
                     await asyncio.sleep(10)
                     status = await client.get_job_status(external_id)

@@ -25,6 +25,15 @@ class HlsEncoderClient:
             r.raise_for_status()
             return cast(dict[str, Any], r.json())
 
+    async def cancel_job(self, job_id: str) -> None:
+        """Tell the encoder to terminate the job. 404 is treated as
+        success — the job is already gone, which is what we want."""
+        async with await self._client() as c:
+            r = await c.delete(f"/jobs/{job_id}")
+            if r.status_code == 404:
+                return
+            r.raise_for_status()
+
     async def healthz(self) -> bool:
         try:
             async with await self._client() as c:
