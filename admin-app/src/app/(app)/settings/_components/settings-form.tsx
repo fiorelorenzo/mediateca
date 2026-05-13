@@ -242,6 +242,20 @@ function SettingsFormInner({ initial }: FormProps) {
       ? "Audio offset reject threshold must be greater than safe limit."
       : null;
 
+  const dirty =
+    langs !== initial.required_audio_langs.join(",") ||
+    retry !== initial.retry_interval_hours ||
+    hls !== initial.hls_enabled ||
+    qualityUpgrade !== initial.quality_upgrade_enabled ||
+    autoScan !== initial.auto_scan_on_promote ||
+    notifyFailed !== initial.notify_failed_enabled ||
+    notifyFrozen !== initial.notify_frozen_enabled ||
+    acceptAfter !== initial.accept_as_is_after_attempts ||
+    durationThreshold !== initial.merge_duration_reject_threshold_s ||
+    offsetSafe !== initial.merge_offset_safe_ms ||
+    offsetReject !== initial.merge_offset_reject_ms ||
+    JSON.stringify(channels) !== JSON.stringify(initial.notification_channels ?? []);
+
   const save = useMutation({
     mutationFn: (s: Partial<Settings>) => api.putSettings(s),
     onSuccess: (next) => {
@@ -513,29 +527,46 @@ function SettingsFormInner({ initial }: FormProps) {
         </TabsContent>
       </Tabs>
 
-      <div className="bg-background sticky bottom-0 z-10 -mx-4 -mb-6 flex items-center justify-end gap-3 border-t px-4 py-3 sm:-mx-6 sm:px-6">
-        {offsetError && (
-          <p className="text-destructive mr-auto text-sm">Fix errors before saving.</p>
-        )}
-        <Button type="submit" disabled={save.isPending || !!offsetError}>
-          <AnimatePresence mode="wait">
-            {save.isSuccess ? (
-              <motion.span
-                key="ok"
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                className="flex items-center gap-1"
-              >
-                <Check className="size-4" /> Saved
-              </motion.span>
-            ) : save.isPending ? (
-              <motion.span key="loading">Saving…</motion.span>
-            ) : (
-              <motion.span key="idle">Save</motion.span>
+      <AnimatePresence>
+        {(dirty || save.isPending || save.isSuccess) && (
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 16 }}
+            transition={{ duration: 0.15 }}
+            className="fixed right-6 bottom-6 z-50 flex items-center gap-3"
+          >
+            {offsetError && (
+              <p className="bg-background/95 text-destructive rounded-md border px-3 py-2 text-sm shadow-lg backdrop-blur">
+                Fix errors before saving.
+              </p>
             )}
-          </AnimatePresence>
-        </Button>
-      </div>
+            <Button
+              type="submit"
+              size="lg"
+              disabled={save.isPending || !!offsetError}
+              className="shadow-lg"
+            >
+              <AnimatePresence mode="wait">
+                {save.isSuccess ? (
+                  <motion.span
+                    key="ok"
+                    initial={{ scale: 0 }}
+                    animate={{ scale: 1 }}
+                    className="flex items-center gap-1"
+                  >
+                    <Check className="size-4" /> Saved
+                  </motion.span>
+                ) : save.isPending ? (
+                  <motion.span key="loading">Saving…</motion.span>
+                ) : (
+                  <motion.span key="idle">Save changes</motion.span>
+                )}
+              </AnimatePresence>
+            </Button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </form>
   );
 }
