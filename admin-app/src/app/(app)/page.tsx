@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { TimeseriesChart } from "./_components/timeseries-chart";
 import { EventFeed } from "./_components/event-feed";
 import { HeroStats } from "./_components/hero-stats";
 import { RecentAdditions } from "./_components/recent-additions";
@@ -32,14 +31,7 @@ export default function Dashboard() {
         <PendingRequestsCard />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <TimeseriesChart />
-        </div>
-        <div className="lg:col-span-1">
-          <EventFeed />
-        </div>
-      </div>
+      <EventFeed />
     </div>
   );
 }

@@ -4,7 +4,6 @@ import type {
   SystemMetrics,
   ContainerStat,
   ServiceEntry,
-  TimeseriesPoint,
 } from "./types";
 
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
@@ -62,8 +61,6 @@ export const api = {
   containers: () => call<ContainerStat[]>("/api/metrics/containers"),
   services: () => call<ServiceEntry[]>("/api/services"),
   recyclarrSync: () => call<{ status: string }>("/api/recyclarr/sync", { method: "POST" }),
-  itemsTimeseries: (sinceSeconds = 604800) =>
-    call<TimeseriesPoint[]>(`/api/items/timeseries?since_seconds=${sinceSeconds}`),
   testNotification: (url: string) =>
     call<{ ok: boolean; message: string }>("/api/notifications/test", {
       method: "POST",

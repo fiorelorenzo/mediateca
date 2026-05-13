@@ -78,7 +78,7 @@ export function EventFeed() {
       <CardHeader>
         <CardTitle>Recent Activity</CardTitle>
       </CardHeader>
-      <CardContent className="max-h-64 space-y-1 overflow-y-auto pr-1">
+      <CardContent className="max-h-[28rem] space-y-1 overflow-y-auto pr-1">
         <AnimatePresence initial={false}>
           {feed.length === 0 && (
             <p className="text-muted-foreground py-4 text-center text-sm">No events yet</p>

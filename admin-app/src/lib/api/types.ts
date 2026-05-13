@@ -86,11 +86,3 @@ export interface HistoryEvent {
   created_at: string;
   detail?: Record<string, unknown> | null;
 }
-
-export interface TimeseriesPoint {
-  ts: string;
-  promoted: number;
-  incomplete: number;
-  merged: number;
-  failed: number;
-}
