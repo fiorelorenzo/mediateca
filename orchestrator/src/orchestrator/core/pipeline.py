@@ -305,10 +305,7 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
             # New file adds nothing — discard it and keep item as-is.
             # Restore audio_present and status to what they were before
             # webhook_inbox clobbered them.
-            try:
-                source_file.unlink(missing_ok=True)  # noqa: ASYNC240
-            except OSError:
-                log.warning("merge.cleanup_failed", path=str(source_file))
+            _discard_or_adopt(item, source_file, old_audio_unchanged=True)
             item.audio_present = old_audio
             # Restore status: INCOMPLETE if old audio was still missing langs,
             # PROMOTED if old audio was already satisfying policy.
@@ -545,6 +542,47 @@ async def _mark_incomplete_and_promote(
     notify_library_added(session)
 
 
+def _discard_or_adopt(
+    item: Item, source_file: Path, *, old_audio_unchanged: bool
+) -> None:
+    """Remove a redundant new download, OR adopt it as the library file
+    if the old one has already vanished.
+
+    Sonarr's "Upgrade Existing" import path deletes the prior library
+    file *before* webhooking us. If we then unlink the new file (under
+    the assumption it's a discardable duplicate sitting in staging), the
+    user ends up with nothing on disk and `library_path` pointing at a
+    ghost — which the next reconcile flags as "library file vanished".
+
+    Branch:
+      - library_path is set AND that file no longer exists on disk →
+        Sonarr has already moved/removed it; the new file *is* the
+        library now. Keep it, point library_path at source_file.
+      - otherwise (staging duplicate, original still in place) → safe
+        to unlink as before.
+
+    old_audio_unchanged signals that the caller has not changed
+    item.audio_present (e.g. merge rejected, no-new-tracks branch). We
+    don't act on it directly — it's a marker that this is a "nothing
+    new added" path, used only by callers/logs.
+    """
+    del old_audio_unchanged  # currently informational only
+    library_gone = bool(item.library_path) and not Path(item.library_path).exists()  # type: ignore[arg-type]
+    if library_gone:
+        log.warning(
+            "discard.library_already_gone_adopting_new",
+            item_id=item.id,
+            old_library_path=item.library_path,
+            new_library_path=str(source_file),
+        )
+        item.library_path = str(source_file)
+        return
+    try:
+        source_file.unlink(missing_ok=True)
+    except OSError:
+        log.warning("discard.cleanup_failed", path=str(source_file))
+
+
 def _reject_merge(
     session: Session,
     item: Item,
@@ -567,11 +605,11 @@ def _reject_merge(
     )
     session.commit()
     publish("item.status_changed", {"item_id": item.id, "status": item.status})
-    # Discard the staging addition — it's been rejected
-    try:
-        source_file.unlink(missing_ok=True)  # noqa: ASYNC240
-    except OSError:
-        log.warning("merge.rejected_cleanup_failed", path=str(source_file))
+    # Discard the rejected addition — but if Sonarr's "Upgrade Existing"
+    # import deleted the old library file before this webhook fired, the
+    # new file is now the only copy on disk; adopt it as library_path
+    # instead of unlinking.
+    _discard_or_adopt(item, source_file, old_audio_unchanged=True)
 
 
 async def _merge_into_existing(
