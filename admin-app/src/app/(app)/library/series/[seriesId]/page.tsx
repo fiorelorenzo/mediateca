@@ -7,5 +7,6 @@ export default async function SeriesDetailPage(props: {
 }) {
   const seriesId = Number((await props.params).seriesId);
   if (Number.isNaN(seriesId) || seriesId <= 0) notFound();
-  return <SeriesDetail seriesId={seriesId} />;
+  const domain = process.env.PUBLIC_DOMAIN ?? "localhost";
+  return <SeriesDetail seriesId={seriesId} domain={domain} />;
 }

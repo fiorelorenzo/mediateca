@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState, useTransition } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronLeft, Film, Search, Tv } from "lucide-react";
+import { ChevronLeft, ExternalLink, Film, PlayCircle, Search, Tv } from "lucide-react";
 import { toast } from "sonner";
 
 import { AudioBadges } from "@/app/(app)/library/_components/audio-badges";
@@ -147,7 +147,7 @@ function SeriesActions({
   );
 }
 
-export function SeriesDetail({ seriesId }: { seriesId: number }) {
+export function SeriesDetail({ seriesId, domain }: { seriesId: number; domain: string }) {
   const { data: series, isLoading: loadingSeries } = useQuery({
     queryKey: ["sonarr", "series", seriesId],
     queryFn: () => arrs.series(seriesId),
@@ -199,15 +199,27 @@ export function SeriesDetail({ seriesId }: { seriesId: number }) {
   const incomplete = itemsData?.items.filter((it) => it.status === "INCOMPLETE").length ?? 0;
   const failed = itemsData?.items.filter((it) => it.status === "FAILED").length ?? 0;
 
+  const jellyfinUrl = `https://streaming.${domain}/web/#/search.html?query=${encodeURIComponent(series.title)}`;
+
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex items-center justify-between gap-2">
         <Link
           href="/library"
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-sm"
         >
           <ChevronLeft className="size-4" /> Library
         </Link>
+        <a
+          href={jellyfinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm transition"
+        >
+          <PlayCircle className="size-4" />
+          Open in Jellyfin
+          <ExternalLink className="size-3" />
+        </a>
       </div>
 
       <Card>

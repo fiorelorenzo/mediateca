@@ -19,10 +19,11 @@ export function ServicesHealthPulse({
       {services.map((s) => {
         const h = byKey[s.key];
         const dot = h?.healthy ? "bg-emerald-500 animate-pulse" : h ? "bg-rose-500" : "bg-zinc-500";
+        const host = s.subdomain ? `${s.subdomain}.${domain}` : domain;
         return (
           <a
             key={s.key}
-            href={`https://${s.subdomain}.${domain}`}
+            href={`https://${host}`}
             target="_blank"
             rel="noopener noreferrer"
             className="group"
@@ -37,7 +38,7 @@ export function ServicesHealthPulse({
               </CardHeader>
               <CardContent>
                 <div className="text-muted-foreground font-mono text-sm">
-                  {s.subdomain}.{domain}
+                  {host}
                 </div>
               </CardContent>
             </Card>

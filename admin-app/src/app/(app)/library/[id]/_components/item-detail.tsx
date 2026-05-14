@@ -9,6 +9,7 @@ import {
   Check,
   Clock,
   Cog,
+  ExternalLink,
   FileVideo,
   Film,
   GitMerge,
@@ -16,6 +17,7 @@ import {
   Inbox,
   Languages,
   Lock,
+  PlayCircle,
   RotateCw,
   Search,
   Sparkles,
@@ -92,9 +94,10 @@ function formatRuntime(min: number | undefined): string | null {
 interface ItemDetailProps {
   item: Item;
   history: HistoryEvent[];
+  domain: string;
 }
 
-export function ItemDetail({ item, history }: ItemDetailProps) {
+export function ItemDetail({ item, history, domain }: ItemDetailProps) {
   const isMovie = item.source === "radarr";
 
   // Lazy-fetch the *arr metadata. Cached per item so navigating away and back
@@ -108,9 +111,18 @@ export function ItemDetail({ item, history }: ItemDetailProps) {
     staleTime: 5 * 60_000,
   });
 
+  // For sonarr items, item.title is "Series Title - SxxEyy" — Jellyfin's search
+  // matches the series, not the episode, so prefer the series/movie title from
+  // the *arr metadata. Falls back to stripping the "- SxxEyy" suffix until meta
+  // loads.
+  const jellyfinTitle =
+    meta.data?.title ??
+    (isMovie ? item.title : item.title.replace(/\s+-\s+S\d+E\d+.*$/, ""));
+  const jellyfinUrl = `https://streaming.${domain}/web/#/search.html?query=${encodeURIComponent(jellyfinTitle)}`;
+
   return (
     <div className="space-y-6">
-      <div>
+      <div className="flex items-center justify-between gap-2">
         <Link
           href="/library"
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm transition"
@@ -118,6 +130,16 @@ export function ItemDetail({ item, history }: ItemDetailProps) {
           <ArrowLeft className="size-4" />
           Library
         </Link>
+        <a
+          href={jellyfinUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1.5 text-sm transition"
+        >
+          <PlayCircle className="size-4" />
+          Open in Jellyfin
+          <ExternalLink className="size-3" />
+        </a>
       </div>
 
       <Hero item={item} meta={meta.data} loading={meta.isLoading} isMovie={isMovie} />

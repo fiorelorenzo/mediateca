@@ -12,5 +12,6 @@ export default async function ItemDetailPage(props: { params: Promise<{ id: stri
   } catch {
     notFound();
   }
-  return <ItemDetail item={payload.item} history={payload.history} />;
+  const domain = process.env.PUBLIC_DOMAIN ?? "localhost";
+  return <ItemDetail item={payload.item} history={payload.history} domain={domain} />;
 }
