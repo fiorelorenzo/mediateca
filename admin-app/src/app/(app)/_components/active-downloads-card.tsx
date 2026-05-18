@@ -122,7 +122,7 @@ export function ActiveDownloadsCard() {
                     <div className="text-muted-foreground mt-0.5 flex justify-between gap-2 font-mono text-[10px] tabular-nums">
                       <span>{p.toFixed(1)}%</span>
                       {speed ? (
-                        <span className="text-blue-700 dark:text-blue-400">↓ {speed}</span>
+                        <span>↓ {speed}</span>
                       ) : (
                         <span>{q.indexer ?? q.protocol ?? ""}</span>
                       )}

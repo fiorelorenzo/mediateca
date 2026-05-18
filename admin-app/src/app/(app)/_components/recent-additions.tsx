@@ -7,10 +7,12 @@ import { Film, Sparkles, Tv } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { api } from "@/lib/api/client";
 import { arrPoster, arrs, type ArrMovie, type ArrSeries } from "@/lib/api/arrs";
 
 interface AdditionRow {
-  id: number;
+  href: string;
+  key: string;
   kind: "movie" | "tv";
   title: string;
   year?: number;
@@ -29,26 +31,41 @@ export function RecentAdditions() {
     queryFn: arrs.allSeries,
     staleTime: 60_000,
   });
+  // Orchestrator items: needed to map a radarr movie (source_id) to the
+  // orchestrator item id that /library/[id] is keyed by. Series detail is
+  // keyed by sonarr seriesId directly so it doesn't need this lookup.
+  const orchItems = useQuery({
+    queryKey: ["items", "recent-additions-lookup"],
+    queryFn: () => api.listItems({ limit: 2000 }),
+    staleTime: 60_000,
+  });
 
   const items: AdditionRow[] = useMemo(() => {
+    const movieItemBySourceId = new Map<number, number>();
+    for (const it of orchItems.data?.items ?? []) {
+      if (it.source === "radarr") movieItemBySourceId.set(it.source_id, it.id);
+    }
     const out: AdditionRow[] = [];
     (movies.data ?? [])
       .filter((m: ArrMovie) => m.hasFile)
-      .forEach((m) =>
+      .forEach((m) => {
+        const orchId = movieItemBySourceId.get(m.id);
         out.push({
-          id: m.id,
+          href: orchId != null ? `/library/${orchId}` : "/library",
+          key: `movie-${m.id}`,
           kind: "movie",
           title: m.title,
           year: m.year,
           added: m.added,
           poster: arrPoster(m.images),
-        }),
-      );
+        });
+      });
     (series.data ?? [])
       .filter((s: ArrSeries) => (s.statistics?.episodeFileCount ?? 0) > 0)
       .forEach((s) =>
         out.push({
-          id: s.id,
+          href: `/library/series/${s.id}`,
+          key: `tv-${s.id}`,
           kind: "tv",
           title: s.title,
           year: s.year,
@@ -59,7 +76,7 @@ export function RecentAdditions() {
     return out
       .sort((a, b) => (a.added < b.added ? 1 : -1))
       .slice(0, 8);
-  }, [movies.data, series.data]);
+  }, [movies.data, series.data, orchItems.data]);
 
   const loading = movies.isLoading || series.isLoading;
 
@@ -85,13 +102,13 @@ export function RecentAdditions() {
                 )
               : items.map((it, i) => (
                   <motion.div
-                    key={`${it.kind}-${it.id}`}
+                    key={it.key}
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.25, delay: Math.min(i * 0.03, 0.2) }}
                   >
                     <Link
-                      href={it.kind === "movie" ? "/library" : "/library"}
+                      href={it.href}
                       className="group block"
                       title={`${it.title}${it.year ? ` (${it.year})` : ""}`}
                     >

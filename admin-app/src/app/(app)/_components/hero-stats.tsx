@@ -25,10 +25,9 @@ interface StatProps {
   value: string | number;
   hint?: string;
   loading?: boolean;
-  accent?: string;
 }
 
-function Stat({ icon: Icon, label, value, hint, loading, accent = "text-foreground" }: StatProps) {
+function Stat({ icon: Icon, label, value, hint, loading }: StatProps) {
   return (
     <Card>
       <CardContent className="p-4">
@@ -39,7 +38,7 @@ function Stat({ icon: Icon, label, value, hint, loading, accent = "text-foregrou
         {loading ? (
           <Skeleton className="mt-1 h-8 w-20" />
         ) : (
-          <div className={`mt-1 text-3xl font-bold tabular-nums leading-none ${accent}`}>
+          <div className="text-foreground mt-1 text-3xl font-bold leading-none tabular-nums">
             {value}
           </div>
         )}
@@ -142,7 +141,6 @@ export function HeroStats() {
         value={stats.queueCount}
         hint={`${stats.queueDownloading} active`}
         loading={queue.isLoading}
-        accent={stats.queueDownloading > 0 ? "text-blue-700 dark:text-blue-400" : undefined}
       />
       <Stat
         icon={Inbox}
@@ -150,7 +148,6 @@ export function HeroStats() {
         value={stats.pendingCount}
         hint={stats.pendingCount > 0 ? "awaiting approval" : "all caught up"}
         loading={pending.isLoading}
-        accent={stats.pendingCount > 0 ? "text-amber-700 dark:text-amber-400" : undefined}
       />
     </div>
   );
