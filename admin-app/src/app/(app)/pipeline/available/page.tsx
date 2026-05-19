@@ -14,9 +14,10 @@ interface Item {
 }
 
 async function fetchAvailable(): Promise<Item[]> {
-  const r = await fetch("/api/proxy/api/items?status=PROMOTED");
+  const r = await fetch("/api/proxy/api/items?status=PROMOTED&limit=5000");
   if (!r.ok) return [];
-  return r.json();
+  const body = (await r.json()) as { items?: Item[] };
+  return body.items ?? [];
 }
 
 function formatSize(bytes: number | null): string {
