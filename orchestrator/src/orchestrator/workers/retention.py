@@ -138,15 +138,27 @@ async def retention_apply_tick() -> None:
         )
         with Session(get_engine()) as session:
             for rs in candidates:
+                existing = session.exec(
+                    select(PendingDeletion).where(
+                        PendingDeletion.item_id == rs.item_id,
+                        PendingDeletion.executed_at.is_(None),  # type: ignore[union-attr]
+                        PendingDeletion.cancelled_at.is_(None),  # type: ignore[union-attr]
+                    )
+                ).first()
+                if existing is not None:
+                    continue
+                item = session.get(Item, rs.item_id)
                 session.add(
                     PendingDeletion(
                         item_id=rs.item_id,
                         proposed_at=now,
                         delete_after=now,
                         reason="disk_pressure",
+                        size_bytes=item.size_bytes if item else None,
                     )
                 )
                 rs.classification = "pending_delete"
+                rs.reason = "disk_pressure_boost"
                 rs.updated_at = now
                 session.add(rs)
             session.commit()
