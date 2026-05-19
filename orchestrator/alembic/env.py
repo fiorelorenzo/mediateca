@@ -4,6 +4,7 @@ from alembic import context
 from sqlalchemy import engine_from_config, pool
 
 from orchestrator.config import get_settings
+from orchestrator.core.retention import models as _retention_models  # noqa: F401 — register tables
 from orchestrator.db.models import SQLModel
 
 config = context.config

@@ -64,6 +64,11 @@ class Item(SQLModel, table=True):
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime | None = None
 
+    season: int | None = None
+    episode: int | None = None
+    jellyfin_item_id: str | None = None
+    size_bytes: int | None = None
+
     __table_args__ = ({"sqlite_autoincrement": True},)
 
 
