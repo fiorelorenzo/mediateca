@@ -2,10 +2,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  Cog,
-  Download,
+  GitBranch,
   Home,
-  Inbox,
   Layers,
   Library,
   ScrollText,
@@ -15,16 +13,18 @@ import {
 import { cn } from "@/lib/utils/cn";
 import { Logo } from "@/components/icons/logo";
 
+// Pipeline is a single nav entry that covers every stage sub-page
+// (/pipeline/request, /pipeline/acquire, /pipeline/process, /pipeline/available,
+// /pipeline/retain, /pipeline/deleted, /pipeline/blocked). Active highlighting
+// uses a prefix match on `/pipeline` so any sub-page lights up the entry.
 const items = [
-  { href: "/", label: "Dashboard", icon: Home },
-  { href: "/library", label: "Library", icon: Library },
-  { href: "/pipeline/request", label: "Request", icon: Inbox },
-  { href: "/pipeline/acquire", label: "Acquire", icon: Download },
-  { href: "/pipeline/process", label: "Process", icon: Cog },
-  { href: "/server", label: "Server", icon: Server },
-  { href: "/services", label: "Services", icon: Layers },
-  { href: "/logs", label: "Logs", icon: ScrollText },
-  { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/", label: "Dashboard", icon: Home, match: "exact" as const },
+  { href: "/pipeline", label: "Pipeline", icon: GitBranch, match: "prefix" as const },
+  { href: "/library", label: "Library", icon: Library, match: "prefix" as const },
+  { href: "/server", label: "Server", icon: Server, match: "prefix" as const },
+  { href: "/services", label: "Services", icon: Layers, match: "prefix" as const },
+  { href: "/logs", label: "Logs", icon: ScrollText, match: "prefix" as const },
+  { href: "/settings", label: "Settings", icon: Settings, match: "prefix" as const },
 ];
 
 export function Sidebar() {
@@ -37,7 +37,8 @@ export function Sidebar() {
       <nav className="flex-1 space-y-1 overflow-y-auto p-2">
         {items.map((it) => {
           const Icon = it.icon;
-          const active = path === it.href || (it.href !== "/" && path.startsWith(it.href));
+          const active =
+            it.match === "exact" ? path === it.href : path === it.href || path.startsWith(`${it.href}/`);
           return (
             <Link
               key={it.href}

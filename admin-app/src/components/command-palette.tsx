@@ -12,16 +12,15 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import {
+  GitBranch,
   Home,
-  Library,
-  Inbox,
-  Download,
-  Server,
   Layers,
-  Settings,
-  ScrollText,
-  RefreshCw,
+  Library,
   Moon,
+  RefreshCw,
+  ScrollText,
+  Server,
+  Settings,
 } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { api } from "@/lib/api/client";
@@ -29,13 +28,12 @@ import { toast } from "sonner";
 
 const PAGES = [
   { href: "/", label: "Dashboard", icon: Home },
+  { href: "/pipeline", label: "Pipeline", icon: GitBranch },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/pipeline/request", label: "Request", icon: Inbox },
-  { href: "/pipeline/acquire", label: "Acquire", icon: Download },
   { href: "/server", label: "Server", icon: Server },
   { href: "/services", label: "Services", icon: Layers },
-  { href: "/settings", label: "Settings", icon: Settings },
   { href: "/logs", label: "Logs", icon: ScrollText },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 export function CommandPalette() {

@@ -1,4 +1,7 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { GitBranch } from "lucide-react";
+import { BlockedBanner } from "@/components/pipeline/blocked-banner";
 import { EventFeed } from "./_components/event-feed";
 import { HeroStats } from "./_components/hero-stats";
 import { RecentAdditions } from "./_components/recent-additions";
@@ -23,7 +26,25 @@ export default function Dashboard() {
         </p>
       </div>
 
+      {/* BlockedBanner self-hides when count is 0, so it costs nothing when
+          the pipeline is healthy. */}
+      <BlockedBanner />
+
       <HeroStats />
+
+      <Link
+        href="/pipeline"
+        className="hover:bg-accent flex items-center justify-between rounded-lg border px-4 py-3 text-sm"
+      >
+        <span className="flex items-center gap-2">
+          <GitBranch className="size-4" />
+          <span className="font-medium">Pipeline</span>
+          <span className="text-muted-foreground">
+            request → acquire → process → available → retain
+          </span>
+        </span>
+        <span className="text-muted-foreground">View pipeline →</span>
+      </Link>
 
       <RecentAdditions />
 
