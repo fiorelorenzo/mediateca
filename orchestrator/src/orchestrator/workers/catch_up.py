@@ -164,6 +164,11 @@ async def orphan_bak_tick() -> None:
 
 def start_scheduler() -> AsyncIOScheduler:
     from orchestrator.workers.job_runner import run_encode_jobs
+    from orchestrator.workers.retention import (
+        retention_apply_tick,
+        retention_plan_tick,
+        retention_sync_tick,
+    )
 
     scheduler = AsyncIOScheduler()
     scheduler.add_job(tick, IntervalTrigger(minutes=15), id="catch_up_tick", replace_existing=True)
@@ -178,6 +183,27 @@ def start_scheduler() -> AsyncIOScheduler:
         IntervalTrigger(hours=1),
         id="orphan_bak_tick",
         replace_existing=True,
+    )
+    scheduler.add_job(
+        retention_sync_tick,
+        IntervalTrigger(minutes=15),
+        id="retention_sync_tick",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        retention_plan_tick,
+        IntervalTrigger(minutes=30),
+        id="retention_plan_tick",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        retention_apply_tick,
+        IntervalTrigger(minutes=60),
+        id="retention_apply_tick",
+        replace_existing=True,
+        max_instances=1,
     )
     scheduler.start()
     return scheduler
