@@ -80,7 +80,38 @@ export function startMock(port = 4567) {
         res.end("[]");
         return;
       }
+      if (req.url?.startsWith("/api/retention/blocked")) {
+        // ?summary=true returns a count payload used by the dashboard; the
+        // bare endpoint returns the array consumed by /pipeline/blocked.
+        if (req.url.includes("summary=true")) {
+          res.end(JSON.stringify({ count: 0 }));
+          return;
+        }
+        res.end("[]");
+        return;
+      }
+      if (req.url?.startsWith("/api/pipeline/overview")) {
+        // Empty-DB shape — every stage at zero. Lets the overview page render
+        // its cards (and the links they wrap) without seeded fixtures.
+        res.end(
+          JSON.stringify({
+            request: { open_jellyseerr: 0, wanted_arr: 0 },
+            acquire: { searching: 0, downloading: 0 },
+            process: { encoding: 0, merging: 0, analyzing: 0 },
+            available: { total: 0, watched: 0 },
+            retain: { eligible: 0, in_grace: 0 },
+            deleted: { last_30d: 0, reclaimed_bytes_30d: 0 },
+          }),
+        );
+        return;
+      }
       if (req.url?.startsWith("/api/items")) {
+        // /pipeline/available calls /api/items?status=PROMOTED and expects a
+        // bare array; the legacy library page uses the {total, items} shape.
+        if (req.url.includes("status=PROMOTED")) {
+          res.end("[]");
+          return;
+        }
         res.end(
           JSON.stringify({
             total: 1,
