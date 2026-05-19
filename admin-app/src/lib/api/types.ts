@@ -86,3 +86,96 @@ export interface HistoryEvent {
   created_at: string;
   detail?: Record<string, unknown> | null;
 }
+
+export type RetentionClassification =
+  | "keep"
+  | "eligible"
+  | "protected_bait"
+  | "protected_pin"
+  | "protected_pin_temp"
+  | "protected_favorite"
+  | "protected_lookahead"
+  | "pending_delete";
+
+export interface RetentionItemState {
+  item_id: number;
+  classification: RetentionClassification;
+  reason: string | null;
+  eligible_since: string | null;
+  pending_delete_at: string | null;
+  score: number;
+  updated_at: string;
+}
+
+export interface PendingDeletion {
+  id: number;
+  item_id: number;
+  title: string;
+  season: number | null;
+  episode: number | null;
+  proposed_at: string;
+  delete_after: string;
+  reason: "ttl_expired" | "disk_pressure" | "manual";
+  size_bytes: number | null;
+  cancelled_at: string | null;
+  executed_at: string | null;
+}
+
+export interface RetentionOverview {
+  enabled: boolean;
+  dry_run: boolean;
+  last_sync_at: string | null;
+  next_tick_at: string | null;
+  disk: { total: number; used: number; free: number; free_pct: number };
+  disk_pressure: "normal" | "warn" | "critical";
+  counts: {
+    eligible: number;
+    in_grace: number;
+    protected_bait: number;
+    protected_lookahead: number;
+    deleted_last_30d: number;
+    reclaimed_bytes_last_30d: number;
+  };
+}
+
+export interface RetentionSettingsPayload {
+  retention_enabled: boolean;
+  retention_dry_run: boolean;
+  movie_ttl_days: number;
+  movie_grace_days: number;
+  series_ttl_days: number;
+  series_grace_days: number;
+  series_bait_first_n: number;
+  series_lookahead_n: number;
+  series_engagement_window_days: number;
+  disk_pressure_target_free_pct: number;
+  disk_pressure_critical_free_pct: number;
+  disk_pressure_grace_days: number;
+  retention_user_ids_include: string[];
+  retention_user_ids_exclude: string[];
+  retention_arr_keep_tag: string;
+  retention_respect_jellyfin_favorites: boolean;
+  retention_max_deletes_per_day: number;
+  retention_max_deletes_per_tick: number;
+}
+
+export interface LifecycleStage {
+  stage:
+    | "requested"
+    | "acquired"
+    | "processing"
+    | "available"
+    | "watched"
+    | "eligible"
+    | "pending_delete"
+    | "deleted";
+  at: string;
+  detail?: string;
+}
+
+export interface ItemLifecycle {
+  item_id: number;
+  stages: LifecycleStage[];
+  current: LifecycleStage["stage"];
+  next_action?: { kind: string; at: string; detail?: string };
+}
