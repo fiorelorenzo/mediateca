@@ -54,6 +54,7 @@ DEFAULTS: dict[str, object] = {
     "retention_stale_watch_max_hours": 6,
     "retention_refetch_max_attempts": 5,
     "retention_refetch_min_interval_hours": 12,
+    "retention_anti_flap_min_minutes": 15,
 }
 
 

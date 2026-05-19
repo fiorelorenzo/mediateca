@@ -38,6 +38,7 @@ class RetentionSettings:
     retention_stale_watch_max_hours: int = 6
     retention_refetch_max_attempts: int = 5
     retention_refetch_min_interval_hours: int = 12
+    retention_anti_flap_min_minutes: int = 15
 
 
 def _read_all_settings() -> dict[str, str]:

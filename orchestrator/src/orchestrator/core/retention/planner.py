@@ -368,9 +368,10 @@ def run_planner_tick(
                 if eligible_since is None:
                     eligible_since = now
                 else:
-                    # Promote on 2nd consecutive tick (>= 15 min from the first)
+                    # Promote on 2nd consecutive tick (>= anti-flap window from the first)
                     if (
-                        (now - eligible_since) >= timedelta(minutes=15)
+                        (now - eligible_since)
+                        >= timedelta(minutes=settings.retention_anti_flap_min_minutes)
                         and not settings.retention_dry_run
                     ):
                         # Promote to pending_delete + emit row
