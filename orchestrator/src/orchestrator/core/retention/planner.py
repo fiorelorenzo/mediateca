@@ -235,6 +235,88 @@ def _score(
     return age_days * 1.0 + size_gb * 0.5 + 10.0 + movie_bonus
 
 
+def _update_series_engagement(session: Session, now: datetime) -> int:
+    """Aggregate ``UserWatch`` rows into ``SeriesEngagement`` per (series, user).
+
+    The planner reads ``SeriesEngagement`` for `protected_lookahead` gating
+    and the look-ahead worker reads it to compute next-N targets. Nothing else
+    populates it, so without this step both code paths are dead. Returns the
+    number of rows upserted.
+    """
+    items = list(
+        session.exec(
+            select(Item).where(
+                Item.source == ItemSource.SONARR,
+                Item.jellyfin_item_id.is_not(None),  # type: ignore[union-attr]
+            )
+        ).all()
+    )
+    by_series: dict[int, list[Item]] = {}
+    for it in items:
+        sid = it.series_id or it.source_id
+        by_series.setdefault(sid, []).append(it)
+
+    n_upsert = 0
+    for series_id, eps in by_series.items():
+        jf_ids = [e.jellyfin_item_id for e in eps if e.jellyfin_item_id]
+        if not jf_ids:
+            continue
+        watches = list(
+            session.exec(
+                select(UserWatch).where(
+                    UserWatch.jellyfin_item_id.in_(jf_ids)  # type: ignore[attr-defined]
+                )
+            ).all()
+        )
+        by_user: dict[str, list[UserWatch]] = {}
+        for w in watches:
+            by_user.setdefault(w.jellyfin_user_id, []).append(w)
+
+        ep_map: dict[str, Item] = {
+            e.jellyfin_item_id: e for e in eps if e.jellyfin_item_id
+        }
+        for user_id, user_watches in by_user.items():
+            relevant = [
+                w for w in user_watches
+                if w.played or (w.position_ticks or 0) > 0
+            ]
+            if not relevant:
+                continue
+            sorted_watches = sorted(
+                relevant,
+                key=lambda w: _as_utc(w.last_played_at)
+                or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )
+            latest = sorted_watches[0]
+            last_activity = _as_utc(latest.last_played_at) or now
+            last_ep = ep_map.get(latest.jellyfin_item_id)
+            last_season = last_ep.season if last_ep else None
+            last_episode_num = last_ep.episode if last_ep else None
+
+            existing = session.get(SeriesEngagement, (series_id, user_id))
+            if existing is None:
+                session.add(
+                    SeriesEngagement(
+                        series_source_id=series_id,
+                        jellyfin_user_id=user_id,
+                        last_activity_at=last_activity,
+                        last_played_season=last_season,
+                        last_played_episode=last_episode_num,
+                        updated_at=now,
+                    )
+                )
+            else:
+                existing.last_activity_at = last_activity
+                existing.last_played_season = last_season
+                existing.last_played_episode = last_episode_num
+                existing.updated_at = now
+                session.add(existing)
+            n_upsert += 1
+    session.commit()
+    return n_upsert
+
+
 def run_planner_tick(
     engine: Engine,
     settings: RetentionSettings,
@@ -243,6 +325,7 @@ def run_planner_tick(
 ) -> PlannerSummary:
     summary = PlannerSummary()
     with Session(engine) as s:
+        _update_series_engagement(s, now)
         # Collect series → list[(season, episode)] for lookahead computation
         all_eps = s.exec(select(Item).where(Item.source == ItemSource.SONARR)).all()
         series_ep_map: dict[int, list[tuple[int, int]]] = {}

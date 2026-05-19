@@ -128,6 +128,50 @@ async def sync_user(
     return res
 
 
+async def fetch_user_items_index(
+    base_url: str,
+    api_key: str,
+    user_id: str,
+    *,
+    page_size: int = 200,
+) -> dict[str, dict[str, Any]]:
+    """Return ``{jellyfin_item_id: item dict}`` for the given user.
+
+    Used by the retention resolver — we only need item metadata, not per-user
+    ``UserData``. Picks the first user as representative because all users see
+    the same library (UserData would differ, but library membership doesn't).
+    """
+    headers = {"X-Emby-Token": api_key, "Accept": "application/json"}
+    out: dict[str, dict[str, Any]] = {}
+    async with httpx.AsyncClient(
+        base_url=base_url.rstrip("/"), headers=headers, timeout=30
+    ) as c:
+        start = 0
+        while True:
+            r = await c.get(
+                f"/Users/{user_id}/Items",
+                params={
+                    "Recursive": "true",
+                    "IncludeItemTypes": "Movie,Episode",
+                    "Fields": "ProviderIds,SeriesId,ParentIndexNumber,IndexNumber,Path",
+                    "Limit": str(page_size),
+                    "StartIndex": str(start),
+                },
+            )
+            r.raise_for_status()
+            data: dict[str, Any] = r.json()
+            items = data.get("Items") or []
+            for it in items:
+                jid = it.get("Id")
+                if jid:
+                    out[jid] = it
+            total = data.get("TotalRecordCount", 0)
+            start += len(items)
+            if not items or start >= total:
+                break
+    return out
+
+
 async def _list_jellyfin_users(base_url: str, api_key: str) -> list[dict[str, Any]]:
     async with httpx.AsyncClient(
         base_url=base_url.rstrip("/"),

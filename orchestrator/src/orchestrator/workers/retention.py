@@ -14,9 +14,14 @@ from orchestrator.core.retention.disk_pressure import (
     select_for_boost,
 )
 from orchestrator.core.retention.executor import run_executor_tick
-from orchestrator.core.retention.jellyfin_sync import sync_all_users
+from orchestrator.core.retention.jellyfin_sync import (
+    _list_jellyfin_users,
+    fetch_user_items_index,
+    sync_all_users,
+)
 from orchestrator.core.retention.lookahead import run_lookahead_tick
 from orchestrator.core.retention.planner import run_planner_tick
+from orchestrator.core.retention.resolver import resolve_and_enrich
 from orchestrator.core.retention.settings import RetentionSettings, load_retention_settings
 from orchestrator.db.models import History, Item, Setting
 from orchestrator.db.session import get_engine
@@ -101,6 +106,33 @@ async def retention_plan_tick() -> None:
             radarr_key=s.radarr_api_key or "",
             keep_tag_label=settings.retention_arr_keep_tag,
         )
+        # Resolve Jellyfin item IDs → orchestrator Item rows. Without this the
+        # planner's eligibility gate (which requires Item.jellyfin_item_id)
+        # can never trip in production. Wrapped so a Jellyfin outage doesn't
+        # kill the whole tick — planner still runs with whatever mappings
+        # already exist.
+        if s.jellyfin_api_key:
+            try:
+                users = await _list_jellyfin_users(
+                    s.jellyfin_url, s.jellyfin_api_key
+                )
+                include = set(settings.retention_user_ids_include or [])
+                exclude = set(settings.retention_user_ids_exclude or [])
+                candidate = next(
+                    (
+                        u for u in users
+                        if (not include or u["Id"] in include)
+                        and u["Id"] not in exclude
+                    ),
+                    None,
+                )
+                if candidate is not None:
+                    jf_index = await fetch_user_items_index(
+                        s.jellyfin_url, s.jellyfin_api_key, candidate["Id"]
+                    )
+                    resolve_and_enrich(get_engine(), snap, jf_items_by_id=jf_index)
+            except Exception as e:
+                log.warning("retention.plan_tick.resolve_failed", err=str(e))
         # Planner classifies items + emits PendingDeletion on 2nd consecutive tick.
         run_planner_tick(get_engine(), settings, now=now)
         # Look-ahead nudges Sonarr to grab the next N unwatched episodes.

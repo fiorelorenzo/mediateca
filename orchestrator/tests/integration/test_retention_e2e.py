@@ -126,6 +126,69 @@ async def test_hls_bundle_is_wiped_when_executor_runs(tmp_path) -> None:
     ), f"unmonitor must precede delete_episode_file, got {method_order}"
 
 
+def test_planner_promotes_eligible_via_user_watch_only_no_hand_seeding() -> None:
+    """A single ``UserWatch`` row should be enough to drive the planner — no
+    manual ``Item.jellyfin_item_id`` or ``SeriesEngagement`` priming. Catches
+    both the resolver-not-called and SeriesEngagement-not-populated wiring
+    gaps.
+    """
+    from orchestrator.core.retention.arr_catalog import (
+        CatalogSnapshot,
+        EpisodeRec,
+        SeriesRec,
+    )
+    from orchestrator.core.retention.resolver import resolve_and_enrich
+
+    eng = _eng()
+    long_ago = datetime.now(UTC) - timedelta(days=15)
+    with Session(eng) as s:
+        # Episode in library with NO jellyfin_item_id — resolver's job to set it.
+        ep = Item(
+            source=ItemSource.SONARR, source_id=999, series_id=1,
+            title="S1E5", status=ItemStatus.PROMOTED,
+            season=1, episode=5, size_bytes=1000,
+        )
+        s.add(ep)
+        s.commit()
+        s.refresh(ep)
+        # UserWatch row keyed to "jf-ep-1-5"; no link to the Item yet.
+        s.add(UserWatch(
+            jellyfin_user_id="u1", jellyfin_item_id="jf-ep-1-5",
+            played=True, last_played_at=long_ago, synced_at=datetime.now(UTC),
+        ))
+        s.commit()
+
+    snap = CatalogSnapshot(series=[
+        SeriesRec(id=1, title="X", tvdb_id=99, path="/", keep_tagged=False,
+                  episodes=[EpisodeRec(id=5005, season=1, episode=5, has_file=True,
+                                       episode_file_id=100, monitored=True)])
+    ])
+    jf_items = {
+        "jf-ep-1-5": {
+            "Tvdb": "99",
+            "Type": "Episode",
+            "ParentIndexNumber": 1,
+            "IndexNumber": 5,
+            "ProviderIds": {"Tvdb": "99"},
+        },
+    }
+    summary = resolve_and_enrich(eng, snap, jf_items_by_id=jf_items)
+    assert summary.new_mappings == 1
+
+    settings = RetentionSettings(
+        retention_dry_run=False, series_ttl_days=7, series_grace_days=3,
+        series_bait_first_n=0,  # disable bait so S01E05 is eligible
+    )
+    run_planner_tick(eng, settings, now=datetime.now(UTC))
+    run_planner_tick(eng, settings, now=datetime.now(UTC) + timedelta(minutes=31))
+
+    with Session(eng) as s:
+        assert len(s.exec(select(SeriesEngagement)).all()) == 1, \
+            "SeriesEngagement should be populated by planner"
+        pd = s.exec(select(PendingDeletion)).all()
+        assert len(pd) == 1, "Anti-flap should produce one PendingDeletion"
+
+
 @pytest.mark.asyncio
 async def test_lookahead_skips_during_encode_in_flight() -> None:
     from orchestrator.core.retention.arr_catalog import (

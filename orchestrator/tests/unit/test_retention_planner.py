@@ -56,14 +56,15 @@ def test_bait_protection_first_n_of_season_one() -> None:
         # S01E05 -- not bait if N=3
         ep5 = _seed_episode(s, 1, 1, 5)
         ten_days_ago = _now() - timedelta(days=10)
-        # both watched by 1 active user
+        # E05 watched slightly later than E01 so the planner's UserWatch →
+        # SeriesEngagement aggregator deterministically picks E05 as the
+        # user's latest position (matching the test's intent — the user has
+        # progressed to E05, putting it past the lookahead window).
         s.add(UserWatch(jellyfin_user_id="u1", jellyfin_item_id=ep1.jellyfin_item_id,
                         played=True, last_played_at=ten_days_ago, synced_at=_now()))
         s.add(UserWatch(jellyfin_user_id="u1", jellyfin_item_id=ep5.jellyfin_item_id,
-                        played=True, last_played_at=ten_days_ago, synced_at=_now()))
-        s.add(SeriesEngagement(series_source_id=1, jellyfin_user_id="u1",
-                               last_activity_at=ten_days_ago, last_played_season=1,
-                               last_played_episode=5, updated_at=_now()))
+                        played=True, last_played_at=ten_days_ago + timedelta(hours=1),
+                        synced_at=_now()))
         s.commit()
     settings = RetentionSettings(series_bait_first_n=3, series_ttl_days=7)
     run_planner_tick(eng, settings, now=_now())
