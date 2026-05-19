@@ -87,7 +87,7 @@ export default function PipelineOverviewPage() {
       />
       <StageCard
         title="Available"
-        href="/library"
+        href="/pipeline/available"
         primary={{ value: data.available.total, label: "titles" }}
         secondary={[{ label: "Watched", value: data.available.watched }]}
       />
