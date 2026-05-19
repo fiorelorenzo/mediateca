@@ -842,13 +842,31 @@ async def _merge_into_existing(
 
 
 async def _unmonitor_in_arr(item: Item) -> None:
-    """Tell Sonarr/Radarr to stop monitoring this file. Best-effort."""
+    """Tell Sonarr/Radarr to stop monitoring this file. Best-effort.
+
+    `Item.source_id` is the *parent* id (episodeId for Sonarr, movieId for
+    Radarr), not the file id. The delete endpoints want episodeFileId /
+    movieFileId, so resolve those first — same pattern as
+    `api.items.delete_item_files`. Skip cleanly if the lookup yields no
+    file id.
+    """
     s = get_settings()
     try:
         if item.source == ItemSource.SONARR:
             client = SonarrClient(s.sonarr_url, s.sonarr_api_key)
-            await client.delete_episode_file(item.source_id)
+            series_id = item.series_id or 0
+            if not series_id:
+                return
+            episodes = await client.list_episodes(series_id)
+            target = next((ep for ep in episodes if ep.get("id") == item.source_id), None)
+            episode_file_id = (target or {}).get("episodeFileId") or 0
+            if episode_file_id:
+                await client.delete_episode_file(episode_file_id)
         else:
-            await RadarrClient(s.radarr_url, s.radarr_api_key).delete_movie_file(item.source_id)
+            radarr = RadarrClient(s.radarr_url, s.radarr_api_key)
+            movie = await radarr.get_movie(item.source_id)
+            movie_file_id = ((movie or {}).get("movieFile") or {}).get("id")
+            if movie_file_id:
+                await radarr.delete_movie_file(movie_file_id)
     except Exception:  # noqa: BLE001
         log.warning("unmonitor.failed", item_id=item.id)
