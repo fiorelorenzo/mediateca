@@ -32,7 +32,10 @@ function relativeTime(isoString: string): string {
   const diff = Math.floor((Date.now() - new Date(isoString).getTime()) / 1000);
   if (diff < 60) return `${diff}s ago`;
   if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`;
+  // Beyond a week, show an absolute date (e.g., "Oct 12"); year omitted to stay compact.
+  return new Date(isoString).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
 const MAX_FEED = 20;
