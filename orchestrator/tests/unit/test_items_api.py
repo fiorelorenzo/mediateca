@@ -1,15 +1,22 @@
 # orchestrator/tests/unit/test_items_api.py
 import httpx
+import pytest
 import respx
 from fastapi.testclient import TestClient
-from sqlmodel import Session
+from sqlalchemy.pool import StaticPool
+from sqlmodel import Session, SQLModel, create_engine
 
 from orchestrator.api.items import delete_item_files
 from orchestrator.app import app
 from orchestrator.config import Settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.encoder_client import HlsEncoderClient
-from orchestrator.db.models import Item, ItemSource, ItemStatus
+from orchestrator.core.retention.models import (  # noqa: F401  # register tables
+    PendingDeletion,
+    RetentionState,
+    UserWatch,
+)
+from orchestrator.db.models import History, Item, ItemSource, ItemStatus
 from orchestrator.db.session import get_engine, init_schema
 
 H = {"Authorization": "Bearer test-admin-token"}
@@ -260,3 +267,91 @@ async def test_delete_item_files_sonarr_no_episode_file_skips_delete() -> None:
 
     assert result.get("sonarr_file_skipped") == "no episodeFileId"
     assert "sonarr_file_deleted" not in result
+
+
+# ── lifecycle aggregator ──────────────────────────────────────────────────
+# Isolated client fixture (mirrors test_retention_api.py): a fresh in-memory
+# SQLite engine via StaticPool, swapped into session_mod so every caller
+# (including FastAPI's get_session dep) sees the same DB.
+
+
+@pytest.fixture
+def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    eng = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+    SQLModel.metadata.create_all(eng)
+    import orchestrator.db.session as session_mod
+
+    monkeypatch.setattr(session_mod, "_engine", eng, raising=False)
+    return TestClient(app)
+
+
+def test_lifecycle_endpoint_aggregates_history_and_retention(
+    client: TestClient,
+) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    eng = get_engine()
+    with Session(eng) as s:
+        item = Item(
+            source=ItemSource.RADARR,
+            source_id=1,
+            title="M",
+            status=ItemStatus.PROMOTED,
+            jellyfin_item_id="jf-1",
+        )
+        s.add(item)
+        s.commit()
+        s.refresh(item)
+        s.add(
+            History(
+                item_id=item.id,  # type: ignore[arg-type]
+                event="REQUESTED",
+                created_at=datetime.now(UTC) - timedelta(days=5),
+            )
+        )
+        s.add(
+            History(
+                item_id=item.id,  # type: ignore[arg-type]
+                event="PROMOTED",
+                created_at=datetime.now(UTC) - timedelta(days=4),
+            )
+        )
+        s.add(
+            UserWatch(
+                jellyfin_user_id="u1",
+                jellyfin_item_id="jf-1",
+                played=True,
+                last_played_at=datetime.now(UTC) - timedelta(days=1),
+                synced_at=datetime.now(UTC),
+            )
+        )
+        s.add(
+            RetentionState(
+                item_id=item.id,  # type: ignore[arg-type]
+                classification="eligible",
+                reason="ttl_expired",
+                updated_at=datetime.now(UTC),
+            )
+        )
+        s.commit()
+        iid = item.id
+
+    r = client.get(f"/api/items/{iid}/lifecycle", headers=H)
+    assert r.status_code == 200
+    body = r.json()
+    stage_names = [stg["stage"] for stg in body["stages"]]
+    assert "requested" in stage_names
+    assert "available" in stage_names
+    assert "watched" in stage_names
+    assert "eligible" in stage_names
+    assert body["item_id"] == iid
+    assert body["current"] == "eligible"
+
+
+def test_lifecycle_endpoint_404_for_unknown_item(client: TestClient) -> None:
+    r = client.get("/api/items/999999/lifecycle", headers=H)
+    assert r.status_code == 404

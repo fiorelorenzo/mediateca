@@ -443,3 +443,100 @@ def search_now(item_id: int, session: Session = Depends(get_session)) -> dict[st
     session.commit()
     session.refresh(item)
     return item.model_dump()
+
+
+# Lifecycle aggregator: a single endpoint that folds History + UserWatch +
+# RetentionState into an ordered list of stages so the admin UI can render
+# a title's journey (requested → acquired → … → deleted) without N round-trips.
+# Imports for retention models are local to keep that module optional.
+_LIFECYCLE_EVENT_TO_STAGE = {
+    "REQUESTED": "requested",
+    "GRABBED": "acquired",
+    "IMPORTED": "processing",
+    "PROMOTED": "available",
+    "ENCODE_DONE": "available",
+}
+
+
+@router.get("/{item_id}/lifecycle")
+def get_item_lifecycle(
+    item_id: int, session: Session = Depends(get_session)
+) -> dict[str, Any]:
+    from orchestrator.core.retention.models import (
+        PendingDeletion,
+        RetentionState,
+        UserWatch,
+    )
+
+    item = session.get(Item, item_id)
+    if item is None:
+        raise HTTPException(404, "item not found")
+
+    hist = session.exec(
+        select(History)
+        .where(History.item_id == item_id)
+        .order_by(History.created_at.asc())  # type: ignore[attr-defined]
+    ).all()
+
+    stages: list[dict[str, Any]] = []
+    seen_stages: set[str] = set()
+    for h in hist:
+        stage = _LIFECYCLE_EVENT_TO_STAGE.get(h.event)
+        if stage and stage not in seen_stages:
+            stages.append({"stage": stage, "at": h.created_at.isoformat()})
+            seen_stages.add(stage)
+
+    # Watched: aggregate per-user playback so the UI can show "3/5 users".
+    if item.jellyfin_item_id:
+        watches = session.exec(
+            select(UserWatch).where(
+                UserWatch.jellyfin_item_id == item.jellyfin_item_id
+            )
+        ).all()
+        played = [w for w in watches if w.played and w.last_played_at]
+        if played:
+            latest = max(w.last_played_at for w in played if w.last_played_at)
+            stages.append({
+                "stage": "watched",
+                "at": latest.isoformat(),
+                "detail": f"{len(played)}/{len(watches)} users",
+            })
+
+    rs = session.get(RetentionState, item_id)
+    next_action: dict[str, Any] | None = None
+    if rs:
+        if rs.classification == "eligible":
+            at = (
+                rs.eligible_since.isoformat()
+                if rs.eligible_since
+                else rs.updated_at.isoformat()
+            )
+            stages.append({"stage": "eligible", "at": at, "detail": rs.reason})
+        elif rs.classification == "pending_delete":
+            pd = session.exec(
+                select(PendingDeletion).where(
+                    PendingDeletion.item_id == item_id,
+                    PendingDeletion.executed_at.is_(None),  # type: ignore[union-attr]
+                    PendingDeletion.cancelled_at.is_(None),  # type: ignore[union-attr]
+                )
+            ).first()
+            if pd:
+                stages.append(
+                    {"stage": "pending_delete", "at": pd.proposed_at.isoformat()}
+                )
+                next_action = {
+                    "kind": "delete_after",
+                    "at": pd.delete_after.isoformat(),
+                }
+
+    deleted = next((h for h in hist if h.event == "retention.deleted"), None)
+    if deleted:
+        stages.append({"stage": "deleted", "at": deleted.created_at.isoformat()})
+
+    current = stages[-1]["stage"] if stages else "requested"
+    return {
+        "item_id": item_id,
+        "stages": stages,
+        "current": current,
+        "next_action": next_action,
+    }
