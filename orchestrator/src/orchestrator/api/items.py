@@ -16,8 +16,9 @@ from orchestrator.config import Settings, get_settings
 from orchestrator.core.arr_client import RadarrClient, SonarrClient
 from orchestrator.core.encoder_client import HlsEncoderClient
 from orchestrator.core.notify import maybe_notify_frozen
+from orchestrator.core.retention.arr_catalog import derive_bundle_path
 from orchestrator.core.state import validate_transition
-from orchestrator.db.models import History, Item, ItemStatus, Job, JobKind, JobStatus
+from orchestrator.db.models import History, Item, ItemSource, ItemStatus, Job, JobKind, JobStatus
 from orchestrator.db.session import get_session
 from orchestrator.logging_setup import get_logger
 
@@ -189,6 +190,63 @@ async def _cancel_inflight_encodes(
     return errors
 
 
+async def delete_item_files(
+    session: Session,
+    item: Item,
+    *,
+    settings: Any,
+    encoder: HlsEncoderClient,
+    sonarr: SonarrClient | None = None,
+    radarr: RadarrClient | None = None,
+    purge_torrent: bool = False,
+) -> dict[str, Any]:
+    """File-only deletion: cancels inflight encodes, removes the file via *arr,
+    cleans up HLS bundle. Does NOT touch orchestrator Item row or *arr anagrafica.
+
+    Used by:
+      - DELETE /api/items/{id} (the full delete handler wraps this + record cleanup)
+      - retention executor
+    """
+    result: dict[str, Any] = {"item_id": item.id}
+    errors = await _cancel_inflight_encodes(session, item.id, encoder)  # type: ignore[arg-type]
+    if errors:
+        result["encoder_cancel_errors"] = errors
+
+    # HLS bundle cleanup (idempotent — if no .hls dir, skip)
+    if item.library_path and item.library_path.endswith(".strm"):
+        bundle = derive_bundle_path(Path(item.library_path))
+        if bundle.exists():
+            try:
+                shutil.rmtree(bundle)
+                result["bundle_removed"] = str(bundle)
+            except OSError as e:
+                result["bundle_error"] = str(e)
+
+    if item.source == ItemSource.RADARR:
+        r = radarr or RadarrClient(settings.radarr_url, settings.radarr_api_key)
+        try:
+            await r.delete_movie_file(item.source_id)
+            result["radarr_file_deleted"] = True
+        except Exception as e:  # noqa: BLE001
+            result["radarr_error"] = str(e)
+    else:  # SONARR
+        s_client = sonarr or SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
+        # Unmonitor FIRST to prevent immediate regrab
+        try:
+            await s_client.unmonitor_episodes([item.source_id])
+            result["sonarr_unmonitored"] = True
+        except Exception as e:  # noqa: BLE001
+            result["sonarr_unmonitor_error"] = str(e)
+        try:
+            episode_file_id = item.source_id  # In sonarr Items, source_id == episodeFileId
+            await s_client.delete_episode_file(episode_file_id)
+            result["sonarr_file_deleted"] = True
+        except Exception as e:  # noqa: BLE001
+            result["sonarr_error"] = str(e)
+
+    return result
+
+
 def _staging_title_dir(item: Item, settings: Settings) -> Path | None:
     """Map item.library_path → corresponding /data/staging/<type>/<title>.
 
@@ -236,17 +294,24 @@ async def delete_item(
     encoder = HlsEncoderClient(s.hls_encoder_url)
     summary: dict[str, Any] = {"item_id": item_id, "kind": item.source}
 
-    if item.source == "radarr":
+    if item.source == ItemSource.RADARR:
         radarr = RadarrClient(s.radarr_url, s.radarr_api_key)
-        errors = await _cancel_inflight_encodes(session, item_id, encoder)
-        if errors:
-            summary["encoder_cancel_errors"] = errors
         if payload.purge_torrent:
             summary["queue_removed"] = await _purge_radarr_queue(radarr, item.source_id)
+        # File-deletion mechanics (encoder cancel + HLS bundle wipe + radarr
+        # delete_movie_file) live in delete_item_files so the retention executor
+        # can share them. Then we wipe the anagrafica entry separately.
+        if payload.delete_files:
+            file_result = await delete_item_files(
+                session, item, settings=s, encoder=encoder, radarr=radarr
+            )
+            summary.update(
+                {k: v for k, v in file_result.items() if k != "item_id"}
+            )
         try:
             await radarr.delete_movie(
                 item.source_id,
-                delete_files=payload.delete_files,
+                delete_files=False,  # files already handled above (or intentionally kept)
                 add_import_exclusion=False,
             )
             summary["radarr_deleted"] = True
