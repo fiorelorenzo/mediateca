@@ -4,6 +4,7 @@ import { HeroStats } from "./_components/hero-stats";
 import { RecentAdditions } from "./_components/recent-additions";
 import { ActiveDownloadsCard } from "./_components/active-downloads-card";
 import { PendingRequestsCard } from "./_components/pending-requests-card";
+import { RetentionWidget } from "./_components/retention-widget";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -26,9 +27,10 @@ export default function Dashboard() {
 
       <RecentAdditions />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
         <ActiveDownloadsCard />
         <PendingRequestsCard />
+        <RetentionWidget />
       </div>
 
       <EventFeed />

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { SettingsForm } from "./_components/settings-form";
+
+import { SettingsTabs } from "./_components/settings-tabs";
 
 export const metadata: Metadata = { title: "Settings" };
 
@@ -12,7 +13,7 @@ export default function SettingsPage() {
           Runtime configuration. Stored in the orchestrator DB.
         </p>
       </div>
-      <SettingsForm />
+      <SettingsTabs />
     </div>
   );
 }

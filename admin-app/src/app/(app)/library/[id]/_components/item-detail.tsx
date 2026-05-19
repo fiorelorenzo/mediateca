@@ -29,6 +29,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { LifecycleStrip } from "@/components/retention/lifecycle-strip";
 import { useRelativeTime } from "@/lib/hooks/use-relative-time";
 import {
   arrBackdrop,
@@ -143,6 +144,8 @@ export function ItemDetail({ item, history, domain }: ItemDetailProps) {
       </div>
 
       <Hero item={item} meta={meta.data} loading={meta.isLoading} isMovie={isMovie} />
+
+      <LifecycleStrip itemId={item.id} />
 
       <Card>
         <CardContent className="flex flex-wrap items-center gap-2 p-3">
