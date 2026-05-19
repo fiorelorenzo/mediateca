@@ -95,7 +95,7 @@ export function startMock(port = 4567) {
         // its cards (and the links they wrap) without seeded fixtures.
         res.end(
           JSON.stringify({
-            request: { open_jellyseerr: 0, wanted_arr: 0 },
+            request: { open_seerr: 0, wanted_arr: 0 },
             acquire: { searching: 0, downloading: 0 },
             process: { encoding: 0, merging: 0, analyzing: 0 },
             available: { total: 0, watched: 0 },

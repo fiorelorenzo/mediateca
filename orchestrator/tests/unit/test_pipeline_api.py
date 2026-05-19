@@ -41,7 +41,7 @@ def test_pipeline_overview_empty_db_returns_zeros(client: TestClient) -> None:
     assert r.status_code == 200
     body = r.json()
     assert body == {
-        "request": {"open_jellyseerr": 0, "wanted_arr": 0},
+        "request": {"open_seerr": 0, "wanted_arr": 0},
         "acquire": {"searching": 0, "downloading": 0},
         "process": {"encoding": 0, "merging": 0, "analyzing": 0},
         "available": {"total": 0, "watched": 0},

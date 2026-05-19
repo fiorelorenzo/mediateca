@@ -2,7 +2,7 @@
 
 Aggregates per-stage counters across the ingest → process → retain pipeline.
 Counters owned by the orchestrator come from its own tables; counters that
-live in upstream services (Jellyseerr requests, *arr search/grab queue,
+live in upstream services (Seerr requests, *arr search/grab queue,
 qBittorrent active transfers) are returned as ``0`` placeholders for now —
 those will be filled in once the dedicated service proxies are wired up.
 """
@@ -95,7 +95,7 @@ def overview(session: Session = Depends(get_session)) -> dict[str, Any]:
     reclaimed = sum((h.detail or {}).get("size_bytes", 0) or 0 for h in recent)
 
     return {
-        "request": {"open_jellyseerr": 0, "wanted_arr": 0},
+        "request": {"open_seerr": 0, "wanted_arr": 0},
         "acquire": {"searching": 0, "downloading": 0},
         "process": {
             "encoding": encoding,
