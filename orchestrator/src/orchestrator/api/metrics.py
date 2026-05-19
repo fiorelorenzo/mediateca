@@ -6,6 +6,7 @@ import threading
 import time
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
+from typing import TypedDict
 
 from fastapi import APIRouter
 
@@ -13,6 +14,29 @@ from orchestrator.api.auth import require_admin_token
 from orchestrator.core.docker_client import client as docker_client
 
 router = APIRouter(prefix="/api/metrics", tags=["metrics"], dependencies=[require_admin_token])
+
+
+class DiskUsage(TypedDict):
+    total: int
+    used: int
+    free: int
+    free_pct: float
+
+
+def read_disk_usage(path: str = "/data") -> DiskUsage:
+    """Return disk usage for ``path`` as a typed dict.
+
+    Shared by ``/api/metrics/system`` and the retention disk_pressure module
+    so both observe the same numbers — keeping them in lockstep avoids the
+    UI and the executor disagreeing about whether the volume is "full".
+    """
+    u = shutil.disk_usage(path)
+    return {
+        "total": u.total,
+        "used": u.used,
+        "free": u.free,
+        "free_pct": round(u.free / u.total * 100, 2) if u.total else 0.0,
+    }
 
 # Server-side load-avg ring buffer. The sampler thread (started on app
 # lifespan) appends one entry every ~5 seconds. The history is returned
@@ -80,7 +104,7 @@ def stop_load_sampler() -> None:
 def system() -> dict[str, object]:
     load = _read_loadavg()
     mem = _read_meminfo()
-    disk = shutil.disk_usage("/data")
+    disk = read_disk_usage("/data")
     cpu_count = os.cpu_count() or 1
     with _load_history_lock:
         history = list(_load_history)
@@ -91,7 +115,7 @@ def system() -> dict[str, object]:
             "total_kb": mem.get("MemTotal", 0),
             "available_kb": mem.get("MemAvailable", 0),
         },
-        "disk_data": {"total": disk.total, "used": disk.used, "free": disk.free},
+        "disk_data": {"total": disk["total"], "used": disk["used"], "free": disk["free"]},
         "load_history": history,
     }
 
