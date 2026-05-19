@@ -30,6 +30,12 @@ async def test_snapshot_collects_sonarr_series_with_episodes() -> None:
              "episodeFileId": 0, "monitored": True},
         ])
     )
+    respx.get("http://sonarr/api/v3/episodefile", params={"seriesId": "1"}).mock(
+        return_value=Response(200, json=[
+            {"id": 100, "size": 1_500_000_000},
+            {"id": 101, "size": 900_000_000},  # belongs to a different episode, ignored
+        ])
+    )
     respx.get("http://radarr/api/v3/movie").mock(return_value=Response(200, json=[]))
     respx.get("http://radarr/api/v3/tag").mock(return_value=Response(200, json=[]))
 
@@ -45,7 +51,9 @@ async def test_snapshot_collects_sonarr_series_with_episodes() -> None:
     assert s.keep_tagged is True
     assert len(s.episodes) == 2
     assert s.episodes[0].has_file is True
+    assert s.episodes[0].size_bytes == 1_500_000_000
     assert s.episodes[1].has_file is False
+    assert s.episodes[1].size_bytes is None
 
 
 @respx.mock

@@ -103,14 +103,31 @@ def _maybe_update_size(item: Item, snap: CatalogSnapshot) -> bool:
             return True
         return False
 
+    # Sonarr classic-mode: size_bytes comes from the EpisodeRec, which the
+    # catalog populates via Sonarr's /api/v3/episodefile endpoint. Match the
+    # item to its episode by (series_id, season, episode).
+    if item.source == ItemSource.SONARR:
+        series_id = item.series_id or item.source_id
+        series = next((s for s in snap.series if s.id == series_id), None)
+        if series is not None and item.season is not None and item.episode is not None:
+            ep = next(
+                (
+                    e
+                    for e in series.episodes
+                    if e.season == item.season and e.episode == item.episode
+                ),
+                None,
+            )
+            if ep and ep.size_bytes is not None and ep.size_bytes != item.size_bytes:
+                item.size_bytes = ep.size_bytes
+                return True
+        return False
+
     if item.source == ItemSource.RADARR:
         movie = next((m for m in snap.movies if m.id == item.source_id), None)
         if movie and movie.size_bytes is not None and item.size_bytes != movie.size_bytes:
             item.size_bytes = movie.size_bytes
             return True
-    # Sonarr classic-mode size_bytes isn't trivially derivable from the EpisodeRec
-    # (Sonarr's episodefile is reached via list_episodes which doesn't include size).
-    # Left for a future enrichment if needed.
     return False
 
 

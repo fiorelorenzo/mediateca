@@ -71,6 +71,10 @@ async def _fetch_sonarr(sonarr: SonarrClient, keep_label: str) -> list[SeriesRec
     for s in series_raw:
         sid = int(s["id"])
         eps_raw = await sonarr.list_episodes(sid)
+        ep_files_raw = await sonarr.list_episode_files(sid)
+        size_by_file_id = {
+            int(ef["id"]): int(ef.get("size", 0)) for ef in ep_files_raw if ef.get("id")
+        }
         eps = [
             EpisodeRec(
                 id=int(e["id"]),
@@ -79,6 +83,11 @@ async def _fetch_sonarr(sonarr: SonarrClient, keep_label: str) -> list[SeriesRec
                 has_file=bool(e.get("hasFile")),
                 episode_file_id=int(e["episodeFileId"]) if e.get("episodeFileId") else None,
                 monitored=bool(e.get("monitored")),
+                size_bytes=(
+                    size_by_file_id.get(int(e["episodeFileId"]))
+                    if e.get("episodeFileId")
+                    else None
+                ),
             )
             for e in eps_raw
         ]

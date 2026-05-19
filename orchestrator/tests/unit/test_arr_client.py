@@ -160,3 +160,22 @@ async def test_monitor_episodes_noop_on_empty() -> None:
     client = SonarrClient("http://sonarr", "key")
     await client.monitor_episodes([])
     assert not route.called
+
+
+@respx.mock
+async def test_sonarr_list_episode_files_returns_rows_with_sizes() -> None:
+    route = respx.get("http://sonarr:8989/api/v3/episodefile").mock(
+        return_value=httpx.Response(
+            200,
+            json=[
+                {"id": 11, "seriesId": 7, "size": 1_500_000_000},
+                {"id": 12, "seriesId": 7, "size": 900_000_000},
+            ],
+        )
+    )
+    c = SonarrClient(base_url="http://sonarr:8989", api_key="k")
+    rows = await c.list_episode_files(7)
+    assert route.called
+    assert route.calls.last.request.url.params["seriesId"] == "7"
+    assert [r["id"] for r in rows] == [11, 12]
+    assert rows[0]["size"] == 1_500_000_000

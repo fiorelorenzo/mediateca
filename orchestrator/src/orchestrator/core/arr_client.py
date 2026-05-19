@@ -60,6 +60,14 @@ class SonarrClient(_ArrClient):
                 return []
             return cast(list[dict[str, Any]], r.json())
 
+    async def list_episode_files(self, series_id: int) -> list[dict[str, Any]]:
+        """All episodefile rows for a series, including size."""
+        async with await self._client() as c:
+            r = await c.get("/api/v3/episodefile", params={"seriesId": series_id})
+            r.raise_for_status()
+            result: list[dict[str, Any]] = r.json()
+            return result
+
     async def delete_series(
         self,
         series_id: int,
