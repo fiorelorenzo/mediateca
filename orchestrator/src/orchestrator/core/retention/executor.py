@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, overload
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
+from orchestrator.core.retention._time import as_utc
 from orchestrator.core.retention.models import PendingDeletion, RetentionState
 from orchestrator.core.retention.settings import RetentionSettings
 from orchestrator.db.models import History, Item
@@ -25,20 +26,6 @@ class ExecutorSummary:
 
 
 DeleteFilesFn = Callable[[Item], Awaitable[dict[str, Any]]]
-
-
-@overload
-def _as_utc(dt: datetime) -> datetime: ...
-@overload
-def _as_utc(dt: None) -> None: ...
-def _as_utc(dt: datetime | None) -> datetime | None:
-    """SQLite drops tzinfo on round-trip, so we treat naive datetimes as UTC
-    before comparing them with tz-aware ``now``."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
 
 
 async def run_executor_tick(
@@ -60,7 +47,7 @@ async def run_executor_tick(
         ).all()
         # Filter by delete_after in Python so SQLite's tz-naive storage doesn't
         # break the comparison (matches the pattern used by planner.py).
-        due = [pd for pd in rows if _as_utc(pd.delete_after) <= now]
+        due = [pd for pd in rows if as_utc(pd.delete_after) <= now]
         for pd in due:
             if (summary.executed + summary.cancelled_stale + summary.errors) >= cap:
                 break

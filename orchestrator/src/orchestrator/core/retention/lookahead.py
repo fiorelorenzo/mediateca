@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
+from orchestrator.core.retention._time import as_utc
 from orchestrator.core.retention.arr_catalog import CatalogSnapshot, EpisodeRec
 from orchestrator.core.retention.models import RefetchAttempt, SeriesEngagement
 from orchestrator.core.retention.settings import RetentionSettings
@@ -42,11 +43,6 @@ def _has_inflight_encode_for_ep(s: Session, series_id: int, season: int, ep: int
         )
     ).all()
     return bool(rows)
-
-
-def _as_utc(dt: datetime) -> datetime:
-    """SQLite drops tzinfo on round-trip; treat naive datetimes as UTC."""
-    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 def _is_after(season_a: int, ep_a: int, season_b: int, ep_b: int) -> bool:
@@ -105,7 +101,7 @@ async def run_lookahead_tick(
                     summary.skipped_inflight_encode += 1
                     continue
                 existing = s.get(RefetchAttempt, (series.id, ep.season, ep.episode))
-                if existing and (now - _as_utc(existing.last_attempt_at)) < interval:
+                if existing and (now - as_utc(existing.last_attempt_at)) < interval:
                     summary.skipped_recent += 1
                     continue
                 to_search.append(ep_id)

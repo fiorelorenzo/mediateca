@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import overload
 
 from sqlalchemy.engine import Engine
 from sqlmodel import Session, select
 
+from orchestrator.core.retention._time import as_utc
 from orchestrator.core.retention.models import (
     KeepUntil,
     PendingDeletion,
@@ -22,20 +22,6 @@ log = get_logger(__name__)
 
 
 _BLOCKED_STATUSES = {ItemStatus.FAILED, ItemStatus.FROZEN_AS_IS, ItemStatus.POLICY_OVERRIDDEN}
-
-
-@overload
-def _as_utc(dt: datetime) -> datetime: ...
-@overload
-def _as_utc(dt: None) -> None: ...
-def _as_utc(dt: datetime | None) -> datetime | None:
-    """SQLite drops tzinfo on round-trip, so we treat naive datetimes as UTC
-    before comparing them with tz-aware ``now``."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=UTC)
-    return dt
 
 
 @dataclass
@@ -108,7 +94,7 @@ def _classify_episode(
 
     # 2. Pin temp
     ku = session.get(KeepUntil, item.id)
-    if ku and _as_utc(ku.until) > now:
+    if ku and as_utc(ku.until) > now:
         return "protected_pin_temp", None
 
     # 3. Favorite — respect Jellyfin favorites if enabled
@@ -160,7 +146,7 @@ def _classify_episode(
         )
         if watches and all(w.played for w in watches):
             last = max(
-                (_as_utc(w.last_played_at) for w in watches if w.last_played_at),
+                (as_utc(w.last_played_at) for w in watches if w.last_played_at),
                 default=None,
             )
             if last is not None and (now - last).days >= settings.series_ttl_days:
@@ -182,7 +168,7 @@ def _classify_movie(
         return "keep", "no_eligibility_yet:inflight_encode"
 
     ku = session.get(KeepUntil, item.id)
-    if ku and _as_utc(ku.until) > now:
+    if ku and as_utc(ku.until) > now:
         return "protected_pin_temp", None
 
     if settings.retention_respect_jellyfin_favorites and item.jellyfin_item_id:
@@ -203,7 +189,7 @@ def _classify_movie(
         )
         if watches and all(w.played for w in watches):
             last = max(
-                (_as_utc(w.last_played_at) for w in watches if w.last_played_at),
+                (as_utc(w.last_played_at) for w in watches if w.last_played_at),
                 default=None,
             )
             if last is not None and (now - last).days >= settings.movie_ttl_days:
@@ -284,12 +270,12 @@ def _update_series_engagement(session: Session, now: datetime) -> int:
                 continue
             sorted_watches = sorted(
                 relevant,
-                key=lambda w: _as_utc(w.last_played_at)
+                key=lambda w: as_utc(w.last_played_at)
                 or datetime.min.replace(tzinfo=UTC),
                 reverse=True,
             )
             latest = sorted_watches[0]
-            last_activity = _as_utc(latest.last_played_at) or now
+            last_activity = as_utc(latest.last_played_at) or now
             last_ep = ep_map.get(latest.jellyfin_item_id)
             last_season = last_ep.season if last_ep else None
             last_episode_num = last_ep.episode if last_ep else None
@@ -350,7 +336,7 @@ def run_planner_tick(
                 cls, reason = _classify_movie(item, s, settings, now)
 
             rs = s.get(RetentionState, item.id)
-            prev_eligible_since = _as_utc(rs.eligible_since) if rs else None
+            prev_eligible_since = as_utc(rs.eligible_since) if rs else None
             last_watched: datetime | None = None
             if item.jellyfin_item_id:
                 lp = s.exec(
@@ -358,7 +344,7 @@ def run_planner_tick(
                         UserWatch.jellyfin_item_id == item.jellyfin_item_id
                     )
                 ).all()
-                last_watched = max((_as_utc(d) for d in lp if d), default=None)
+                last_watched = max((as_utc(d) for d in lp if d), default=None)
             score = _score(item, cls, last_watched, now)
 
             # Anti-flap promotion gate
