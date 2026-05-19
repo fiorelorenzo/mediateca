@@ -15,7 +15,7 @@ export function StageCard({ title, href, primary, secondary, accent = "default" 
     <Link
       href={href}
       className={cn(
-        "block rounded-lg border bg-card p-4 transition hover:bg-accent",
+        "flex h-full flex-col rounded-lg border bg-card p-4 transition hover:bg-accent",
         accent === "warn" && "border-amber-400/40",
         accent === "danger" && "border-red-400/40",
       )}
