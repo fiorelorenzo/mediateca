@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from orchestrator.core.retention.models import (
@@ -181,3 +182,63 @@ def test_skips_items_not_in_promoted_status() -> None:
         rs = s.exec(select(RetentionState)).one()
         assert rs.classification == "keep"
         assert "no_eligibility_yet" in (rs.reason or "")
+
+
+def test_score_for_eligible_episode_excludes_movie_bonus() -> None:
+    """Spec §5 step 3: score = age*1 + size_gb*0.5 + 10 + (5 if movie)."""
+    eng = _eng()
+    with Session(eng) as s:
+        ep = _seed_episode(s, 1, 1, 5)
+        # Set size to 2 GiB → size_gb = 2.0
+        ep.size_bytes = 2 * 1024 ** 3
+        s.add(ep)
+        long_ago = _now() - timedelta(days=10)
+        s.add(UserWatch(jellyfin_user_id="u1", jellyfin_item_id=ep.jellyfin_item_id,
+                        played=True, last_played_at=long_ago, synced_at=_now()))
+        s.commit()
+    run_planner_tick(eng, RetentionSettings(series_ttl_days=7), now=_now())
+    with Session(eng) as s:
+        rs = s.exec(select(RetentionState)).one()
+        # age=10, size_gb=2.0 → 10*1 + 2*0.5 + 10 = 21.0 (no movie bonus)
+        assert rs.score == pytest.approx(21.0, rel=0.01)
+
+
+def test_score_for_eligible_movie_includes_movie_bonus() -> None:
+    eng = _eng()
+    with Session(eng) as s:
+        m = Item(source=ItemSource.RADARR, source_id=1, title="M",
+                 status=ItemStatus.PROMOTED, size_bytes=2 * 1024 ** 3,
+                 jellyfin_item_id="jf-m")
+        s.add(m)
+        s.commit()
+        s.refresh(m)
+        long_ago = _now() - timedelta(days=10)
+        s.add(UserWatch(jellyfin_user_id="u1", jellyfin_item_id="jf-m",
+                        played=True, last_played_at=long_ago, synced_at=_now()))
+        s.commit()
+    run_planner_tick(eng, RetentionSettings(movie_ttl_days=7), now=_now())
+    with Session(eng) as s:
+        rs = s.exec(select(RetentionState)).one()
+        # age=10, size_gb=2.0 → 10 + 1 + 10 + 5 = 26.0
+        assert rs.score == pytest.approx(26.0, rel=0.01)
+
+
+def test_movie_eligibility_end_to_end() -> None:
+    """Coverage gap: classify_movie was never tested end-to-end."""
+    eng = _eng()
+    with Session(eng) as s:
+        m = Item(source=ItemSource.RADARR, source_id=1, title="M",
+                 status=ItemStatus.PROMOTED, jellyfin_item_id="jf-m",
+                 size_bytes=1000)
+        s.add(m)
+        s.commit()
+        s.refresh(m)
+        long_ago = _now() - timedelta(days=20)
+        s.add(UserWatch(jellyfin_user_id="u1", jellyfin_item_id="jf-m",
+                        played=True, last_played_at=long_ago, synced_at=_now()))
+        s.commit()
+    run_planner_tick(eng, RetentionSettings(movie_ttl_days=10), now=_now())
+    with Session(eng) as s:
+        rs = s.exec(select(RetentionState)).one()
+        assert rs.classification == "eligible"
+        assert rs.reason == "dry_run"  # default settings: dry_run=True

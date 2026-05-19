@@ -44,8 +44,10 @@ class PlannerSummary:
     eligible: int = 0
     promoted_to_pending: int = 0
     protected_pin_temp: int = 0
+    protected_favorite: int = 0
     protected_bait: int = 0
     protected_lookahead: int = 0
+    pending_delete: int = 0
     keep: int = 0
 
 
@@ -215,11 +217,22 @@ def _score(
     last_watched: datetime | None,
     now: datetime,
 ) -> float:
+    """Spec §5 step 3:
+        score = age_days * 1.0
+              + size_gb * 0.5
+              + (10 if not in lookahead else 0)
+              + (5 if movie else 0)
+
+    Only eligible items get a non-zero score. The cascade order in
+    `_classify_*` guarantees that anything reaching `eligible` is not in
+    lookahead, so the `+10` baseline always applies here.
+    """
     if classification != "eligible":
         return 0.0
     age_days = (now - last_watched).days if last_watched else 0
     size_gb = (item.size_bytes or 0) / (1024 ** 3)
-    return age_days * 1.0 + size_gb * 0.5 + 5.0  # +5 baseline (movie/eligible weight)
+    movie_bonus = 5.0 if item.source == ItemSource.RADARR else 0.0
+    return age_days * 1.0 + size_gb * 0.5 + 10.0 + movie_bonus
 
 
 def run_planner_tick(
@@ -238,7 +251,10 @@ def run_planner_tick(
             if it.season is not None and it.episode is not None:
                 series_ep_map.setdefault(sid, []).append((it.season, it.episode))
 
-        items = s.exec(select(Item)).all()
+        # Deterministic ordering for reproducible logs (spec §5).
+        items = s.exec(
+            select(Item).order_by(Item.series_id, Item.season, Item.episode, Item.id)  # type: ignore[arg-type]
+        ).all()
         for item in items:
             assert item.id is not None
             summary.items_evaluated += 1
@@ -331,6 +347,10 @@ def run_planner_tick(
                 summary.protected_lookahead += 1
             elif new_classification == "protected_pin_temp":
                 summary.protected_pin_temp += 1
+            elif new_classification == "protected_favorite":
+                summary.protected_favorite += 1
+            elif new_classification == "pending_delete":
+                summary.pending_delete += 1
             else:
                 summary.keep += 1
 
