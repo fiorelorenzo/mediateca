@@ -88,6 +88,7 @@ async def test_sync_user_paginates_until_total_reached() -> None:
     eng = _engine()
     res = await sync_user("http://jf", "key", "u1", engine=eng, page_size=2)
     assert res.rows_upserted == 3
+    assert res.pages == 2
 
 
 @respx.mock

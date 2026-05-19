@@ -5,14 +5,14 @@ from datetime import UTC, datetime
 from typing import Any
 
 import httpx
-import structlog
 from sqlalchemy.engine import Engine
 from sqlmodel import Session
 
 from orchestrator.core.retention.models import UserWatch
 from orchestrator.db.session import get_engine
+from orchestrator.logging_setup import get_logger
 
-log = structlog.get_logger(__name__)
+log = get_logger(__name__)
 
 
 @dataclass
