@@ -138,3 +138,25 @@ async def test_sonarr_command_search_episode() -> None:
     body = route.calls.last.request.content
     assert b"EpisodeSearch" in body
     assert b"10" in body and b"11" in body
+
+
+@respx.mock
+async def test_monitor_episodes_calls_episode_monitor_endpoint() -> None:
+    route = respx.put("http://sonarr/api/v3/episode/monitor").mock(
+        return_value=httpx.Response(202, json={})
+    )
+    client = SonarrClient("http://sonarr", "key")
+    await client.monitor_episodes([1, 2, 3])
+    assert route.called
+    call = route.calls.last
+    body = call.request.read()
+    assert b'"monitored": true' in body or b'"monitored":true' in body
+    assert b"1" in body and b"2" in body and b"3" in body
+
+
+@respx.mock
+async def test_monitor_episodes_noop_on_empty() -> None:
+    route = respx.put("http://sonarr/api/v3/episode/monitor")
+    client = SonarrClient("http://sonarr", "key")
+    await client.monitor_episodes([])
+    assert not route.called

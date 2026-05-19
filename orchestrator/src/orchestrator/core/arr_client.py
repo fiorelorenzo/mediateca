@@ -129,6 +129,19 @@ class SonarrClient(_ArrClient):
             )
             r.raise_for_status()
 
+    async def monitor_episodes(self, episode_ids: list[int]) -> None:
+        """Re-monitor episodes (inverse of unmonitor_episodes). Used by retention
+        look-ahead when an episode that was previously unmonitored after cleanup
+        needs to be re-grabbed."""
+        if not episode_ids:
+            return
+        async with await self._client() as c:
+            r = await c.put(
+                "/api/v3/episode/monitor",
+                json={"episodeIds": episode_ids, "monitored": True},
+            )
+            r.raise_for_status()
+
     async def get_episode_file(self, episode_file_id: int) -> dict[str, Any] | None:
         async with await self._client() as c:
             r = await c.get(f"/api/v3/episodefile/{episode_file_id}")
