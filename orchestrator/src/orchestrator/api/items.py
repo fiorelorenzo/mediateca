@@ -194,7 +194,7 @@ async def delete_item_files(
     session: Session,
     item: Item,
     *,
-    settings: Any,
+    settings: Settings,
     encoder: HlsEncoderClient,
     sonarr: SonarrClient | None = None,
     radarr: RadarrClient | None = None,
@@ -206,6 +206,11 @@ async def delete_item_files(
     Used by:
       - DELETE /api/items/{id} (the full delete handler wraps this + record cleanup)
       - retention executor
+
+    Note on *arr id semantics — `Item.source_id` is the *parent* id, not the
+    file id (see workers/webhook_inbox.py): for Radarr it's the movieId, for
+    Sonarr it's the episodeId. The file-delete endpoints want movieFileId /
+    episodeFileId, so we resolve those via a lookup first.
     """
     result: dict[str, Any] = {"item_id": item.id}
     errors = await _cancel_inflight_encodes(session, item.id, encoder)  # type: ignore[arg-type]
@@ -225,24 +230,42 @@ async def delete_item_files(
     if item.source == ItemSource.RADARR:
         r = radarr or RadarrClient(settings.radarr_url, settings.radarr_api_key)
         try:
-            await r.delete_movie_file(item.source_id)
-            result["radarr_file_deleted"] = True
+            movie = await r.get_movie(item.source_id)
+            movie_file_id = ((movie or {}).get("movieFile") or {}).get("id")
+            if movie_file_id:
+                await r.delete_movie_file(movie_file_id)
+                result["radarr_file_deleted"] = True
+            else:
+                result["radarr_file_skipped"] = "no movieFile.id"
         except Exception as e:  # noqa: BLE001
             result["radarr_error"] = str(e)
     else:  # SONARR
         s_client = sonarr or SonarrClient(settings.sonarr_url, settings.sonarr_api_key)
-        # Unmonitor FIRST to prevent immediate regrab
+        # Unmonitor FIRST to prevent immediate regrab. source_id IS episode_id,
+        # which is what /api/v3/episode/monitor expects — this call is correct.
         try:
             await s_client.unmonitor_episodes([item.source_id])
             result["sonarr_unmonitored"] = True
         except Exception as e:  # noqa: BLE001
             result["sonarr_unmonitor_error"] = str(e)
-        try:
-            episode_file_id = item.source_id  # In sonarr Items, source_id == episodeFileId
-            await s_client.delete_episode_file(episode_file_id)
-            result["sonarr_file_deleted"] = True
-        except Exception as e:  # noqa: BLE001
-            result["sonarr_error"] = str(e)
+        # Resolve episodeFileId via Sonarr (source_id is episodeId, not fileId).
+        series_id = item.series_id or 0
+        if series_id:
+            try:
+                episodes = await s_client.list_episodes(series_id)
+                target = next(
+                    (ep for ep in episodes if ep.get("id") == item.source_id), None
+                )
+                episode_file_id = (target or {}).get("episodeFileId") or 0
+                if episode_file_id:
+                    await s_client.delete_episode_file(episode_file_id)
+                    result["sonarr_file_deleted"] = True
+                else:
+                    result["sonarr_file_skipped"] = "no episodeFileId"
+            except Exception as e:  # noqa: BLE001
+                result["sonarr_error"] = str(e)
+        else:
+            result["sonarr_skipped"] = "no series_id"
 
     return result
 
