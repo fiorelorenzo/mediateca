@@ -33,6 +33,27 @@ DEFAULTS: dict[str, object] = {
     # Trigger Jellyfin + Seerr scans the instant a file lands in the library
     # instead of waiting for their scheduled jobs. See core/scanners.py.
     "auto_scan_on_promote": True,
+    "retention_enabled": False,
+    "retention_dry_run": True,
+    "movie_ttl_days": 10,
+    "movie_grace_days": 3,
+    "series_ttl_days": 7,
+    "series_grace_days": 3,
+    "series_bait_first_n": 3,
+    "series_lookahead_n": 3,
+    "series_engagement_window_days": 30,
+    "disk_pressure_target_free_pct": 20,
+    "disk_pressure_critical_free_pct": 10,
+    "disk_pressure_grace_days": 0,
+    "retention_user_ids_include": [],
+    "retention_user_ids_exclude": [],
+    "retention_arr_keep_tag": "keep",
+    "retention_respect_jellyfin_favorites": True,
+    "retention_max_deletes_per_day": 50,
+    "retention_max_deletes_per_tick": 20,
+    "retention_stale_watch_max_hours": 6,
+    "retention_refetch_max_attempts": 5,
+    "retention_refetch_min_interval_hours": 12,
 }
 
 

@@ -22,3 +22,39 @@ merge_offset_safe_ms: 100.0
 # Audio offset (ms) above which the merge is rejected (likely different cuts/framerates).
 # Must be greater than merge_offset_safe_ms.
 merge_offset_reject_ms: 2000.0
+
+# ── Retention ─────────────────────────────────────────────────────
+# Disk-pressure-aware retention engine. Off by default.
+# Once enabled, starts in dry-run mode — change retention_dry_run to
+# false to start producing real deletions (with grace period).
+retention_enabled: false
+retention_dry_run: true
+
+# TTL after Jellyfin marks Played (≥90% by default).
+movie_ttl_days: 10
+movie_grace_days: 3
+series_ttl_days: 7
+series_grace_days: 3
+
+# Series-specific safety net.
+series_bait_first_n: 3            # first N S01 episodes always protected
+series_lookahead_n: 3             # episodes ahead of each active viewer
+series_engagement_window_days: 30
+
+# Disk pressure boost.
+disk_pressure_target_free_pct: 20
+disk_pressure_critical_free_pct: 10
+disk_pressure_grace_days: 0
+
+# Participant scoping.
+retention_user_ids_include: []     # empty = all active Jellyfin users
+retention_user_ids_exclude: []
+retention_arr_keep_tag: keep
+retention_respect_jellyfin_favorites: true
+
+# Circuit breakers.
+retention_max_deletes_per_day: 50
+retention_max_deletes_per_tick: 20
+retention_stale_watch_max_hours: 6
+retention_refetch_max_attempts: 5
+retention_refetch_min_interval_hours: 12
