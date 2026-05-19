@@ -18,9 +18,9 @@ import { Logo } from "@/components/icons/logo";
 const items = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/requests", label: "Requests", icon: Inbox },
-  { href: "/downloads", label: "Downloads", icon: Download },
-  { href: "/processing", label: "Processing", icon: Cog },
+  { href: "/pipeline/request", label: "Request", icon: Inbox },
+  { href: "/pipeline/acquire", label: "Acquire", icon: Download },
+  { href: "/pipeline/process", label: "Process", icon: Cog },
   { href: "/server", label: "Server", icon: Server },
   { href: "/services", label: "Services", icon: Layers },
   { href: "/logs", label: "Logs", icon: ScrollText },

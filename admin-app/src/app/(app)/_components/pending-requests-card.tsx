@@ -37,7 +37,7 @@ export function PendingRequestsCard() {
           Pending requests
         </CardTitle>
         <Link
-          href="/requests"
+          href="/pipeline/request"
           className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs transition"
         >
           Review all

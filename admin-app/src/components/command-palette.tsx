@@ -30,8 +30,8 @@ import { toast } from "sonner";
 const PAGES = [
   { href: "/", label: "Dashboard", icon: Home },
   { href: "/library", label: "Library", icon: Library },
-  { href: "/requests", label: "Requests", icon: Inbox },
-  { href: "/downloads", label: "Downloads", icon: Download },
+  { href: "/pipeline/request", label: "Request", icon: Inbox },
+  { href: "/pipeline/acquire", label: "Acquire", icon: Download },
   { href: "/server", label: "Server", icon: Server },
   { href: "/services", label: "Services", icon: Layers },
   { href: "/settings", label: "Settings", icon: Settings },

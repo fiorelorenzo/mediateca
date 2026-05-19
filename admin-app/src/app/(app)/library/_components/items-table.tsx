@@ -211,7 +211,7 @@ export function ItemsTable() {
       api.listItems({
         // ALL really means "everything that's settled" — items in transient
         // pipeline states (ANALYZING/MERGING/PROMOTING/ENCODING) live in
-        // /processing, not here, otherwise the same row would appear in two
+        // /pipeline/process, not here, otherwise the same row would appear in two
         // places at once. Limit is bumped because series rows aggregate
         // across all their episodes; a 50-show library with 8 episodes each
         // is already 400 items pre-aggregation.
