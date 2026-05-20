@@ -46,6 +46,7 @@ required**, smooth playback even from mobile networks.
 - [Live TV via Dispatcharr](#live-tv-via-dispatcharr)
 - [Indexer proxy on a home node](#indexer-proxy-on-a-home-node)
 - [Maintenance](#maintenance)
+  - [Retention](#retention)
   - [Routine](#routine)
   - [Backup](#backup)
   - [Notifications](#notifications)
@@ -131,14 +132,12 @@ docker compose up -d
 | --- | --- |
 | **Dashboard** | Hero stats (movies, series, library size, active downloads, pending requests), recently-added poster strip, top active downloads + pending requests cards, 7-day stacked area chart, live event feed |
 | **Library** | One row per title (a series collapses its N episodes into a single row) with poster, year, runtime, quality, total file size, audio union, worst-case status + `N/M promoted` subline for series. Search + status filter + sortable columns (cycle asc → desc → off on every header, default title asc). Clicking a row routes to the right detail page. |
-| **Movie detail** (`/library/[id]`) | Hero with TMDB metadata, action bar (search-now, accept-as-is, override per-item language policy, delete with file-on-disk + cancel-torrent toggles), pipeline state card, full timeline with state icons + action toasts. |
+| **Movie detail** (`/library/[id]`) | Hero with TMDB metadata, action bar (search-now, accept-as-is, override per-item language policy, delete with file-on-disk + cancel-torrent toggles), pipeline state card, full timeline with state icons + action toasts. Also renders a `<LifecycleStrip>` showing the title's full lifecycle (requested → acquired → processing → available → watched → eligible → pending_delete → deleted) when retention metadata is available. |
 | **Series detail** (`/library/series/[seriesId]`) | Hero with Sonarr metadata + summary badges (promoted / incomplete / failed / on-disk / total size). Action bar: "Search N stuck episodes" (fan-out search-now across every INCOMPLETE/FAILED/PENDING episode) and delete (full-series confirm + partial mode with per-episode checkboxes inside a collapsible season tree). One card per season — Specials pinned last — with every episode showing SxxExx, title, air date, audio chips, and either the orchestrator status or Missing / Not aired / Untracked. |
-| **Requests** | Cards with TMDB poster, year, runtime, rating, overview clamp; request status (pending / approved / declined) + media status (pending / processing / partial / available) shown as separate colored pills, plus 4K badge. Filter chips with live counts. Approve / decline inline + deep link to Seerr. |
-| **Downloads** | Real-time qBit-overlayed Sonarr + Radarr queue. Top summary cards (in queue, downloaded, remaining, overall %, total ↓ speed). Per-row poster, indexer, protocol, download client, ETA, error message inline; series rows carry a `SxxExx` chip (or range / "N episodes" for season packs) so multi-episode grabs don't look identical. Sortable columns (title, type, indexer, status, progress, ETA) with asc → desc → off cycle, default progress desc. Quick actions: remove and remove + blocklist. Polled every 3 s with qBittorrent's live progress (avoids the *arr-side ~60 s repoll lag). |
-| **Processing** | Items currently moving through the orchestrator pipeline — ANALYZING, MERGING, PROMOTING, ENCODING. Cards with poster, current state animated chip, audio detected so far, time-in-state, link to detail. SSE-live on `item.*` events; once a row settles it leaves this page and shows up in Library. |
+| **Pipeline** (`/pipeline`) | Operational view of the ingestion lifecycle. Horizontal strip of 5 stage cards (Request → Acquire → Process → Available → Retain) with live counts and per-stage drilldowns. Below: a "Deleted (last 30 days)" archive link and a live event feed. Sub-pages: **Request** (Seerr open requests + *arr wanted), **Acquire** (qBittorrent + *arr queue), **Process** (orchestrator items in ANALYZING/MERGING/ENCODING/PROMOTING), **Available** (PROMOTED items, admin lens), **Retain** (eligible + in-grace proposals with undo/delete-now/keep-30d), **Deleted** (audit of retention cleanups with re-acquire), **Blocked** (FAILED / FROZEN_AS_IS / POLICY_OVERRIDDEN / unresolved disk-pressure). A `<BlockedBanner>` is always present (green "Pipeline clear" or red "N items need attention"). |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
 | **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
-| **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio), auto-scan-on-promote toggle (nudge Jellyfin + Seerr the moment a file lands instead of waiting for their scheduled jobs). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). |
+| **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio), auto-scan-on-promote toggle (nudge Jellyfin + Seerr the moment a file lands instead of waiting for their scheduled jobs). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). A second **Retention** tab exposes the retention engine configuration: enable/dry-run toggles, per-source TTL/grace periods, series bait + look-ahead window, engagement window, disk-pressure thresholds, participant include/exclude lists, *arr immunity tag, circuit breakers. |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
 | **Logs** | Real-time SSE multiplex of Docker container logs: virtualized rows, ANSI color, filter regex, pause with drop counter, autoscroll, save-to-file, expand/collapse on long lines, per-line copy button. The orchestrator's own container is excluded to prevent a feedback loop. |
@@ -231,6 +230,20 @@ The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire i
 | `POST` | `/api/items/{id}/override-policy` | Set per-item audio language override |
 | `POST` | `/api/items/{id}/search-now` | Trigger *arr search for a new release |
 | `DELETE` | `/api/items/{id}` | Wipe across the stack: cancel any in-flight HLS encode (`DELETE` on the encoder side), cancel the torrent (qBit via *arr queue), delete movie/series + files in *arr, `rmtree` the matching `/data/staging/<type>/<title>` so unpromoted leftovers don't survive, drop the orchestrator row (FK `ON DELETE CASCADE` reaps the related `jobs` and `history` rows). Body opts: `delete_files`, `purge_torrent`, `seasons[]`/`episode_ids[]` (partial-series mode keeps the series, only nukes targeted files; optional `unmonitor`). |
+| `GET` | `/api/items/{id}/lifecycle` | Aggregated lifecycle for one item: ordered stages + next action (used by `<LifecycleStrip>`). |
+| `GET` | `/api/pipeline/overview` | Per-stage counts for the Pipeline overview page (request / acquire / process / available / retain / deleted). |
+| `GET` | `/api/retention/overview` | Retention dashboard payload: enabled/dry-run flags, disk usage + pressure level, counts (eligible, in-grace, protected_bait, protected_lookahead, deleted_30d, reclaimed_bytes_30d). |
+| `GET` | `/api/retention/proposals` | List of open `PendingDeletion` rows with item context (title, S/E, reason, proposed_at, delete_after, size). |
+| `GET` | `/api/retention/items/{id}` | `RetentionState` snapshot for one item (classification + reason + score). |
+| `POST` | `/api/retention/pending/{id}/cancel` | Undo a pending deletion (sets `cancelled_at`). Planner reclassifies on next tick. |
+| `POST` | `/api/retention/pending/{id}/execute_now` | Force the executor to act on a pending deletion at next apply tick (skips remaining grace). |
+| `POST` | `/api/retention/items/{id}/keep` | Pin an item for N days (1..365). Body: `{"days": 30}`. Creates/updates `KeepUntil`. |
+| `DELETE` | `/api/retention/items/{id}/keep` | Remove a temporary pin. |
+| `GET` | `/api/retention/settings` | Read all retention settings as a typed payload. |
+| `PUT` | `/api/retention/settings` | Update one or more retention settings (only whitelisted keys are persisted). |
+| `POST` | `/api/retention/dry_run/preview` | Synchronous preview of what the planner would do (no writes). |
+| `GET` | `/api/retention/history` | History rows filtered to `retention.*` events (most-recent first, capped at 500). |
+| `GET` | `/api/retention/blocked` | Items in FAILED/FROZEN_AS_IS/POLICY_OVERRIDDEN. Pass `?summary=true` for `{count: N}` only. |
 | `GET` | `/api/settings` | Read runtime settings |
 | `PUT` | `/api/settings` | Update runtime settings (HLS toggle, thresholds, …) |
 | `GET` | `/api/metrics/system` | CPU load, memory, disk + 1-hour load history ring buffer |
@@ -255,7 +268,7 @@ The orchestrator (`orchestrator/`) is a FastAPI service that drives the entire i
 - `/api/logs/stream` spawns one Docker SDK watcher thread per requested container and multiplexes their output into a single SSE stream. The orchestrator's own container is excluded via `SELF_CONTAINER_BLOCKLIST` to prevent a feedback loop (each SSE payload would be logged, which would trigger another SSE event, and so on).
 - Merge safety pre-checks (before mkvmerge): release group parity, duration difference, and audio cross-correlation offset. Thresholds are runtime-configurable via `/api/settings` and the admin app Settings page.
 - **Audio sync correction**: when cross-correlation detects an offset between existing and addition above the safety threshold (default ~50 ms), the merge command emits one `--sync TID:OFFSET` *per audio track ID* of the addition. The TIDs are discovered with `mkvmerge --identify --identification-format json`; hard-coding TID 0 would target the (dropped-by-`--no-video`) video track and the sync would be silently lost. The cross-correlation sign convention: positive offset means addition LEADS existing, so the same value handed verbatim to mkvmerge delays the addition track into alignment.
-- **Background scheduler jobs** (apscheduler): `inbox_tick` (15 s — drains the webhook_inbox table), `catch_up_tick` (15 min — re-searches INCOMPLETE items, clearing stale *arr file tracking first so the next grab isn't blocked by an upgrade-spec rejection), `encode_jobs_tick` (1 min — dispatches HLS jobs), `orphan_bak_tick` (1 h — sweeps any leftover `*.bak` under `media_root` so a rare CIFS write-cache miss can't leave a 12 GB ghost on disk).
+- **Background scheduler jobs** (apscheduler): `inbox_tick` (15 s — drains the webhook_inbox table), `catch_up_tick` (15 min — re-searches INCOMPLETE items, clearing stale *arr file tracking first so the next grab isn't blocked by an upgrade-spec rejection), `encode_jobs_tick` (1 min — dispatches HLS jobs), `orphan_bak_tick` (1 h — sweeps any leftover `*.bak` under `media_root` so a rare CIFS write-cache miss can't leave a 12 GB ghost on disk). When the retention engine is enabled, three more jobs run: `retention_sync_tick` (15 min — pulls Jellyfin `UserData` into `user_watch`), `retention_plan_tick` (30 min — snapshots Sonarr/Radarr, resolves `jellyfin_item_id` per `Item`, updates `series_engagement`, runs the classification cascade, then emits look-ahead `monitor_episodes` + `episode_search` for missing windows), `retention_apply_tick` (60 min — measures disk pressure, optionally promotes top-N eligible items to `pending_delete` with grace=0, then runs the executor on due `PendingDeletion` rows; soft circuit-breaker disables the engine if it would exceed `retention_max_deletes_per_day`).
 - **Reconcile on boot**: cross-references DB items against the disk. Items in `PROMOTED` or `INCOMPLETE` whose `library_path` no longer exists transition to `FAILED` (and fire the configured FAILED notifications). `.mkv` files found under `media_root` that no DB row tracks are inserted as `LEGACY` rows — visible in the library as a "Not Found" pseudo-series so they're easy to spot and clean up. Reconcile runs **only at boot** today, so a long uptime can let "library file vanished" events accumulate silently and arrive en-masse the next time the orchestrator is restarted.
 - **Discard-or-adopt safeguard** (`_discard_or_adopt` in `core/pipeline.py`): when the merge-rejected and no-new-tracks branches need to unlink a redundant new download, they first check whether `library_path` still exists. If it doesn't — typically because Sonarr's "Upgrade Existing" import deleted the prior file before webhooking us — the new file is the only surviving copy and is adopted as the new `library_path` instead of being unlinked. Without this, an upgrade-search for an item missing audio could end with both files deleted (Sonarr removed the old, the orchestrator then removed the new) and the next reconcile flipping the item to `FAILED`.
 - **Cascade delete and FK enforcement** (orchestrator SQLite): `History.item_id` and `Job.item_id` both carry `ON DELETE CASCADE`, and the engine sets `PRAGMA foreign_keys=ON` on every connection. Deleting an item drops its history and any queued/running job rows with it — no orphans, no stale encode jobs trying to write to a vanishing `library_path`. Backed by migration `0002_cascade_item_fks` (SQLite needs full table rebuild, data preserved).
@@ -1320,6 +1333,73 @@ via the API:
 curl -X POST https://orchestrator.<DOMAIN>/api/recyclarr/sync \
   -H "Authorization: Bearer $ADMIN_API_TOKEN"
 ```
+
+### Retention
+
+A disk-pressure-aware cleanup engine that deletes already-watched titles
+after a TTL, while protecting bait episodes and pre-fetching the next ones
+viewers are about to need. **Off by default** — turn it on from
+`https://admin.<DOMAIN>/settings#retention`.
+
+**4-phase rollout (recommended):**
+
+1. **Discovery (≥7 days)** — `retention_enabled=true`, `retention_dry_run=true`.
+   The planner classifies items (`eligible`, `protected_bait`,
+   `protected_lookahead`, …) and writes `retention_state` rows, but never
+   creates `pending_deletion` rows. Watch what would have been cleaned up via
+   `/pipeline/retain` and the SSE feed.
+2. **Live ristretta (≥14 days)** — turn dry-run off, but bump grace days to
+   ~14 and leave disk pressure disabled (`disk_pressure_target_free_pct=0`).
+   Deletions happen but with a long undo window. Use this phase to catch any
+   "I needed that" surprises.
+3. **Normal cadence** — drop grace back to defaults (3 days), enable
+   disk-pressure (target 20% free, critical 10%).
+4. **Tuning** — adjust `series_bait_first_n`, `series_lookahead_n`,
+   `series_engagement_window_days`, and per-source TTLs based on what you
+   observed.
+
+**Conceptual model:**
+
+- **Watched** = Jellyfin `Played=true` (the ~90% threshold Jellyfin uses
+  natively). Half-watched titles never qualify.
+- **Active participant** = a Jellyfin user who interacted with the series
+  within the last `series_engagement_window_days` days. Lookahead protection
+  is gated on this set; TTL eligibility is not (so a once-engaged viewer who
+  abandons doesn't keep a title alive forever).
+- **Bait** = first N episodes of S01 (default N=3) — always protected so a
+  new viewer can start the series.
+- **Lookahead** = next N episodes (default N=3) after each active viewer's
+  last-played position — always protected, and proactively re-fetched if
+  missing (via Sonarr `episode_search` after `monitor_episodes`).
+- **Eligible** = all `UserWatch` rows for the item have `played=true` AND
+  `now - max(last_played_at) ≥ ttl_days`. If no one has ever opened the
+  item, it stays `keep` — never auto-deleted.
+- **Pin** = a Sonarr/Radarr tag (default name `keep`), a Jellyfin Favorite
+  (per user), or a temporary 30-day pin from the admin app — any of these
+  override classification.
+
+**Anti-flap & grace:** an item becomes `eligible` for at least two
+consecutive planner ticks (gap ≥ `retention_anti_flap_min_minutes`, default
+15) before promoting to `pending_delete` with a grace timer (3 days
+default). During grace the row is visible in `/pipeline/retain` "In grace"
+tab with a live countdown and Undo/Delete-now/Keep-30d actions.
+
+**Disk pressure:** the apply tick measures free space and classifies as
+`normal` / `warn` / `critical`. Under `critical` the executor selects the
+top-scoring eligible items (`age × 1 + size_gb × 0.5 + 10 + 5 if movie`) and
+promotes them to `pending_delete` with grace=0 — they're deleted on the
+same tick. `PROTECTED_*` items are never violated even under disk pressure.
+
+**HLS integration:** in HLS mode the source `.mkv` is already gone after
+encoding (per `HLS_ABR_DESIGN.md`). The retention executor reuses
+`api/items.delete_item_files()` which removes both the `.<stem>.hls/`
+bundle and the `.strm` (via *arr `delete_episode_file`/`delete_movie_file`),
+in the right order to avoid Sonarr instantly re-grabbing the title.
+
+**Troubleshooting:** `GET /api/retention/items/{id}` returns a JSON snapshot
+of why a given title is in its current state. The dashboard widget shows
+free GB / active proposals / deletions last 30d at a glance. `GET
+/api/retention/history` is the audit log.
 
 ### Routine
 
