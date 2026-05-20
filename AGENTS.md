@@ -100,26 +100,56 @@ weaken it locally to silence errors.
 
 ```
 admin-app/src/
-  app/(app)/                # authenticated routes (dashboard, library, settings, …)
-    _components/            # dashboard widgets
+  app/(app)/                  # authenticated routes
+    _components/              # dashboard widgets (retention-widget, event-feed, …)
+    pipeline/                 # pipeline-centric admin IA — operational view
+      page.tsx                # 5-stage overview + Deleted archive + EventFeed
+      request|acquire|process|available|retain|deleted|blocked/
     library/, library/[id], library/series/[seriesId]
-    settings/, server/, logs/, downloads/, requests/, processing/, services/
+    settings/                 # tabbed (General + Retention)
+    server/, services/, logs/
   app/(auth)/login/
-  app/api/                  # Next route handlers: proxy to orchestrator + per-service passthroughs
-  components/ui/            # shadcn primitives — reuse, don't rewrite
-  lib/api/                  # typed clients (orchestrator, arrs, seerr, qbit)
-  lib/hooks/                # use-events, use-relative-time, …
+  app/api/                    # Next route handlers: /api/proxy/* to orchestrator
+  components/ui/              # shadcn primitives — reuse, don't rewrite
+  components/pipeline/        # StageCard, TimelineHeader, PipelineTable, BlockedBanner
+  components/retention/       # LifecycleStrip, DiskPressureBanner, ProposalsTable, RetentionForm
+  lib/api/                    # typed clients (orchestrator, arrs, seerr, qbit, retention)
+  lib/hooks/                  # use-events (handles retention.* + item.* SSE), use-relative-time
 
 orchestrator/src/orchestrator/
-  api/                      # FastAPI routers
-  core/                     # business logic (policy, merge, promotion, retries)
-  db/                       # SQLAlchemy models + repos
-  workers/                  # APScheduler jobs (inbox_tick, catch_up_tick, encode_jobs_tick, orphan_bak_tick)
-  alembic/versions/         # migrations (Alembic runs on container boot)
+  api/                        # FastAPI routers: items, settings, services, events, logs,
+                              # metrics, custom_formats, notifications, recyclarr,
+                              # retention (NEW), pipeline (NEW)
+  core/                       # business logic
+    policy.py, merger.py, …   # ingestion pipeline
+    retention/                # NEW: jellyfin_sync, arr_catalog, resolver, planner,
+                              # lookahead, executor, disk_pressure, settings, models, _time
+  db/                         # SQLModel models + Setting key/value table
+  workers/                    # APScheduler jobs (inbox, catch_up, encode_jobs, orphan_bak,
+                              # retention_sync, retention_plan, retention_apply — NEW)
+  alembic/versions/           # migrations (Alembic runs on container boot)
 
 caddy/Caddyfile             # reverse proxy + automatic HTTPS for *.${DOMAIN}
 docker-compose.yml          # the whole stack
 ```
+
+## Retention engine (quick reference)
+
+A disk-pressure-aware cleanup engine lives in `core/retention/`. **Off by
+default**, dry-run when first enabled, surfaces in admin app at
+`/settings#retention`. Worth knowing:
+
+- Three APScheduler tick jobs (`retention_sync_tick`, `retention_plan_tick`,
+  `retention_apply_tick`) run only when `retention_enabled=true`.
+- Six retention tables: `user_watch`, `series_engagement`, `retention_state`,
+  `pending_deletion`, `keep_until`, `refetch_attempt` — all migrated by
+  Alembic `0003_retention.py`.
+- The executor reuses `api/items.delete_item_files()` — HLS-aware
+  (wipes `.{stem}.hls/` bundle) and resolves correct `episodeFileId`/
+  `movieFileId` before calling *arr (don't pass `Item.source_id` to a
+  `delete_*_file` endpoint — that's an episode_id/movie_id, not a file_id).
+- Spec lives in `docs/superpowers/specs/` (gitignored) — read the source
+  for behavioural details.
 
 ## When the task is ambiguous
 
