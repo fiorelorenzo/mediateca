@@ -29,21 +29,21 @@ export function RetentionWidget() {
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
         <div>
-          <div className="text-muted-foreground">Spazio libero</div>
+          <div className="text-muted-foreground">Free space</div>
           <div className="font-mono tabular-nums">{freeGB} GB</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Proposte attive</div>
+          <div className="text-muted-foreground">Active proposals</div>
           <div className="font-mono tabular-nums">
             {data.counts.in_grace} + {data.counts.eligible}
           </div>
         </div>
         <div>
-          <div className="text-muted-foreground">Cancellati 30g</div>
+          <div className="text-muted-foreground">Deleted (30d)</div>
           <div className="font-mono tabular-nums">{data.counts.deleted_last_30d}</div>
         </div>
         <div>
-          <div className="text-muted-foreground">Recuperati 30g</div>
+          <div className="text-muted-foreground">Reclaimed (30d)</div>
           <div className="font-mono tabular-nums">{reclaimedGB} GB</div>
         </div>
       </div>

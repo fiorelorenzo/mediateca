@@ -134,14 +134,14 @@ export function RetentionForm() {
         if (!hasErrors) save.mutate(form);
       }}
     >
-      <Section title="Globale" open>
+      <Section title="Global" open>
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
             checked={form.retention_enabled}
             onChange={(e) => set("retention_enabled", e.target.checked)}
           />
-          Abilita retention
+          Enable retention
         </label>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -149,20 +149,20 @@ export function RetentionForm() {
             checked={form.retention_dry_run}
             onChange={(e) => set("retention_dry_run", e.target.checked)}
           />
-          Dry-run (consigliato per la prima settimana)
+          Dry-run (recommended for the first week)
         </label>
       </Section>
 
-      <Section title="Film">
+      <Section title="Movies">
         <NumField
-          label='TTL dopo "visto" (giorni)'
+          label='TTL after "watched" (days)'
           value={form.movie_ttl_days}
           onChange={(n) => set("movie_ttl_days", n)}
           min={1}
           error={errors.movie_ttl_days}
         />
         <NumField
-          label="Grace period (giorni)"
+          label="Grace period (days)"
           value={form.movie_grace_days}
           onChange={(n) => set("movie_grace_days", n)}
           min={0}
@@ -170,30 +170,30 @@ export function RetentionForm() {
         />
       </Section>
 
-      <Section title="Serie">
+      <Section title="Series">
         <NumField
-          label='TTL dopo "visto" (giorni)'
+          label='TTL after "watched" (days)'
           value={form.series_ttl_days}
           onChange={(n) => set("series_ttl_days", n)}
           min={1}
           error={errors.series_ttl_days}
         />
         <NumField
-          label="Grace period (giorni)"
+          label="Grace period (days)"
           value={form.series_grace_days}
           onChange={(n) => set("series_grace_days", n)}
           min={0}
           error={errors.series_grace_days}
         />
         <NumField
-          label="Episodi protetti S01"
+          label="Protected S01 episodes"
           value={form.series_bait_first_n}
           onChange={(n) => set("series_bait_first_n", n)}
           min={0}
           error={errors.series_bait_first_n}
         />
         <NumField
-          label="Look-ahead (episodi avanti)"
+          label="Look-ahead (episodes ahead)"
           value={form.series_lookahead_n}
           onChange={(n) => set("series_lookahead_n", n)}
           min={0}
@@ -201,7 +201,7 @@ export function RetentionForm() {
           error={errors.series_lookahead_n}
         />
         <NumField
-          label="Finestra partecipante attivo (giorni)"
+          label="Active participant window (days)"
           value={form.series_engagement_window_days}
           onChange={(n) => set("series_engagement_window_days", n)}
           min={1}
@@ -227,16 +227,16 @@ export function RetentionForm() {
           error={errors.disk_pressure_critical_free_pct}
         />
         <NumField
-          label="Grace ridotto sotto soglia (giorni)"
+          label="Reduced grace below threshold (days)"
           value={form.disk_pressure_grace_days}
           onChange={(n) => set("disk_pressure_grace_days", n)}
           min={0}
         />
       </Section>
 
-      <Section title="Partecipanti">
+      <Section title="Participants">
         <CsvField
-          label="Include user IDs (vuoto = tutti)"
+          label="Include user IDs (empty = all)"
           value={form.retention_user_ids_include}
           onChange={(v) => set("retention_user_ids_include", v)}
         />
@@ -251,13 +251,13 @@ export function RetentionForm() {
             checked={form.retention_respect_jellyfin_favorites}
             onChange={(e) => set("retention_respect_jellyfin_favorites", e.target.checked)}
           />
-          Rispetta Jellyfin Favorites
+          Respect Jellyfin Favorites
         </label>
       </Section>
 
       <Section title="Pin / keep">
         <label className="flex flex-col gap-1 text-sm">
-          <span>Tag *arr di immunità</span>
+          <span>*arr immunity tag</span>
           <Input
             type="text"
             value={form.retention_arr_keep_tag}
@@ -269,7 +269,7 @@ export function RetentionForm() {
 
       <Section title="Circuit breakers">
         <NumField
-          label="Max delete/giorno"
+          label="Max delete/day"
           value={form.retention_max_deletes_per_day}
           onChange={(n) => set("retention_max_deletes_per_day", n)}
           min={1}
@@ -284,10 +284,10 @@ export function RetentionForm() {
 
       <div className="flex items-center gap-2">
         <Button type="submit" disabled={hasErrors || save.isPending}>
-          Salva
+          Save
         </Button>
-        {saved ? <span className="text-xs text-emerald-500">Salvato.</span> : null}
-        {save.isError ? <span className="text-xs text-red-500">Errore nel salvataggio.</span> : null}
+        {saved ? <span className="text-xs text-emerald-500">Saved.</span> : null}
+        {save.isError ? <span className="text-xs text-red-500">Save error.</span> : null}
       </div>
     </form>
   );

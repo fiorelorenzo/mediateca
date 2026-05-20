@@ -25,8 +25,8 @@ test("dry-run: enabling retention saves without deleting", async ({ page }) => {
   await page.goto("/settings");
   await page.getByRole("tab", { name: /retention/i }).click();
 
-  // The "Globale" section is open by default and exposes both toggles.
-  const enableCheckbox = page.getByLabel(/abilita retention/i);
+  // The "Global" section is open by default and exposes both toggles.
+  const enableCheckbox = page.getByLabel(/enable retention/i);
   await expect(enableCheckbox).toBeVisible();
   const dryRunCheckbox = page.getByLabel(/dry-run/i);
   await expect(dryRunCheckbox).toBeChecked();
@@ -36,8 +36,8 @@ test("dry-run: enabling retention saves without deleting", async ({ page }) => {
   }
 
   // Save and wait for the inline confirmation.
-  await page.getByRole("button", { name: /salva/i }).click();
-  await expect(page.getByText(/^salvato\.?$/i)).toBeVisible({ timeout: 5000 });
+  await page.getByRole("button", { name: /save/i }).click();
+  await expect(page.getByText(/^saved\.?$/i)).toBeVisible({ timeout: 5000 });
 
   // History endpoint must report zero retention.deleted events while dry-run
   // is engaged. Use page.request so the admin session cookie is carried.

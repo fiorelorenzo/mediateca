@@ -117,7 +117,7 @@ export function ProposalsTable() {
                 colSpan={5}
                 className="py-6 text-center text-sm text-muted-foreground"
               >
-                Nessuna proposta attiva.
+                No active proposals.
               </TableCell>
             </TableRow>
           ) : (
