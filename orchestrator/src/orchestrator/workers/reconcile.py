@@ -44,17 +44,31 @@ def reconcile() -> list[tuple[int, str, str]]:
                     )
         # 2. Files in media/ not tracked → mark as LEGACY
         if media.exists():
-            tracked = {
-                it.library_path for it in session.exec(select(Item)).all() if it.library_path
+            all_items = session.exec(select(Item)).all()
+            tracked = {it.library_path for it in all_items if it.library_path}
+            # Defense in depth: if a LEGACY row already points at this path
+            # (e.g. a prior reconcile pass already inserted one and the
+            # pipeline absorber hasn't run yet), don't insert a second one.
+            # The real fix lives in pipeline._absorb_legacy_orphans_for_path;
+            # this just keeps us from snowballing duplicates on every boot.
+            existing_legacy_paths = {
+                it.library_path
+                for it in all_items
+                if it.status == ItemStatus.LEGACY and it.library_path
             }
             for f in media.rglob("*.mkv"):
-                if str(f) not in tracked and not f.name.startswith("."):
+                path_str = str(f)
+                if (
+                    path_str not in tracked
+                    and path_str not in existing_legacy_paths
+                    and not f.name.startswith(".")
+                ):
                     session.add(
                         Item(
                             source=ItemSource.SONARR,  # placeholder — LEGACY items aren't owned
                             source_id=0,
                             title=f.stem,
-                            library_path=str(f),
+                            library_path=path_str,
                             status=ItemStatus.LEGACY,
                         )
                     )

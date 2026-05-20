@@ -77,6 +77,41 @@ def _settings_dict(session: Session) -> dict[str, object]:
     return {s.key: json.loads(s.value) for s in session.exec(select(Setting)).all()}
 
 
+def _absorb_legacy_orphans_for_path(
+    session: Session, library_path: str, except_item_id: int | None
+) -> None:
+    """Delete every LEGACY ``Item`` whose ``library_path`` collides with the
+    canonical row that just claimed *library_path*.
+
+    Race we're closing: reconcile-on-boot sweeps ``media/`` and inserts a
+    LEGACY row for every untracked ``.mkv``. If a Sonarr/Radarr import is
+    in flight — file already on disk but the canonical Item hasn't yet been
+    assigned ``library_path`` — reconcile mistakes the canonical file for an
+    orphan and creates a duplicate LEGACY row. This helper runs every time
+    the pipeline assigns a real path to an Item, sweeping up any LEGACY
+    rivals that ended up pointing at the same file.
+
+    ``except_item_id`` guards against deleting the canonical itself (which
+    is LEGACY only in pathological tests — callers should pass the row's id
+    once it has one). Cascade FKs on ``History`` / ``Job`` clean up children.
+    """
+    orphans = session.exec(
+        select(Item).where(
+            Item.status == ItemStatus.LEGACY,
+            Item.library_path == library_path,
+            Item.id != except_item_id,
+        )
+    ).all()
+    for orphan in orphans:
+        log.info(
+            "pipeline.legacy_orphan_absorbed",
+            item_id=orphan.id,
+            library_path=library_path,
+            canonical_id=except_item_id,
+        )
+        session.delete(orphan)
+
+
 class StagingPathError(RuntimeError):
     """Raised when the inbox source file is not under a staging tree —
     something upstream (typically Sonarr/Radarr) imported directly into
@@ -305,7 +340,7 @@ async def process_item(session: Session, item: Item, source_file: Path) -> None:
             # New file adds nothing — discard it and keep item as-is.
             # Restore audio_present and status to what they were before
             # webhook_inbox clobbered them.
-            _discard_or_adopt(item, source_file, old_audio_unchanged=True)
+            _discard_or_adopt(item, source_file, old_audio_unchanged=True, session=session)
             item.audio_present = old_audio
             # Restore status: INCOMPLETE if old audio was still missing langs,
             # PROMOTED if old audio was already satisfying policy.
@@ -417,6 +452,7 @@ async def _promote_or_encode(
     target = _resolve_library_path(item, source_file, settings.media_root)
     promote(source_file, target)
     item.library_path = str(target)
+    _absorb_legacy_orphans_for_path(session, str(target), item.id)
     await _realign_arr_path(item, target)
     if item.status != ItemStatus.PROMOTED:
         validate_transition(item.status, ItemStatus.PROMOTING)
@@ -520,6 +556,7 @@ async def _mark_incomplete_and_promote(
     target = _resolve_library_path(item, source_file, settings.media_root)
     promote(source_file, target)
     item.library_path = str(target)
+    _absorb_legacy_orphans_for_path(session, str(target), item.id)
     await _realign_arr_path(item, target)
     if item.status != ItemStatus.INCOMPLETE:
         validate_transition(item.status, ItemStatus.INCOMPLETE)
@@ -543,7 +580,11 @@ async def _mark_incomplete_and_promote(
 
 
 def _discard_or_adopt(
-    item: Item, source_file: Path, *, old_audio_unchanged: bool
+    item: Item,
+    source_file: Path,
+    *,
+    old_audio_unchanged: bool,
+    session: Session | None = None,
 ) -> None:
     """Remove a redundant new download, OR adopt it as the library file
     if the old one has already vanished.
@@ -565,6 +606,10 @@ def _discard_or_adopt(
     item.audio_present (e.g. merge rejected, no-new-tracks branch). We
     don't act on it directly — it's a marker that this is a "nothing
     new added" path, used only by callers/logs.
+
+    *session* is optional so the existing test signature stays intact;
+    production callers pass it so the legacy-orphan absorber can run when
+    we re-point ``library_path`` at the adopted file.
     """
     del old_audio_unchanged  # currently informational only
     library_gone = bool(item.library_path) and not Path(item.library_path).exists()  # type: ignore[arg-type]
@@ -576,6 +621,8 @@ def _discard_or_adopt(
             new_library_path=str(source_file),
         )
         item.library_path = str(source_file)
+        if session is not None:
+            _absorb_legacy_orphans_for_path(session, str(source_file), item.id)
         return
     try:
         source_file.unlink(missing_ok=True)
@@ -609,7 +656,7 @@ def _reject_merge(
     # import deleted the old library file before this webhook fired, the
     # new file is now the only copy on disk; adopt it as library_path
     # instead of unlinking.
-    _discard_or_adopt(item, source_file, old_audio_unchanged=True)
+    _discard_or_adopt(item, source_file, old_audio_unchanged=True, session=session)
 
 
 async def _merge_into_existing(
