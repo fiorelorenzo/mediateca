@@ -79,7 +79,19 @@ Source `.mkv` is kept on disk — the encoder doesn't delete it. Lifecycle
 management belongs to the orchestrator, which only removes the source as
 part of a `DELETE /api/items/{id}` (and that delete also cancels any
 in-flight HLS job and wipes the `.hls/` bundle along with the source
-folder). `.srt` sidecar files (when present, e.g. from Bazarr or manual)
+folder).
+
+Note that lifecycle deletes are also driven by the **retention engine** when
+enabled (see the Retention section in the top-level README). The engine
+reuses the same internal helper `api/items.delete_item_files()` — HLS-aware
+(wipes the `.<stem>.hls/` bundle along with the `.strm`), correct *arr
+file-id resolution (`episodeFileId`/`movieFileId` via `list_episodes`/
+`get_movie` — never `Item.source_id` directly), and unmonitor-before-delete
+on Sonarr to prevent immediate re-grab. The retention executor is the
+production caller; `DELETE /api/items/{id}` is the manual path. Same
+mechanics, different trigger.
+
+`.srt` sidecar files (when present, e.g. from Bazarr or manual)
 live alongside the `.strm` and Jellyfin attaches them as separate
 subtitle tracks during playback.
 
