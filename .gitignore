@@ -8,11 +8,6 @@ downloads/
 caddy/data/
 caddy/config/
 
-# Headscale config.yaml is a checked-in template (no secrets); the runtime
-# data/ subtree (private keys, sqlite DB) stays ignored.
-!config/headscale/
-config/headscale/*
-!config/headscale/config.yaml
 !config/jellyfin-custom.css
 !config/streamyfin/
 !config/streamyfin/plugin-config.yml
