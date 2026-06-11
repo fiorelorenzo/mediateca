@@ -28,9 +28,6 @@ networks:
   servarr:
     driver: bridge
 
-volumes:
-  headscale-rendered:
-
 services:
   # =========================================
   # Reverse proxy + automatic HTTPS
@@ -245,12 +242,26 @@ services:
     networks:
       - servarr
 
-  # FlareSolverr is intentionally NOT in this compose. Running it on the
-  # server (whether direct or behind Gluetun) means Cloudflare sees a
-  # datacenter or VPN ASN and blocks it anyway. Instead it runs on a
-  # residential machine (Mac/Linux/Windows/Raspberry Pi) and Prowlarr
-  # reaches it over the private Tailscale/Headscale tailnet — see
-  # README "Indexer proxy on a home node" section.
+  # Cloudflare challenge solver (Camoufox-based, FlareSolverr-API
+  # compatible). Prowlarr points its FlareSolverr Indexer Proxy at
+  # http://byparr:8191. Byparr sends all browser traffic through the
+  # managed residential proxy via PROXY_* so Cloudflare sees a residential
+  # IP instead of this datacenter IP — see README "Residential proxy for
+  # indexer scraping".
+  byparr:
+    image: ghcr.io/thephaseless/byparr:latest
+    container_name: byparr
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-UTC}
+      - PROXY_SERVER=${RESIDENTIAL_PROXY_URL:-}
+      - PROXY_USERNAME=${RESIDENTIAL_PROXY_USER:-}
+      - PROXY_PASSWORD=${RESIDENTIAL_PROXY_PASS:-}
+      - LOG_LEVEL=info
+    shm_size: "1gb"
+    mem_limit: 1g
+    networks:
+      - servarr
 
   # Syncs qBittorrent's listening port with whatever NAT-PMP port Proton hands
   # out, every 60s. Reads /gluetun/forwarded_port, calls qBit WebUI API.
@@ -347,54 +358,19 @@ services:
       - CELERY_BROKER_URL=redis://localhost:6379/0
       - DISPATCHARR_LOG_LEVEL=info
       - TZ=${TZ:-UTC}
-      # Optional: route dispatcharr outbound HTTP through the home-node
-      # tinyproxy on the tailnet for IT geo-locked sources (RaiPlay,
-      # Mediaset). Leave unset for sources that work from datacenter IP.
-      # - HTTP_PROXY=http://100.64.0.3:8888
-      # - HTTPS_PROXY=http://100.64.0.3:8888
-      # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
+      # Optional: route dispatcharr outbound HTTP through a dedicated
+      # Italian VPS/VPN for IT geo-locked sources (RaiPlay, Mediaset).
+      # NOT the residential indexer proxy — IPTV streams are far too heavy
+      # for a metered proxy. Leave unset for sources that work from the
+      # datacenter IP. See README Dispatcharr section.
+      # - HTTP_PROXY=http://<it-vps-ip>:8888
+      # - HTTPS_PROXY=http://<it-vps-ip>:8888
+      # - NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,gluetun,seerr-inject,hls-encoder,localhost
     volumes:
       - ./config/dispatcharr:/data
     networks:
       - servarr
 
-  # =========================================
-  # Headscale — self-hosted Tailscale coordination server.
-  # The VPS host (and remote nodes like Mac/Pi) join this tailnet via the
-  # official Tailscale client pointed at https://headscale.${DOMAIN}.
-  # Used to route Prowlarr's indexer scraping through a residential IP at
-  # home (Cloudflare/datacenter blocks bypass).
-  #
-  # The official headscale image is distroless (no shell, no envsubst), so
-  # the config template is rendered by a one-shot init container that
-  # writes the resolved YAML to a shared named volume.
-  # =========================================
-  headscale-init:
-    image: alpine:3
-    container_name: headscale-init
-    restart: "no"
-    command: >
-      sh -c "apk add --no-cache gettext >/dev/null &&
-             envsubst '$$DOMAIN' < /template/config.yaml.template > /rendered/config.yaml"
-    environment:
-      - DOMAIN=${DOMAIN}
-    volumes:
-      - ./config/headscale/config.yaml.template:/template/config.yaml.template:ro
-      - headscale-rendered:/rendered
-
-  headscale:
-    image: headscale/headscale:0.26
-    container_name: headscale
-    restart: unless-stopped
-    command: serve
-    depends_on:
-      headscale-init:
-        condition: service_completed_successfully
-    volumes:
-      - headscale-rendered:/etc/headscale:ro
-      - ./config/headscale/data:/var/lib/headscale
-    networks:
-      - servarr
 
   # =========================================
   # hls-encoder — consumer-only REST service. The orchestrator calls
