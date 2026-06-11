@@ -19,7 +19,7 @@ connection.
 | Mobile / TV unified client (streaming + Live TV + requests) | [Streamyfin](https://github.com/streamyfin/streamyfin) (iOS / Android / tvOS / Android TV) + [server-side plugin](https://github.com/streamyfin/jellyfin-plugin-streamyfin) |
 | BitTorrent client | [qBittorrent](https://www.qbittorrent.org) (forced through ProtonVPN) |
 | Reverse proxy + automatic HTTPS | [Caddy](https://caddyserver.com) |
-| Self-hosted Tailscale control plane | [Headscale](https://github.com/juanfont/headscale) |
+| Cloudflare challenge solver (for indexer scraping) | [Byparr](https://github.com/ThePhaseless/Byparr) |
 | HLS adaptive-bitrate encoder (optional profile) | this repo's `hls-encoder/` |
 
 The headline feature is the **HLS pipeline**: every imported video is
@@ -44,7 +44,7 @@ required**, smooth playback even from mobile networks.
 - [HLS encoding mode](#hls-encoding-mode)
 - [Service configuration](#service-configuration)
 - [Live TV via Dispatcharr](#live-tv-via-dispatcharr)
-- [Indexer proxy on a home node](#indexer-proxy-on-a-home-node)
+- [Residential proxy for indexer scraping](#residential-proxy-for-indexer-scraping)
 - [Maintenance](#maintenance)
   - [Retention](#retention)
   - [Routine](#routine)
@@ -77,7 +77,6 @@ your `DOMAIN`:
 | `bazarr.<DOMAIN>` | Bazarr | Automatic subtitle downloads |
 | `tv.<DOMAIN>` | Dispatcharr | IPTV middleware (HDHomeRun emulator for Jellyfin Live TV) |
 | `qbit.<DOMAIN>` | qBittorrent | Torrent client (egress via ProtonVPN) |
-| `headscale.<DOMAIN>` | Headscale | Self-hosted Tailscale coordination server |
 | `hls.<DOMAIN>` | static file server | Public read-only CDN for HLS segments + master playlists (only active when HLS profile enabled) |
 | `encoder-status.<DOMAIN>` | static file server | Encoder live dashboard + `status.json` (only active when HLS profile enabled) |
 
@@ -136,7 +135,7 @@ docker compose up -d
 | **Series detail** (`/library/series/[seriesId]`) | Hero with Sonarr metadata + summary badges (promoted / incomplete / failed / on-disk / total size). Action bar: "Search N stuck episodes" (fan-out search-now across every INCOMPLETE/FAILED/PENDING episode) and delete (full-series confirm + partial mode with per-episode checkboxes inside a collapsible season tree). One card per season — Specials pinned last — with every episode showing SxxExx, title, air date, audio chips, and either the orchestrator status or Missing / Not aired / Untracked. |
 | **Pipeline** (`/pipeline`) | Operational view of the ingestion lifecycle. Horizontal strip of 5 stage cards (Request → Acquire → Process → Available → Retain) with live counts and per-stage drilldowns. Below: a "Deleted (last 30 days)" archive link and a live event feed. Sub-pages: **Request** (Seerr open requests + *arr wanted), **Acquire** (qBittorrent + *arr queue), **Process** (orchestrator items in ANALYZING/MERGING/ENCODING/PROMOTING), **Available** (PROMOTED items, admin lens), **Retain** (eligible + in-grace proposals with undo/delete-now/keep-30d), **Deleted** (audit of retention cleanups with re-acquire), **Blocked** (FAILED / FROZEN_AS_IS / POLICY_OVERRIDDEN / unresolved disk-pressure). A `<BlockedBanner>` is always present (green "Pipeline clear" or red "N items need attention"). |
 | **Server** | Half-circle gauges (CPU / Memory / Disk), 1-hour load average chart (server-side ring buffer, returned inline), sortable containers table with memory color scale |
-| **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr, Headscale |
+| **Services** | Green/red health pulse dots — probes Sonarr, Radarr, Prowlarr, Bazarr, Jellyfin, Seerr, qBittorrent, Dispatcharr |
 | **Settings** | Tabbed runtime config. **Pipeline**: required audio languages, retry interval, auto-freeze after N retries, HLS toggle, quality-upgrades toggle (opt-in: replace promoted file in place when arr grabs a better release with the same audio), auto-scan-on-promote toggle (nudge Jellyfin + Seerr the moment a file lands instead of waiting for their scheduled jobs). **Merge safety**: duration parity threshold, audio-offset safe + reject thresholds. **Notifications**: per-event toggles (FAILED / FROZEN_AS_IS) and channels CRUD — add/edit/delete/reveal/test Apprise channel URLs (Gmail, Telegram, ntfy, Discord, …). A second **Retention** tab exposes the retention engine configuration: enable/dry-run toggles, per-source TTL/grace periods, series bait + look-ahead window, engagement window, disk-pressure thresholds, participant include/exclude lists, *arr immunity tag, circuit breakers. |
 | **Settings → Custom Formats** | CRUD on stack-managed custom formats (pushed to Sonarr/Radarr by the orchestrator) |
 | **Settings → TRaSH** | Recyclarr-managed custom formats (read-only reference) + Recyclarr sync trigger |
@@ -161,18 +160,15 @@ internet ─► host ─► Caddy (TLS) ─► docker network "servarr"
                        │                    │
                        │               media/ ──► jellyfin library
                        ├── seerr / prowlarr / bazarr
-                       ├── headscale (Tailscale control plane)
+                       ├── byparr (Cloudflare solver → residential proxy)
                        └── gluetun (ProtonVPN, WireGuard)
                               │ shared netns
                               ├── qbittorrent
                               └── qb-port-manager (sidecar)
 
-  Tailscale tailnet (WireGuard P2P, encrypted)
-  ────────────────────────────────────────────
-  ├── server               100.64.0.1
-  └── home-node            100.64.0.3   (Mac / Pi at home)
-        ├── tinyproxy      :8888  (HTTP proxy → residential IP)
-        └── flaresolverr   :8191  (Cloudflare challenge solver)
+  Managed residential proxy (external, e.g. IPRoyal ISP)
+  ──────────────────────────────────────────────────────
+  └── static residential IP   ← prowlarr scraping + byparr egress
 ```
 
 `gluetun` runs the WireGuard tunnel to ProtonVPN (or any provider that
@@ -182,12 +178,14 @@ small alpine sidecar that polls `/gluetun/forwarded_port` every 60 s and
 pokes the qBit WebUI API to keep its listening port aligned with the
 provider's NAT-PMP-assigned port.
 
-`headscale` is the open-source Tailscale coordination server. The host
-joins its own tailnet via the official Tailscale client; a residential
-machine at home joins the same tailnet and runs `tinyproxy` and/or
-`flaresolverr`. Prowlarr uses those as Indexer Proxies, so scraping
-queries exit with a residential IP — bypassing both datacenter and
-commercial-VPN ASN blocklists. Torrent traffic itself stays on ProtonVPN.
+`byparr` is a Cloudflare challenge solver (Camoufox, FlareSolverr-API
+compatible) that runs on the server and routes its browser traffic
+through a managed residential proxy via `PROXY_*`. Prowlarr uses Byparr
+for Cloudflare-gated trackers and the same residential proxy as a plain
+HTTP Indexer Proxy for ASN-gated trackers, so scraping queries exit with
+a residential IP — bypassing both datacenter and commercial-VPN ASN
+blocklists. Torrent traffic itself stays on ProtonVPN. See
+[Residential proxy for indexer scraping](#residential-proxy-for-indexer-scraping).
 
 ### Filesystem layout
 
@@ -394,10 +392,12 @@ reference.
 - A **WireGuard VPN with port forwarding**. The reference is ProtonVPN
   Plus (NAT-PMP). Mullvad, AirVPN, PrivateInternetAccess all work — the
   only requirement is forwarded ports for incoming peer connections.
-- Optional: a **residential machine at home** (Mac mini, Pi, Linux box,
-  always-on PC). Used as a private indexer proxy via the Headscale
-  tailnet to bypass tracker IP/ASN blocks. Skip if you only use Usenet
-  or trackers that don't gate on IP.
+- Optional: a **managed residential / ISP proxy** subscription (e.g.
+  [IPRoyal ISP](https://iproyal.com/isp-proxies/), ~$2.40/mo for one
+  static IP). Lets Prowlarr scrape IP/ASN-gated trackers from a
+  residential IP, entirely server-side. Skip if you only use Usenet or
+  trackers that don't gate on IP. See
+  [Residential proxy for indexer scraping](#residential-proxy-for-indexer-scraping).
 
 ### On your laptop
 
@@ -567,7 +567,7 @@ Per-subdomain records work too (e.g. `A streaming → <HOST-IP>`,
 is one-click less and avoids the "I forgot to add `encoder-status`"
 trap. The full list of subdomains the stack actually serves is in the
 [Routing](#routing) table above (`streaming`, `admin`, `orchestrator`,
-`sonarr`, `radarr`, `prowlarr`, `bazarr`, `tv`, `qbit`, `headscale`,
+`sonarr`, `radarr`, `prowlarr`, `bazarr`, `tv`, `qbit`,
 `hls`, `encoder-status`).
 
 Verify against the registrar's authoritative NS, not a cached resolver
@@ -794,19 +794,19 @@ audio.
 Settings → General → Authentication = Forms, create user.
 
 Skip indexer setup until you've finished the
-[Indexer proxy on a home node](#indexer-proxy-on-a-home-node) section
-below — most public trackers will refuse direct datacenter / VPN
-connections. Once the home node is up:
+[Residential proxy for indexer scraping](#residential-proxy-for-indexer-scraping)
+section below — most public trackers will refuse direct datacenter / VPN
+connections. Once the proxy and Byparr are up:
 
 - **Settings → Indexers → Indexer Proxies → Add → Http** named
-  `home-proxy`, host = `<home-tailnet-ip>` (typically `100.64.0.3`),
-  port `8888`, tag `home-proxy`.
+  `residential`, host/port = your residential proxy, username/password =
+  your proxy credentials (leave blank if it authenticates by IP
+  allowlist), tag `residential`.
 - **Settings → Indexers → Indexer Proxies → Add → FlareSolverr** named
-  `FlareSolverr`, host = `http://<home-tailnet-ip>:8191`, tag
-  `flaresolverr`.
+  `Byparr`, host = `http://byparr:8191`, tag `flaresolverr`.
 
 Add public indexers from Indexers → Add. Tag CF-protected trackers with
-`flaresolverr`, ASN-blocked trackers with `home-proxy`. See
+`flaresolverr`, ASN-blocked trackers with `residential`. See
 [Indexer notes](#indexer-notes).
 
 Then Settings → Apps → connect Sonarr (`http://sonarr:8989`) and Radarr
@@ -959,24 +959,13 @@ Dispatcharr auto-merges channel ↔ EPG by `tvg-id` matching after import.
 Endpoints like RaiPlay's HLS feeds check geographic IP. The server is
 in a datacenter — those streams will fail.
 
-The same indexer-proxy pattern used for Prowlarr works here: route
-Dispatcharr's outbound HTTP through the home-node `tinyproxy` so requests
-exit with an Italian residential IP.
-
-In `docker-compose.yml`, uncomment the proxy env block on the dispatcharr
-service:
-
-```yaml
-- HTTP_PROXY=http://100.64.0.3:8888
-- HTTPS_PROXY=http://100.64.0.3:8888
-- NO_PROXY=jellyfin,sonarr,radarr,bazarr,seerr,prowlarr,headscale,gluetun,seerr-inject,hls-encoder,localhost
-```
-
-Replace `100.64.0.3` with your home node's tailnet IP. Then
-`docker compose up -d --force-recreate dispatcharr`.
-
-**Don't enable the proxy until you actually need IT-locked sources** —
-it adds latency to every M3U / EPG fetch and stream.
+Routing Dispatcharr through an Italian residential exit is **out of scope
+for this stack**: video streams are many GB and would blow the budget of
+a metered residential proxy (which is sized for Prowlarr's tiny scraping
+traffic, not IPTV). If you need IT-locked sources, run a dedicated Italian
+VPS/VPN as Dispatcharr's HTTP egress and point `HTTP_PROXY` / `HTTPS_PROXY`
+on the `dispatcharr` service at it (commented example in
+`docker-compose.yml`).
 
 ### 4 — Wire Dispatcharr to Jellyfin
 
@@ -1108,190 +1097,94 @@ risks DMCA / takedown notices reaching the cloud provider. This stack
 deliberately doesn't recommend specific providers — if you go that
 route, you'll need to:
 
-- Always route Dispatcharr through `home-proxy` (residential exit), and
+- Route Dispatcharr through a dedicated Italian VPS/VPN exit (not the indexer proxy — IPTV streams are far too large for a metered proxy), and
 - Audit the provider's M3U/EPG host reputation before enabling.
 
-## Indexer proxy on a home node
+## Residential proxy for indexer scraping
 
 Most cloud / VPS / dedicated providers sit on ASN ranges aggressively
 blocklisted by Cloudflare and by direct ASN checks on public trackers
-(1337x, TPB, EZTV, KAT, ...). qBit exiting through ProtonVPN doesn't
-help — VPN ASNs are blocked too. The only sustainable workaround is to
-source scraping requests from a **residential IP** at home: a Mac, Linux
-box, Windows machine, or Raspberry Pi.
-
-The home node joins the same Headscale tailnet as the server (encrypted
-P2P WireGuard via the coordination server at `https://headscale.<DOMAIN>`)
-and runs two services Prowlarr can reach over the tailnet:
-
-- **tinyproxy** on port `8888` — a plain HTTP proxy. Cheap and good enough
-  for trackers that block on IP/ASN but don't have Cloudflare.
-- **flaresolverr** on port `8191` — runs a real headless Chromium to solve
-  Cloudflare's JS challenge, with a residential IP and a real browser
-  fingerprint.
+(1337x, TPB, EZTV, KAT, ...). qBit exiting through ProtonVPN doesn't help
+— VPN ASNs are blocked too. The fix is to source Prowlarr's scraping from
+a **residential IP** via a managed proxy, and run the Cloudflare solver
+**on the server** pointed at that same proxy. No home machine, no tailnet.
 
 Skip this section entirely if you only use Usenet (NZBgeek, DrunkenSlug,
 etc.) or trackers that don't gate on IP.
 
-### Step 1 — Bring up the coordination server
+Two pieces:
 
-Headscale's official image is distroless, so the config is rendered
-from `config/headscale/config.yaml.template` (which references
-`${DOMAIN}`) by a one-shot `headscale-init` sidecar that runs before
-the daemon. No manual templating needed:
+- **A managed static residential / ISP proxy.** Reference: an
+  [IPRoyal ISP proxy](https://iproyal.com/isp-proxies/) — one dedicated
+  IP, unlimited traffic, ~$2.40/month. A *static* IP (not rotating
+  pay-per-GB) matters: private trackers flag logins that hop IPs. Pick an
+  Italian IP if you might want IT sources later. You get a `host:port`
+  plus either `user:pass` auth or an IP allowlist (whitelist the server's
+  public IP).
+- **Byparr** — a Camoufox-based, FlareSolverr-API-compatible Cloudflare
+  solver that runs in the stack (`byparr` service, port `8191`). It sends
+  all browser traffic through the residential proxy via `PROXY_*`, so
+  Cloudflare sees the residential IP. Byparr replaces the old
+  FlareSolverr-on-a-home-node; FlareSolverr still works as a drop-in
+  (`PROXY_URL` / `PROXY_USERNAME` / `PROXY_PASSWORD`) if you prefer it.
 
-```sh
-docker compose up -d headscale-init headscale
-curl -I https://headscale.<DOMAIN>/key   # 400-class is fine, means it's reachable
-```
+### Step 1 — Subscribe and set credentials
 
-Create a user and pre-auth keys (one per node you want to enroll):
-
-```sh
-docker exec headscale headscale users create <USERNAME>
-docker exec headscale headscale users list   # note the numeric id, e.g. 1
-docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
-# → tskey-auth-...SERVER-KEY...
-docker exec headscale headscale preauthkeys create --user 1 --expiration 1h
-# → tskey-auth-...HOME-KEY...
-```
-
-### Step 2 — Enroll the server host in the tailnet
-
-So Prowlarr's container can resolve `100.x.y.z` for the home node, the
-**host** (not the Docker bridge) needs Tailscale running:
+Subscribe to the proxy, then put the values in `.env`:
 
 ```sh
-curl -fsSL https://tailscale.com/install.sh | sudo sh
-sudo tailscale up \
-  --login-server=https://headscale.<DOMAIN> \
-  --authkey=<SERVER-KEY> \
-  --hostname=server
-sudo tailscale ip -4
-# → 100.64.0.1
+RESIDENTIAL_PROXY_URL=http://geo.iproyal.com:12321   # scheme required
+RESIDENTIAL_PROXY_USER=<your-proxy-user>
+RESIDENTIAL_PROXY_PASS=<your-proxy-pass>
 ```
 
-### Step 3 — Enroll the home node
+The `byparr` service reads these automatically. If your provider uses an
+IP allowlist instead of credentials, set only `RESIDENTIAL_PROXY_URL` and
+leave user/pass blank.
 
-Pick **one** of the platforms below.
-
-#### macOS (standalone Tailscale + Homebrew CLI services)
-
-The App Store version of Tailscale doesn't accept a custom login server.
-Use the standalone `.pkg` from <https://pkgs.tailscale.com/stable/#macos>,
-**or** install only the CLI / daemon via Homebrew:
+### Step 2 — Start Byparr and verify the residential egress
 
 ```sh
-brew install tailscale tinyproxy
-sudo brew services start tailscale
-sudo /opt/homebrew/bin/tailscale up \
-  --login-server=https://headscale.<DOMAIN> \
-  --authkey=<HOME-KEY> \
-  --hostname=mac-home
+docker compose up -d byparr
+docker compose logs -f byparr        # wait until it reports listening on :8191
 ```
 
-If the auth key has already expired, Tailscale falls back to interactive
-registration: paste the URL it prints, then on the server:
+Confirm the egress IP is residential, from the server:
 
 ```sh
-docker exec headscale headscale nodes register --user <USERNAME> --key <THE-KEY-IT-PRINTED>
+curl -x "$RESIDENTIAL_PROXY_URL" -U "$RESIDENTIAL_PROXY_USER:$RESIDENTIAL_PROXY_PASS" \
+  https://ipinfo.io/json
+# → should show a residential (non-datacenter) IP, ideally Italian
 ```
 
-Configure tinyproxy (Apple Silicon path; on Intel use `/usr/local/etc/`):
+### Step 3 — Point Prowlarr at it
+
+The two Prowlarr Indexer Proxies (an `Http` proxy → the residential proxy,
+and a `FlareSolverr` proxy → `http://byparr:8191`) are configured in the
+[Prowlarr](#prowlarr) section above. Tag CF-protected trackers with
+`flaresolverr` and ASN-only trackers with `residential`.
+
+### Decommissioning the old home node
+
+Once scraping works through the residential proxy, tear down the tailnet:
 
 ```sh
-sed -i '' 's/^User nobody/User '"$(whoami)"'/' /opt/homebrew/etc/tinyproxy/tinyproxy.conf
-sed -i '' 's/^Group nobody/Group staff/'       /opt/homebrew/etc/tinyproxy/tinyproxy.conf
-# Allow the whole tailnet to use this proxy:
-printf '\nAllow 100.64.0.0/10\nAllow fd7a:115c:a1e0::/48\n' \
-  >> /opt/homebrew/etc/tinyproxy/tinyproxy.conf
-brew services start tinyproxy
-```
-
-For FlareSolverr just run the official container (Docker Desktop / OrbStack):
-
-```sh
-docker run -d --name flaresolverr --restart unless-stopped \
-  -p 0.0.0.0:8191:8191 \
-  -e LOG_LEVEL=info -e CAPTCHA_SOLVER=none -e TZ=$TZ \
-  ghcr.io/flaresolverr/flaresolverr:latest
-```
-
-Caveat: a MacBook in clamshell sleep won't route the tunnel. Keep the lid
-open or set Settings → Battery → Power Adapter → "Prevent automatic
-sleeping". A Mac mini / iMac is fine as-is. Long-term, prefer a Pi.
-
-**NAT-keepalive LaunchAgent.** Residential routers drop the UDP NAT
-mapping for the WireGuard tunnel after ~30–60 min of idleness, which
-makes the *server-initiated* path to the Mac time out (server → Mac is
-exactly the direction Prowlarr scrapes use). Tailscale doesn't fall
-back to DERP fast enough to mask this. Drop a LaunchAgent at
-`~/Library/LaunchAgents/io.<you>.mediateca-tailscale-keepalive.plist`
-that pings the server every 30 s:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTD/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-    <key>Label</key>             <string>io.mediateca.tailscale-keepalive</string>
-    <key>ProgramArguments</key>
-    <array>
-      <string>/usr/bin/env</string><string>sh</string><string>-c</string>
-      <string>/usr/local/bin/tailscale ping -c 1 100.64.0.1 >/dev/null 2>&amp;1 || true</string>
-    </array>
-    <key>StartInterval</key>     <integer>30</integer>
-    <key>RunAtLoad</key>         <true/>
-</dict></plist>
-```
-
-Then `launchctl load ~/Library/LaunchAgents/io.<you>.mediateca-tailscale-keepalive.plist`.
-A 1-byte/30-s heartbeat is plenty to keep the NAT entry alive.
-
-#### Linux (Debian / Ubuntu / Raspberry Pi OS, x86 or ARM)
-
-```sh
-curl -fsSL https://tailscale.com/install.sh | sudo sh
-sudo tailscale up \
-  --login-server=https://headscale.<DOMAIN> \
-  --authkey=<HOME-KEY> \
-  --hostname=home-node
-
-sudo apt install -y tinyproxy
-sudo sed -i 's/^Allow 127.0.0.1$/Allow 127.0.0.1\nAllow 100.64.0.0\/10\nAllow fd7a:115c:a1e0::\/48/' \
-  /etc/tinyproxy/tinyproxy.conf
-sudo systemctl enable --now tinyproxy
-
-# FlareSolverr (Docker required):
-docker run -d --name flaresolverr --restart unless-stopped \
-  -p 0.0.0.0:8191:8191 \
-  -e LOG_LEVEL=info -e CAPTCHA_SOLVER=none -e TZ=$TZ \
-  ghcr.io/flaresolverr/flaresolverr:latest
-```
-
-### Step 4 — Smoke-test from the server
-
-```sh
-ssh <USERNAME>@<HOST-IP>
-sudo tailscale status
-# Should show server + the home node, both online.
-
-# Plain HTTP proxy works and exits with the home IP:
-curl -x http://<home-tailnet-ip>:8888 https://api.ipify.org
-# → your residential IP, NOT the server IP
-
-# FlareSolverr is alive:
-curl -s http://<home-tailnet-ip>:8191/
-# → {"msg": "FlareSolverr is ready!", ...}
+# on the server host
+sudo tailscale down && sudo tailscale logout      # then uninstall the client
+# on the Mac at home
+sudo brew services stop tailscale tinyproxy
+docker rm -f flaresolverr
+launchctl unload ~/Library/LaunchAgents/io.*.mediateca-tailscale-keepalive.plist
 ```
 
 ### Indexer notes
 
-What works without any home proxy (free-access trackers):
+What works without any proxy (free-access trackers):
 - **YTS** (movies x265)
 - **Nyaa.si** (anime)
 - **Internet Archive** (legal public domain)
 
-What works with `home-proxy` only (geo / ASN blocked, no Cloudflare):
+What works with the `residential` HTTP proxy only (geo / ASN blocked, no Cloudflare):
 - **Knaben** (meta-search aggregator — best single pick)
 - **LimeTorrents** (general)
 - **Torrent Downloads** (general)
@@ -1433,7 +1326,7 @@ Retention defaults to **7 daily + 4 weekly + 6 monthly** snapshots.
 - Jellyseerr DB (users, request history)
 - Jellyfin DB (users, watch state, playlists)
 - qBittorrent state (categories, torrents on-disk metadata)
-- Headscale data (preauth keys, node registry)
+- Byparr state (if any persistent config)
 - `.env` (all secrets needed to rebuild the stack)
 
 **What it excludes** (regenerable, see `backup/excludes.txt`):
@@ -1604,7 +1497,7 @@ ssh <USERNAME>@<HOST-IP> "
 | Gluetun and qBittorrent return different IPs | `network_mode: service:gluetun` not actually applied | Recreate the qBit container: `docker compose up -d --force-recreate qbittorrent`. |
 | Encoder dashboard returns 404 | `encoder-status.<DOMAIN>` DNS missing, or `./config/hls-encoder` not yet populated | Add the A record; the dashboard appears once the encoder writes its first `status.json` (within `STATUS_INTERVAL` of startup). |
 | Encoder marks every job `failed` with `stale in_progress` | Container restarted mid-encode | Expected behaviour — those rows are auto-requeued and retried up to `RETRY_LIMIT`. |
-| Tailscale `up` fails with `unexpected control plane error` | The auth key has expired | Generate a fresh one: `docker exec headscale headscale preauthkeys create --user 1 --expiration 1h`. |
+| Prowlarr gets rate-limited or blocked on a previously working indexer | Residential proxy IP flagged or rotated | Verify the egress IP via `curl -x "$RESIDENTIAL_PROXY_URL" https://ipinfo.io/json`; contact your proxy provider if the IP changed unexpectedly. |
 | Bazarr never downloads subtitles | `opensubtitlescom` requires an account; the other 3 providers don't | Add credentials in Bazarr → Settings → Providers, or rely on the no-auth providers (`yifysubtitles`, `tvsubtitles`, `podnapisi`). |
 | Seerr "Sign in with Jellyfin" fails | Jellyfin user has no library access | Jellyfin → Dashboard → Users → grant the user library permissions; Seerr inherits them. |
 | Encoder OOM-killed mid-job | `ENCODER_MEM` too small for source | Raise `ENCODER_MEM` in `.env` or drop `ENCODER_WORKERS` to 1 to halve peak memory. |
@@ -1636,7 +1529,7 @@ ssh <USERNAME>@<HOST-IP> "
 - qBittorrent exits traffic only through ProtonVPN — no host-IP torrent
   peer announcements, no DMCA exposure for the host.
 - Indexer scraping (small HTTP queries, no torrent payload) goes through
-  the home node over Tailscale, isolating residential IP exposure to
+  the managed residential proxy, isolating residential IP exposure to
   metadata-only traffic.
 - The HLS CDN at `hls.<DOMAIN>` is **public** by design (anyone with the
   URL can fetch segments). For a personal stack of legally-obtained or
@@ -1719,12 +1612,12 @@ RAID directly (`STORAGE_DRIVER=none`, set `MEDIA_DIR=/srv/servarr-data`).
 Pick **Ubuntu 24.04 LTS** or **Debian 12** for one-click compatibility
 with `setup-server.sh`. Sizing same as Hetzner. Some hosts (notably
 Vultr) ship aggressive ASN blocks that break tracker scraping even via
-`home-proxy` — test before committing.
+the residential proxy — test before committing.
 
 ### Bare metal at home (NUC, mini-PC, recycled desktop)
 
 Plus: residential IP solves the indexer-block problem natively (you can
-skip the home-node section entirely). Power consumption matters more
+skip the residential proxy section entirely). Power consumption matters more
 than raw vCPU — pick something with a 7-15 W TDP. ECC RAM nice but not
 required. Set `STORAGE_DRIVER=none` and point `MEDIA_DIR` at your local
 disk.
@@ -1733,7 +1626,7 @@ You'll need a way to expose the host to the internet:
 - A static residential IP from your ISP (rare).
 - DDNS + port forwarding on your router (most consumer ISPs).
 - A Cloudflare Tunnel pointing at the host (works behind CGNAT).
-- A cheap VPS as a reverse-proxy front-end via wireguard / tailscale
+- A cheap VPS as a reverse-proxy front-end via WireGuard
   (full control, ~€5/mo).
 
 ### Raspberry Pi 5 / Orange Pi 5 Plus
@@ -1774,8 +1667,6 @@ of the above. Total for the reference setup: ~€63/mo.
 │   ├── Caddyfile                     # reverse proxy + automatic TLS
 │   └── seerr-inject.conf.template    # nginx envsubst template (DOMAIN-aware)
 ├── config/
-│   ├── headscale/
-│   │   └── config.yaml.template      # rendered into headscale-rendered volume by headscale-init
 │   ├── jellyfin-custom.css           # apply via Dashboard → General → Custom CSS
 │   ├── recyclarr/
 │   │   ├── recyclarr.yml             # Recyclarr config (TRaSH-managed custom formats + quality defs)
