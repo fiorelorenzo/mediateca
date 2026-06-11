@@ -2,7 +2,6 @@
 import json
 
 import httpx
-import pytest
 
 from orchestrator.core.jellyfin_defaults import DESIRED, push_user_defaults
 

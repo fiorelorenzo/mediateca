@@ -369,7 +369,7 @@ def test_happy_merge_sonarr_episode(tmp_path: Path, monkeypatch) -> None:
     src1.write_bytes(b"\x00" * 16)
 
     _sonarr_series_mock(series_id)
-    respx.delete(f"http://sonarr:8989/api/v3/episodefile/500").mock(
+    respx.delete("http://sonarr:8989/api/v3/episodefile/500").mock(
         return_value=httpx.Response(200, json={})
     )
 
@@ -458,8 +458,9 @@ def test_quality_upgrade_replaces_in_place(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setenv("INCOMING_ROOT", str(tmp_path / "incoming"))
 
     # Flip the runtime setting on in the DB (overrides policy.yml defaults).
-    from orchestrator.db.models import Setting
     import json as _json
+
+    from orchestrator.db.models import Setting
 
     with Session(get_engine()) as s:
         existing = s.get(Setting, "quality_upgrade_enabled")
