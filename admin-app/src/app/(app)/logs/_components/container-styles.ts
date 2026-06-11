@@ -101,18 +101,6 @@ const CONTAINER_PALETTE: Record<
     soft: "bg-cyan-400/12 border-cyan-400/40",
     text: "text-cyan-700 dark:text-cyan-300",
   },
-  headscale: {
-    ring: "ring-indigo-500",
-    dot: "bg-indigo-500",
-    soft: "bg-indigo-500/12 border-indigo-500/40",
-    text: "text-indigo-700 dark:text-indigo-300",
-  },
-  "headscale-init": {
-    ring: "ring-indigo-400",
-    dot: "bg-indigo-400",
-    soft: "bg-indigo-400/12 border-indigo-400/40",
-    text: "text-indigo-700 dark:text-indigo-300",
-  },
 };
 
 const FALLBACK = {
