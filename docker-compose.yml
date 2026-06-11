@@ -371,7 +371,6 @@ services:
     networks:
       - servarr
 
-
   # =========================================
   # hls-encoder — consumer-only REST service. The orchestrator calls
   # POST /jobs to start an encode; this service runs the FFmpeg ladder
