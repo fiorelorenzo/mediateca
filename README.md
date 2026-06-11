@@ -387,7 +387,7 @@ reference.
 
 ### Network services
 
-- A **registered domain** (any registrar). 11 A records will point at
+- A **registered domain** (any registrar). 10 A records will point at
   the host (table further down).
 - A **WireGuard VPN with port forwarding**. The reference is ProtonVPN
   Plus (NAT-PMP). Mullvad, AirVPN, PrivateInternetAccess all work — the
