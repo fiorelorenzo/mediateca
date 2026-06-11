@@ -44,7 +44,6 @@ class Settings(BaseSettings):
     qbit_user: str | None = None
     qbit_pass: str | None = None
     dispatcharr_url: str = "http://dispatcharr:9191"
-    headscale_url: str = "http://headscale:8080"
 
     # Notifications — Apprise HTTP dispatcher. Channel URLs themselves live
     # in the `notification_channels` setting (managed via the admin app).

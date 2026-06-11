@@ -10,8 +10,7 @@ router = APIRouter(prefix="/api/services", tags=["services"], dependencies=[requ
 #                accept_any_response_under_500).
 # When `accept_any` is True, even 401/403/404 means "the service is up and
 # answering HTTP" — useful for services that don't expose an unauthenticated
-# liveness endpoint (qBittorrent, Headscale's API server with no /health on
-# all versions, etc).
+# liveness endpoint (qBittorrent, Dispatcharr, etc).
 PROBES: dict[str, tuple[str, str, str | None, bool]] = {
     "sonarr":      ("/api/v3/system/status", "sonarr_url",   "sonarr_api_key",   False),
     "radarr":      ("/api/v3/system/status", "radarr_url",   "radarr_api_key",   False),
@@ -21,7 +20,6 @@ PROBES: dict[str, tuple[str, str, str | None, bool]] = {
     "seerr":       ("/api/v1/status",        "seerr_url",    None,               False),
     "qbit":        ("/api/v2/app/version",   "qbit_url",     None,               True),
     "dispatcharr": ("/",                     "dispatcharr_url", None,            True),
-    "headscale":   ("/health",               "headscale_url", None,              True),
 }
 
 
@@ -61,7 +59,6 @@ _SERVICES = [
     {"key": "jellyfin", "name": "Jellyfin", "subdomain": "streaming"},
     {"key": "seerr", "name": "Seerr", "subdomain": ""},
     {"key": "dispatcharr", "name": "Dispatcharr", "subdomain": "tv"},
-    {"key": "headscale", "name": "Headscale", "subdomain": "headscale"},
     {"key": "encoder", "name": "HLS encoder", "subdomain": "encoder-status"},
 ]
 
