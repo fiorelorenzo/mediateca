@@ -8,8 +8,8 @@ exists to orient an agent quickly.
 
 A self-hosted media server stack: Docker Compose at the root composes Jellyfin,
 the *arr suite (Sonarr/Radarr/Prowlarr/Bazarr), qBittorrent (via Gluetun +
-ProtonVPN), Caddy, Headscale, and three first-party services that live in this
-repo:
+ProtonVPN), Caddy, Byparr (Cloudflare solver for indexer scraping), and
+three first-party services that live in this repo:
 
 | Path | What | Stack |
 | --- | --- | --- |
