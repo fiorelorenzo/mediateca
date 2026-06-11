@@ -86,11 +86,6 @@ qbit.{$DOMAIN} {
 	reverse_proxy gluetun:8080
 }
 
-headscale.{$DOMAIN} {
-	import no_index
-	reverse_proxy headscale:8080
-}
-
 # Dispatcharr — IPTV middleware (active fork of xTeVe/Threadfin). Aggregates
 # M3U playlists, applies XMLTV EPG, exposes HDHomeRun emulator on the same
 # port; Jellyfin's Live TV auto-discovers it as a virtual tuner.
