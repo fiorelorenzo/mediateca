@@ -45,6 +45,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      # The integration tests shell out to ffprobe (probe / merge-safety), so
+      # the media toolchain must be present even though the ffmpeg calls the
+      # tests exercise are mocked.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       # The dev tools (ruff/mypy/pytest) live in requirements-dev.txt, not the
       # uv.lock dependency set, so create a venv and install both requirement
       # files into it explicitly. `--python .venv` pins the install target:
