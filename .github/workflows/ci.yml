@@ -45,12 +45,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-        with:
-          python-version: "3.12"
       # The dev tools (ruff/mypy/pytest) live in requirements-dev.txt, not the
-      # uv.lock dependency set, so install both requirement files explicitly.
-      - run: uv venv
-      - run: uv pip install -r requirements.txt -r requirements-dev.txt
+      # uv.lock dependency set, so create a venv and install both requirement
+      # files into it explicitly. `--python .venv` pins the install target:
+      # setup-uv with a python-version otherwise sets VIRTUAL_ENV to a root
+      # .venv and the tools land there instead of orchestrator/.venv.
+      - run: uv venv .venv --python 3.12
+      - run: uv pip install --python .venv -r requirements.txt -r requirements-dev.txt
       - run: .venv/bin/ruff check src tests
       - run: .venv/bin/mypy
       - run: .venv/bin/pytest
