@@ -1,0 +1,74 @@
+name: ci
+
+# Always-on gate: runs on every push to main and every pull request, one job
+# per service. Nothing merges without a green check. Playwright e2e is not run
+# here (it needs a browser + the stack up); the per-service lint/typecheck/test
+# gate is the CI contract.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  admin-app:
+    name: admin-app (lint · typecheck · test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: admin-app
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin-app/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run test
+
+  orchestrator:
+    name: orchestrator (ruff · mypy · pytest)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: orchestrator
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # The integration tests shell out to ffprobe (probe / merge-safety), so
+      # the media toolchain must be present even though the ffmpeg calls the
+      # tests exercise are mocked.
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      # The dev tools (ruff/mypy/pytest) live in requirements-dev.txt, not the
+      # uv.lock dependency set, so create a venv and install both requirement
+      # files into it explicitly. `--python .venv` pins the install target:
+      # setup-uv with a python-version otherwise sets VIRTUAL_ENV to a root
+      # .venv and the tools land there instead of orchestrator/.venv.
+      - run: uv venv .venv --python 3.12
+      - run: uv pip install --python .venv -r requirements.txt -r requirements-dev.txt
+      - run: .venv/bin/ruff check src tests
+      - run: .venv/bin/mypy
+      - run: .venv/bin/pytest
+
+  hls-encoder:
+    name: hls-encoder (ruff)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: hls-encoder
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # Small service with no lint config: gate only real errors (syntax,
+      # undefined names), not style.
+      - run: uvx ruff@0.15.12 check --select E9,F63,F7,F82 encoder.py server.py

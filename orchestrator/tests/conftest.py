@@ -1,4 +1,5 @@
 import os
+import tempfile
 
 import pytest
 
@@ -7,6 +8,9 @@ REQUIRED_ENV = {
     "WEBHOOK_TOKEN": "test-webhook-token",
     "SONARR_API_KEY": "test-sonarr-key",
     "RADARR_API_KEY": "test-radarr-key",
+    # The state DB defaults to /config/orchestrator.db (a Docker mount path,
+    # absent from a clean checkout / CI). Point it at a writable temp file.
+    "STATE_DB": os.path.join(tempfile.mkdtemp(prefix="orch-test-"), "orchestrator.db"),
 }
 
 # Set env vars at import time so setup_module() functions can call get_settings()
