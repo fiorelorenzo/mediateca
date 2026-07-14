@@ -52,8 +52,38 @@ docker compose logs -f <service>
 ```
 
 Always run lint + typecheck + tests in the changed package before claiming a
-task is done. The orchestrator's mypy config is `strict = true`; do not
-weaken it locally to silence errors.
+task is done — see "Local verification: run the minimal covering subset"
+below for how narrowly to scope that. The orchestrator's mypy config is
+`strict = true`; do not weaken it locally to silence errors.
+
+## Local verification: run the minimal covering subset
+
+CI (`.github/workflows/ci.yml`) runs the full lint + typecheck + test matrix
+for every changed service on every push/PR — it's the merge gate. Locally you
+only need enough signal to catch an obviously broken PR, so scope commands to
+the *diff*, not the whole package:
+
+- **admin-app tests**: `npx vitest run <path/to/file.test.ts>` instead of
+  `npm run test`.
+- **admin-app lint**: `npm run lint` hardcodes `eslint .` (whole project) —
+  scope with `npm run lint:files -- <path/to/file.tsx>` or `npx eslint
+  <path/to/file.tsx>` directly.
+- **admin-app typecheck**: `npm run typecheck` (`tsc --noEmit`) is
+  whole-project by nature — there's no scoped form, run it as-is.
+- **orchestrator tests**: `uv run pytest <path/to/test_file.py>::<test_name>`
+  instead of `uv run pytest`.
+- **orchestrator lint**: `uv run ruff check <path/to/file.py>` instead of
+  `uv run ruff check src tests`.
+- **orchestrator typecheck**: `uv run mypy` is whole-project by nature (its
+  `strict = true` config and cross-module inference don't scope cleanly) —
+  run it as-is.
+
+Scope by *amount*, never by *category*: narrowing `pytest` to one file is
+fine, but skipping mypy because you "only touched tests" is not — CI runs
+mypy on every orchestrator PR regardless. Run the full unscoped suite
+(`npm run lint && npm run typecheck && npm run test`, `uv run ruff check src
+tests && uv run mypy && uv run pytest`) only for release-critical changes
+(migrations, retention engine, auth, CI/workflow edits).
 
 ## Repo conventions
 
