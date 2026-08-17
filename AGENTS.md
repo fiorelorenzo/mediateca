@@ -56,6 +56,51 @@ task is done — see "Local verification: run the minimal covering subset"
 below for how narrowly to scope that. The orchestrator's mypy config is
 `strict = true`; do not weaken it locally to silence errors.
 
+## Working in a worktree, next to other agents
+
+**The stack is not worktree-shareable: it runs single-instance per host.**
+Every service in `docker-compose.yml` pins an explicit `container_name`
+(`caddy`, `orchestrator`, `admin-app`, `sonarr`, ... one per service) instead
+of a project-scoped name, so Docker refuses to start any container from a
+second `docker compose up` while the first checkout's containers are
+running: it collides on the container name before it ever reaches ports, and
+there is no `COMPOSE_PROJECT_NAME` split that fixes that, `container_name`
+always wins. A second worktree that needs the running stack talks to the one
+instance already up (`docker compose ps`, `docker compose logs -f
+<service>`) instead of starting its own.
+
+**Almost nothing publishes a host port; Caddy is the only door in.** Of the
+whole compose file, only `caddy` (`80`, `443/tcp`, `443/udp`) and `gluetun`
+(container port `8080` for qBittorrent's WebUI, published to a random host
+port since no host port is pinned) touch the host network at all. Every
+other service (`sonarr:8989`, `radarr:7878`, `prowlarr:9696`, `bazarr:6767`,
+`orchestrator:8000`, `jellyfin:8096`, `seerr:5055`, `dispatcharr:9191`,
+`admin-app:3000`, ...) is reachable only inside the `servarr` Docker network,
+and from outside it only through Caddy's subdomain routing
+(`caddy/Caddyfile`, one `<sub>.${DOMAIN}` block per service). So "which port
+does X use locally" almost always means the container port named in the
+Caddyfile, not a host port you can curl directly.
+
+**`admin-app`'s own dev loop is isolated; talking to a live orchestrator is
+not.** `npm run dev` runs Next.js on host port `3000` on its own, no compose
+needed. But `admin-app/.env.example`'s `ORCHESTRATOR_URL` defaults to
+`http://orchestrator:8000`, a Docker-network hostname that only resolves
+inside the `servarr` network, and nothing in this repo runs the
+orchestrator's FastAPI app outside Docker (the `orchestrator/` commands
+above cover lint, typecheck, test and migrate only; the API server itself is
+started by the container's `docker-entrypoint.sh` / the Dockerfile `CMD`).
+To exercise `admin-app` against a real orchestrator you need the compose
+stack up with `ORCHESTRATOR_URL` pointed at it; there is no documented
+native path around Docker for that half of the stack.
+
+**Test isolation needs nothing extra.** The orchestrator's pytest suite
+never touches a shared file or port: every test either opens an in-memory
+`sqlite://` engine with `StaticPool`, or points `STATE_DB` /
+`MEDIA_ROOT` / `INCOMING_ROOT` at a fresh pytest `tmp_path`
+(`orchestrator/tests/conftest.py` and the per-test `monkeypatch.setenv`
+calls throughout `tests/integration/` and `tests/unit/`). Two worktrees
+running `uv run pytest` at the same time do not interact.
+
 ## Local verification: run the minimal covering subset
 
 CI (`.github/workflows/ci.yml`) runs the full lint + typecheck + test matrix
@@ -120,6 +165,12 @@ tests && uv run mypy && uv run pytest`) only for release-critical changes
   tracked files.
 - Do **not** push directly to `main` without running lint + typecheck + tests
   in the changed package. CI is minimal; the discipline lives here.
+- **That last one is enforced, not just a reminder.** The `require-pull-request`
+  ruleset blocks a direct push to `main` outright: squash is the only allowed
+  merge method, and no approving review is required. There is no
+  `required_status_checks` rule, so a red PR can still be merged; the CI gate
+  is a courtesy signal, not a hard block. `delete_branch_on_merge` is on, so a
+  merged branch disappears from the remote on its own.
 - Do **not** edit `config/*` for runtime services — those directories are
   populated by the services at first boot and are intentionally gitignored
   (with named exceptions like `config/orchestrator/policy.yml`).
