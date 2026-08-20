@@ -154,6 +154,40 @@ tests && uv run mypy && uv run pytest`) only for release-critical changes
   and numbers on the dashboard (icons/dots are fine for status); prefer
   `text-foreground` / `text-muted-foreground`.
 
+## Design and UI
+
+The three `ui-*` skills (`ui-brief-first`, `ui-design-tokens`, `ui-visual-review`)
+and `uishot`/`uislop` are the pipeline; this section only states what's
+specific to `admin-app`.
+
+- **Dev command/port:** `npm run dev` → `next dev -p 3000`, standalone, no
+  Docker needed to boot. Point `uishot` at `/login` first — it renders with
+  no backend at all. Everything under `(app)/` (dashboard, library,
+  pipeline, settings) calls the orchestrator via `ORCHESTRATOR_URL`, which
+  only resolves inside the `servarr` Docker network (see "Working in a
+  worktree" above): screenshot those only with the compose stack up, or
+  reuse the Playwright mock (`tests/e2e/mocks/orchestrator-mock.ts`) the
+  e2e specs under `tests/e2e/` already start instead of the real backend.
+- **Tokens live in `src/app/globals.css`**: a Tailwind v4 `@theme` block maps
+  `--color-*` to `hsl(var(--...))`, light values in `:root`, dark overrides
+  in `.dark`. `components.json` (shadcn's own CLI config — `cssVariables:
+  true`, `baseColor: slate`) generated `src/components/ui/*` on top of
+  `@radix-ui/*` primitives, so this is genuine shadcn, not radix standing in
+  for it. The "Tailwind utility classes only" rule (Repo conventions above)
+  is enforced: no raw hex in `components/ui/` or `app/` pages, aside from
+  `chart.tsx`'s unavoidable recharts default-stroke overrides and the
+  `themeColor` metadata tag in `layout.tsx` (a browser meta value, not a
+  Tailwind class).
+- **No `/design` gallery route.** Adding `app/(app)/design/page.tsx`
+  rendering every `components/ui/*` variant would give the whole shadcn set
+  a one-command `uishot` review.
+- **Dark mode is real and class-based, default-on.** An inline
+  `themeBootstrap` script in `app/layout.tsx` applies `.dark` to `<html>`
+  from a `theme` cookie before first paint (dark when the cookie is absent),
+  and `ThemeToggle` (`src/components/shell/theme-toggle.tsx`) flips it
+  client-side. A `--theme light,dark` `uishot` pass should come back
+  visually different; if it doesn't, that's a bug, not a tooling artifact.
+
 ## What NOT to do
 
 - Do **not** commit `.env` or anything matched by `.gitignore` (`config/*`
