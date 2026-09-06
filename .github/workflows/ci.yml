@@ -62,10 +62,15 @@ jobs:
   # A PR that only touches one service's directory no longer pays for the other
   # two: each job below only runs on a PR when its own filter matched, and
   # always runs on push to main so a merge to trunk keeps proving all three.
+  # `always()` is required in each `if:` below, not decoration: `changes` itself
+  # is skipped on push (its own `if` is PR-only), and a job whose `needs` was
+  # skipped is cascade-skipped by GitHub Actions regardless of its own `if`
+  # unless that `if` contains `always()` -- without it, push to main silently
+  # ran nothing and `ci` still went green off three skips.
   admin-app:
     name: admin-app (lint · typecheck · test)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.admin_app == 'true'
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.admin_app == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -86,7 +91,7 @@ jobs:
   orchestrator:
     name: orchestrator (ruff · mypy · pytest)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.orchestrator == 'true'
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.orchestrator == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -113,7 +118,7 @@ jobs:
   hls-encoder:
     name: hls-encoder (ruff)
     needs: changes
-    if: github.event_name == 'push' || needs.changes.outputs.hls_encoder == 'true'
+    if: always() && (github.event_name == 'push' || needs.changes.outputs.hls_encoder == 'true')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     defaults:
