@@ -130,6 +130,18 @@ mypy on every orchestrator PR regardless. Run the full unscoped suite
 tests && uv run mypy && uv run pytest`) only for release-critical changes
 (migrations, retention engine, auth, CI/workflow edits).
 
+### Preflight: run CI's checks before you push
+
+`preflight` (on PATH, manifest at `.github/preflight.json`) runs the same
+lint/typecheck/test commands as the three CI jobs above, scoped to whichever
+service your branch actually touches, in parallel, before a PR exists.
+`preflight --install-hook` (already run in this checkout) wires it into
+`pre-push`; a push after a green preflight run costs nothing on GitHub. Each
+PR also gets a `changes` job that skips a service's CI job entirely when its
+directory didn't change — the single required check is the `ci` aggregate
+job, not any one service job by name, so `preflight --list` is the fast way
+to see what a given diff is about to run in both places.
+
 ## Repo conventions
 
 - **Comments**: terse. The codebase explains *why* (non-obvious constraints,
@@ -201,10 +213,13 @@ specific to `admin-app`.
   in the changed package. CI is minimal; the discipline lives here.
 - **That last one is enforced, not just a reminder.** The `require-pull-request`
   ruleset blocks a direct push to `main` outright: squash is the only allowed
-  merge method, and no approving review is required. There is no
-  `required_status_checks` rule, so a red PR can still be merged; the CI gate
-  is a courtesy signal, not a hard block. `delete_branch_on_merge` is on, so a
-  merged branch disappears from the remote on its own.
+  merge method, and no approving review is required. A second ruleset requires
+  the single `ci` status check (`strict_required_status_checks_policy: false`)
+  to be green before merge — the aggregate job in `.github/workflows/ci.yml`,
+  not any one service job by name, so the service jobs can be renamed or
+  reordered without ever touching branch protection again.
+  `delete_branch_on_merge` is on, so a merged branch disappears from the
+  remote on its own.
 - Do **not** edit `config/*` for runtime services — those directories are
   populated by the services at first boot and are intentionally gitignored
   (with named exceptions like `config/orchestrator/policy.yml`).
