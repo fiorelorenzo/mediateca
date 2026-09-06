@@ -11,16 +11,63 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
   contents: read
 
 jobs:
+  # PR-only. dorny/paths-filter answers from the API on a pull_request, so this
+  # job needs no checkout and costs a few seconds. It is deliberately not used
+  # on push: main runs every service regardless, which also spares us the
+  # fetch-depth: 0 that filtering a push would require.
+  changes:
+    name: changes
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Job-level permissions replace the workflow-level block rather than merging
+    # with it, so contents: read is repeated here. dorny/paths-filter lists the
+    # PR's changed files through the GitHub API (no checkout, by design), which
+    # needs pull-requests: read. A public repo's default token can list a PR's
+    # files without it, but a private one can't ("Resource not accessible by
+    # integration"), so this is granted uniformly rather than relying on that.
+    # Every other job stays on the workflow-level contents: read only.
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      admin_app: ${{ steps.filter.outputs.admin_app }}
+      orchestrator: ${{ steps.filter.outputs.orchestrator }}
+      hls_encoder: ${{ steps.filter.outputs.hls_encoder }}
+    steps:
+      # Filter names use underscores, not hyphens: a paths-filter output is
+      # read back via dot notation (needs.changes.outputs.hls_encoder), and
+      # the GitHub Actions expression parser reads a hyphen in that position
+      # as subtraction, not an identifier character. The job IDs below stay
+      # hyphenated since those are only ever literal `needs:` entries, never
+      # read through dot notation.
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            admin_app:
+              - 'admin-app/**'
+            orchestrator:
+              - 'orchestrator/**'
+            hls_encoder:
+              - 'hls-encoder/**'
+
+  # A PR that only touches one service's directory no longer pays for the other
+  # two: each job below only runs on a PR when its own filter matched, and
+  # always runs on push to main so a merge to trunk keeps proving all three.
   admin-app:
     name: admin-app (lint · typecheck · test)
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.admin_app == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: admin-app
@@ -38,7 +85,10 @@ jobs:
 
   orchestrator:
     name: orchestrator (ruff · mypy · pytest)
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.orchestrator == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: orchestrator
@@ -62,7 +112,10 @@ jobs:
 
   hls-encoder:
     name: hls-encoder (ruff)
+    needs: changes
+    if: github.event_name == 'push' || needs.changes.outputs.hls_encoder == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     defaults:
       run:
         working-directory: hls-encoder
@@ -72,3 +125,23 @@ jobs:
       # Small service with no lint config: gate only real errors (syntax,
       # undefined names), not style.
       - run: uvx ruff@0.15.12 check --select E9,F63,F7,F82 encoder.py server.py
+
+  # The single required status check. Never rename it: it is the one context in
+  # the ruleset, so the three job names above can change forever without
+  # touching a ruleset again. `skipped` counts as passing, which is the point:
+  # a PR touching only one service skips the other two jobs and still goes
+  # green here, because their filter already proved they have nothing to say.
+  ci:
+    name: ci
+    if: always()
+    needs: [changes, admin-app, orchestrator, hls-encoder]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: A needed job failed or was cancelled
+        run: |
+          printf '%s\n' '${{ toJSON(needs) }}'
+          printf '%s' '${{ toJSON(needs) }}' | jq -e '
+            to_entries
+            | map(select(.value.result == "failure" or .value.result == "cancelled"))
+            | length == 0'
