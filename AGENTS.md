@@ -166,6 +166,33 @@ to see what a given diff is about to run in both places.
   and numbers on the dashboard (icons/dots are fine for status); prefer
   `text-foreground` / `text-muted-foreground`.
 
+## Pull requests
+
+One shape for every repo of mine: `skill://opening-a-pull-request`. The issue and its
+neighbours before the branch, the branch name Linear renders on the issue, Conventional
+Commits in the first person, the body's four sections from
+`.github/PULL_REQUEST_TEMPLATE.md` (Screenshots is never deleted), an independent review
+applied in a second commit, and the card closed only against evidence. What is true only
+here:
+
+- **No board of its own**: mediateca carries no Linear initiative, project, milestone
+  or `repo:` label, and none is coming unless Lorenzo decides to file one. The step
+  that asks for a placed tracker issue before the branch does not apply the same way
+  it does in a repo with a board: there is nothing here to place it against. The
+  template's `Linear: LOR-` line still stays and still gets filled whenever a change
+  actually came from an issue filed in the shared personal workspace (this
+  convention's own rollout is one, tracked as LOR-301); when nothing was filed, the
+  line is left as `Linear: LOR-` rather than a number invented to fill it.
+- **Scopes** for the subject: `admin-app`, `orchestrator`, `hls`, `retention`,
+  `pipeline`, `compose`, `caddy`, `agents`, `readme`, `env`, or none at all for a change
+  that spans the whole stack, read from `git log`, never invented.
+- **Required check**: the aggregate `ci` context, from the `protect-default-branch`
+  ruleset.
+- **Merge**: `gh pr merge <n> --auto --squash --delete-branch` right after opening
+  (`allow_auto_merge` is on here), squash being the only method `require-pull-request`
+  allows, then `git checkout main && git reset --hard origin/main`, because local `main`
+  diverges on every squash.
+
 ## Design and UI
 
 The three `ui-*` skills (`ui-brief-first`, `ui-design-tokens`, `ui-visual-review`)
