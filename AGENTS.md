@@ -166,6 +166,19 @@ to see what a given diff is about to run in both places.
   and numbers on the dashboard (icons/dots are fine for status); prefer
   `text-foreground` / `text-muted-foreground`.
 
+## Where the work is tracked, which is nowhere yet
+
+Every other product of Lorenzo's has an initiative in `linear.app/fiorelorenzo`, a release
+project, milestones and issues. **This repo has none of that: no initiative, no `repo:` label
+and no issues.** Checked 2026-09-11 against the workspace itself, not assumed.
+
+So do not go looking for a board, and do not invent one. While there is no backlog, the state
+of this project is this file plus the docs it points at, and anything worth remembering goes
+here rather than into an issue nobody will read. Filing a backlog is a planning decision for
+Lorenzo, not a side effect of a session: if he asks for one, it follows the same shape as the
+others (initiative, one project per release, milestones inside it, a `repo:mediateca` label
+added to the workspace's `repo` group, and every issue in both a project and a milestone).
+
 ## Design and UI
 
 The three `ui-*` skills (`ui-brief-first`, `ui-design-tokens`, `ui-visual-review`)
