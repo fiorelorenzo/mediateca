@@ -134,15 +134,40 @@ jobs:
       # undefined names), not style.
       - run: uvx ruff@0.15.12 check --select E9,F63,F7,F82 encoder.py server.py
 
+  # The workflow kit's copy matches its manifest (a skill edited in .claude/skills
+  # instead of .agents/skills, a kit file changed without a sync, a PR template that
+  # no longer follows .github/workflow.json), and on a pull request the title and body
+  # follow .github/workflow.json. No paths filter and no `needs`: every PR has a title,
+  # and it takes seconds. pr_lint reads the PR from the API, not from the event, so
+  # after `gh pr edit` a re-run of the failed jobs checks the new text without a push.
+  # python3 is on the runner and both scripts use the standard library only.
+  kit:
+    name: kit (check · PR lint)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # A job-level block replaces the workflow-level one, so contents: read is restated.
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: The kit's copy is intact
+        run: python3 .github/kit/bin/kit.py check
+      - name: The PR's title and body follow .github/workflow.json
+        if: github.event_name == 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python3 .github/kit/bin/pr_lint.py --github
+
   # The single required status check. Never rename it: it is the one context in
-  # the ruleset, so the three job names above can change forever without
+  # the ruleset, so the job names above can change forever without
   # touching a ruleset again. `skipped` counts as passing, which is the point:
   # a PR touching only one service skips the other two jobs and still goes
   # green here, because their filter already proved they have nothing to say.
   ci:
     name: ci
     if: always()
-    needs: [changes, admin-app, orchestrator, hls-encoder]
+    needs: [changes, admin-app, orchestrator, hls-encoder, kit]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
