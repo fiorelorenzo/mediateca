@@ -9,7 +9,7 @@
   "commits": {
     "types": ["feat", "fix", "refactor", "perf", "test", "docs", "ci", "chore", "style", "revert"],
     "scope_required": false,
-    "scopes": ["admin-app", "orchestrator", "hls", "retention", "pipeline", "compose", "caddy", "agents", "readme", "env", "backup", "repo", "ci", "deps"]
+    "scopes": ["admin-app", "orchestrator", "hls", "retention", "pipeline", "library", "settings", "dashboard", "downloads", "compose", "caddy", "agents", "readme", "env", "backup", "repo", "ci", "deps"]
   },
   "pr": {
     "title_max": 72,

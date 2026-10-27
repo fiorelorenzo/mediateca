@@ -198,8 +198,8 @@ What is true only here:
 - **No board of its own**: `tracker` is `null` in `workflow.json`. mediateca carries no
   Linear initiative, project, milestone or `repo:` label, so there is no card line: no
   `Linear:` line closes a commit or a PR body, and the body says there is no card rather
-  than naming a number invented to fill the slot. See "Where the work is tracked"
-  below; if Lorenzo files a backlog, `tracker` gets its workspace, team and prefix then.
+  than naming a number invented to fill the slot. If Lorenzo files a backlog, `tracker`
+  gets its workspace, team and prefix in `workflow.json` then.
 - **Required check**: the aggregate `ci` context, from the `protect-default-branch`
   ruleset. The `kit` job is in its `needs`.
 - **Merge**: `gh pr merge <n> --auto --squash --delete-branch` right after opening
