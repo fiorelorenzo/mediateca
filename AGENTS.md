@@ -132,15 +132,15 @@ tests && uv run mypy && uv run pytest`) only for release-critical changes
 
 ### Preflight: run CI's checks before you push
 
-`preflight` (on PATH, manifest at `.github/preflight.json`) runs the same
-lint/typecheck/test commands as the three CI jobs above, scoped to whichever
-service your branch actually touches, in parallel, before a PR exists.
-`preflight --install-hook` (already run in this checkout) wires it into
+`python3 .github/kit/bin/preflight` (manifest at `.github/preflight.json`) runs the same
+lint/typecheck/test commands as the three service CI jobs above, plus the kit's
+`kit.py check`, scoped to whichever part your branch actually touches, in parallel,
+before a PR exists. `python3 .github/kit/bin/preflight --install-hook` wires it into
 `pre-push`; a push after a green preflight run costs nothing on GitHub. Each
 PR also gets a `changes` job that skips a service's CI job entirely when its
 directory didn't change — the single required check is the `ci` aggregate
-job, not any one service job by name, so `preflight --list` is the fast way
-to see what a given diff is about to run in both places.
+job, not any one service job by name, so `python3 .github/kit/bin/preflight --list`
+is the fast way to see what a given diff is about to run in both places.
 
 ## Repo conventions
 
@@ -166,28 +166,42 @@ to see what a given diff is about to run in both places.
   and numbers on the dashboard (icons/dots are fine for status); prefer
   `text-foreground` / `text-muted-foreground`.
 
-## Pull requests
+## Pull requests and cards
 
-One shape for every repo of mine: `skill://opening-a-pull-request`. The issue and its
-neighbours before the branch, the branch name Linear renders on the issue, Conventional
-Commits in the first person, the body's four sections from
-`.github/PULL_REQUEST_TEMPLATE.md` (Screenshots is never deleted), an independent review
-applied in a second commit, and the card closed only against evidence. What is true only
-here:
+The procedure is the workflow kit's, not written out here: the skills `linear-ticket`,
+`linear-content` and `pr-creation` in `.agents/skills/` (`.claude/skills/` is the copy
+Claude Code reads; edit the first, never the second). Their data is
+`.github/workflow.json` (commit types and scopes, PR sections, the required check, the
+merge method). `ci` checks it in the `kit` job: `kit.py check` on every run and
+`pr_lint.py` on the PR title and body. A gate refuses a malformed Linear write before it
+is sent, in Claude Code (`.claude/settings.json`) and in omp
+(`.omp/hooks/pre/linear-gate.ts`). Do not edit `.github/kit/`, the three skills or the
+gate hook here: change the kit's source (`tooling/workflow-kit/` in letsrebase/rebase)
+and re-run `python3 .github/kit/bin/kit.py sync --source <rebase checkout>/tooling/workflow-kit`.
 
-- **No board of its own**: mediateca carries no Linear initiative, project, milestone
-  or `repo:` label, and none is coming unless Lorenzo decides to file one. The step
-  that asks for a placed tracker issue before the branch does not apply the same way
-  it does in a repo with a board: there is nothing here to place it against. The
-  template's `Linear: LOR-` line still stays and still gets filled whenever a change
-  actually came from an issue filed in the shared personal workspace (this
-  convention's own rollout is one, tracked as LOR-301); when nothing was filed, the
-  line is left as `Linear: LOR-` rather than a number invented to fill it.
-- **Scopes** for the subject: `admin-app`, `orchestrator`, `hls`, `retention`,
-  `pipeline`, `compose`, `caddy`, `agents`, `readme`, `env`, or none at all for a change
-  that spans the whole stack, read from `git log`, never invented.
+The rules, for an agent with no skill loaded:
+
+- A branch from `origin/main` in a worktree of its own, never in the main checkout; no
+  push to `main`. Where a card exists it comes before the branch; here none does (below).
+- Conventional Commits, English, first person, scope from `commits.scopes` in
+  `workflow.json` (or none for a change spanning the whole stack), read from `git log`,
+  never invented.
+- A PR title of at most 72 characters and the body's sections from
+  `.github/PULL_REQUEST_TEMPLATE.md`, in order: What this changes, How I verified it,
+  Anything a reviewer should look at twice, Screenshots (never deleted). Run
+  `python3 .github/kit/bin/pr_lint.py --title "..." --body-file <file>` before opening.
+- An independent review of the diff, applied in a second commit, before the PR opens.
+- Squash merge once `ci` is green.
+
+What is true only here:
+
+- **No board of its own**: `tracker` is `null` in `workflow.json`. mediateca carries no
+  Linear initiative, project, milestone or `repo:` label, so there is no card line: no
+  `Linear:` line closes a commit or a PR body, and the body says there is no card rather
+  than naming a number invented to fill the slot. If Lorenzo files a backlog, `tracker`
+  gets its workspace, team and prefix in `workflow.json` then.
 - **Required check**: the aggregate `ci` context, from the `protect-default-branch`
-  ruleset.
+  ruleset. The `kit` job is in its `needs`.
 - **Merge**: `gh pr merge <n> --auto --squash --delete-branch` right after opening
   (`allow_auto_merge` is on here), squash being the only method `require-pull-request`
   allows, then `git checkout main && git reset --hard origin/main`, because local `main`

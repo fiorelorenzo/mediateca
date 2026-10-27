@@ -19,6 +19,12 @@
       "run": "cd hls-encoder && uvx ruff@0.15.12 check --select E9,F63,F7,F82 encoder.py server.py",
       "when": ["hls-encoder/**"],
       "why": "mirrors the hls-encoder CI job: syntax/undefined-name errors only, this service carries no lint config"
+    },
+    {
+      "id": "kit",
+      "run": "python3 .github/kit/bin/kit.py check",
+      "when": [".agents/**", ".claude/**", ".github/kit/**", ".omp/hooks/**", ".github/workflow.json", ".github/PULL_REQUEST_TEMPLATE.md"],
+      "why": "mirrors the kit job in ci: a skill edited in .claude/skills instead of .agents/skills, or a kit file changed without a sync, fails here before the push"
     }
   ]
 }

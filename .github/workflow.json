@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "tracker": null,
+  "github": {
+    "merge": "squash",
+    "required_check": "ci",
+    "review_bots": []
+  },
+  "commits": {
+    "types": ["feat", "fix", "refactor", "perf", "test", "docs", "ci", "chore", "style", "revert"],
+    "scope_required": false,
+    "scopes": ["admin-app", "orchestrator", "hls", "retention", "pipeline", "library", "settings", "dashboard", "downloads", "compose", "caddy", "agents", "readme", "env", "backup", "repo", "ci", "deps"]
+  },
+  "pr": {
+    "title_max": 72,
+    "card_line": true,
+    "milestone_card_line": true,
+    "exempt_authors": ["dependabot[bot]", "app/dependabot"],
+    "sections": [
+      {"title": "What this changes", "required": true},
+      {"title": "How I verified it", "required": true},
+      {"title": "Anything a reviewer should look at twice"},
+      {"title": "Screenshots", "required": true, "hint": "For anything a person could see: one before-and-after pair per change, composed into\na single side-by-side image and attached with `gh pr edit <n> --attach`. If nothing\nvisible changed, or a pair cannot be captured, say so and why. Keep this section either\nway."}
+    ]
+  },
+  "extras": "docs/agents"
+}

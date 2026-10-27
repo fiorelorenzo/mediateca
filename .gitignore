@@ -62,7 +62,9 @@ admin-app/.playwright/
 .vscode/
 
 # Tooling
-.claude/
+.claude/*
+!.claude/settings.json
+!.claude/skills/
 
 # Backup SSH keys — never commit
 backup/ssh/*
